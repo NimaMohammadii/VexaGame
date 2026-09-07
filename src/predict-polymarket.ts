@@ -24,6 +24,7 @@ const GEOBLOCK_URL = `${POLYMARKET_WEB_BASE}/api/geoblock`;
 const POLYMARKET_ROUND_MS = 5 * 60 * 1000;
 const PUSD_SCALE = 1_000_000;
 const RTDS_URL = 'wss://ws-live-data.polymarket.com';
+const START_PRICE_CACHE_SECONDS = 15 * 60;
 
 export const POLYMARKET_RTDS_URL = RTDS_URL;
 
@@ -67,6 +68,7 @@ type TradingClient = Awaited<ReturnType<typeof createSecureClient>>;
 let tradingClientPromise: Promise<TradingClient> | null = null;
 let approvalsReadyPromise: Promise<void> | null = null;
 let providerTablesReady: Promise<void> | null = null;
+const startPriceRequests = new Map<number, Promise<number>>();
 
 export type PolymarketMarketView = {
   slug: string;
@@ -522,17 +524,45 @@ async function assertPolymarketTradingAllowed(): Promise<GeoBlockState> {
 async function fetchPolymarketBitcoinStartPrice(startMs: number): Promise<number> {
   const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
+  const inFlight = startPriceRequests.get(normalizedStart);
+  if (inFlight) return inFlight;
+  const request = fetchPolymarketBitcoinStartPriceOnce(normalizedStart).finally(() => {
+    startPriceRequests.delete(normalizedStart);
+  });
+  startPriceRequests.set(normalizedStart, request);
+  return request;
+}
+
+async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number): Promise<number> {
   const query = new URLSearchParams({
     symbol: 'BTC',
     eventStartTime: new Date(normalizedStart).toISOString(),
     variant: 'fiveminute',
     endDate: new Date(normalizedStart + POLYMARKET_ROUND_MS).toISOString(),
   });
-  const response = await fetch(`${POLYMARKET_WEB_BASE}/api/crypto/crypto-price?${query.toString()}`, { headers: { accept: 'application/json' } });
+  const url = `${POLYMARKET_WEB_BASE}/api/crypto/crypto-price?${query.toString()}`;
+  const cacheKey = new Request(url, { method: 'GET' });
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const data = await cached.json() as { openPrice?: unknown };
+    const cachedPrice = Number(data.openPrice);
+    if (Number.isFinite(cachedPrice) && cachedPrice > 0) return cachedPrice;
+    await cache.delete(cacheKey).catch(() => false);
+  }
+  const response = await fetch(url, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`Polymarket Bitcoin start price is unavailable: HTTP ${response.status}`);
   const data = await response.json() as { openPrice?: unknown };
   const startPrice = Number(data.openPrice);
   if (!Number.isFinite(startPrice) || startPrice <= 0) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
+  const cachedResponse = new Response(JSON.stringify({ openPrice: startPrice }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': `public, max-age=${START_PRICE_CACHE_SECONDS}`,
+    },
+  });
+  await cache.put(cacheKey, cachedResponse).catch(() => undefined);
   return startPrice;
 }
 

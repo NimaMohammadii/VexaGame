@@ -4,7 +4,7 @@ import type { Env } from './types';
 import { publishPredictOpsState, publishPredictRoundState, type PredictOpsRealtimeState } from './section-lock-events';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, publicUserControls, setUserSectionBlocked, type UserSectionBlock } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
-import { executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
+import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -16,6 +16,7 @@ const ROUND_MS = 5 * 60 * 1000;
 const MONTH_BET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_MS = 15 * 1000;
 const PLATFORM_FEE_BPS = 500;
+const POLYMARKET_PLATFORM_FEE_BPS = 200;
 const NANO = 1_000_000_000;
 const PREDICT_OPS_CONTROL_KEY = 'admin:predict-ops-control:v1';
 const PREDICT_OPS_FEED_PREFIX = 'admin:predict-ops-feed:v1:';
@@ -42,6 +43,7 @@ export type PredictOpsIncident = { id: string; at: string; type: string; market:
 export type PredictOpsRoundView = { id: string; market: TradeMarket; startsAt: string; endsAt: string; startPrice: number; endPrice: number | null; status: string; result: string | null; settledAt: string | null; createdAt: string; due: boolean; totalBets: number; totalStakeNano: number; counts: Record<string, number> };
 export type PredictOpsMarketStatus = { market: TradeMarket; manualPaused: boolean; circuitOpen: boolean; circuitReason: string | null; lastPrice: number | null; lastSuccessAt: string | null; lastError: string | null; lastErrorAt: string | null; latestRound: PredictOpsRoundView | null; lastSettledAt: string | null; dueSettlementCount: number; activeExposureNano: number; exposureLimitNano: number; capacityReached: boolean };
 export type PredictOpsDashboard = { emergencyPaused: boolean; maintenanceMessage: string; updatedAt: string | null; markets: PredictOpsMarketStatus[] };
+export type PredictPlatformFeeStats = { rate: number; totalNano: number; todayNano: number; weekNano: number; monthNano: number };
 export type PredictUserLimits = { userId: string; maxBetNano: number; dailyLimitNano: number; updatedAt: string | null };
 export type PredictUserMarketAccess = { market: TradeMarket; blocked: boolean; expiresAt: string | null; remainingMs: number | null; reason: string | null; adminNote: string | null };
 export type PredictOpsBetView = { id: string; roundId: string; market: TradeMarket; userId: string; side: string; stakeNano: number; status: string; payoutNano: number; createdAt: string; roundStatus: string; roundResult: string | null; roundEndsAt: string; refundable: boolean };
@@ -145,8 +147,9 @@ app.post('/app/api/predict-bet', async (c) => {
     debited = true;
     const provider = await getPredictRoundProvider(c.env, roundId);
     if (provider === 'polymarket') {
-      const stakeUsd = Number(nanoToTon(stakeNano)) * tonUsd;
-      if (!(stakeUsd > 0)) throw new Error('A current Gram/USD price is required for Polymarket predictions');
+      const grossStakeUsd = Number(nanoToTon(stakeNano)) * tonUsd;
+      const stakeUsd = grossStakeUsd * (10_000 - POLYMARKET_PLATFORM_FEE_BPS) / 10_000;
+      if (!(grossStakeUsd > 0) || !(stakeUsd > 0)) throw new Error('A current Gram/USD price is required for Polymarket predictions');
       await executePolymarketBitcoinBet(c.env, { betId, roundId, side, stakeUsd });
       polymarketOrderMayExist = true;
     }
@@ -225,6 +228,7 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
     downTokenId: String(polymarketRow.down_token_id || ''),
     clobWsUrl: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
     takerFeeRate: 0.07,
+    platformFeeRate: POLYMARKET_PLATFORM_FEE_BPS / 10_000,
   } : null;
   return { ok: true, userControls, round: { id: roundId, market: String(round.market || ''), provider, polymarket, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
 }
@@ -436,6 +440,33 @@ export async function getPredictOpsDashboard(env: Env): Promise<PredictOpsDashbo
   const control = await readPredictOpsControl(env);
   const markets = await Promise.all(TRADE_MARKETS.map((market) => getPredictOpsMarketStatus(env, market, control)));
   return { emergencyPaused: control.emergencyPaused, maintenanceMessage: control.maintenanceMessage, updatedAt: control.updatedAt, markets };
+}
+
+export async function getPredictPlatformFeeStats(env: Env): Promise<PredictPlatformFeeStats> {
+  await Promise.all([ensurePredictTables(env), ensurePredictProviderTables(env)]);
+  const row = await env.DB.prepare(`SELECT
+      COALESCE(SUM(fee_nano), 0) AS totalNano,
+      COALESCE(SUM(CASE WHEN date(earned_at) = date('now') THEN fee_nano ELSE 0 END), 0) AS todayNano,
+      COALESCE(SUM(CASE WHEN date(earned_at) >= date('now', '-' || ((CAST(strftime('%w','now') AS INTEGER) + 6) % 7) || ' days') THEN fee_nano ELSE 0 END), 0) AS weekNano,
+      COALESCE(SUM(CASE WHEN strftime('%Y-%m', earned_at) = strftime('%Y-%m', 'now') THEN fee_nano ELSE 0 END), 0) AS monthNano
+    FROM (
+      SELECT p.updated_at AS earned_at,
+        CASE
+          WHEN b.ton_usd_snapshot > 0 AND b.stake_usd_snapshot > p.requested_usd
+          THEN CAST(((b.stake_usd_snapshot - p.requested_usd) / b.ton_usd_snapshot) * ? AS INTEGER)
+          ELSE 0
+        END AS fee_nano
+      FROM predict_bets b
+      JOIN predict_polymarket_bets p ON p.bet_id = b.id
+      WHERE p.status = 'matched' AND b.status NOT IN ('failed','refunded')
+    )`).bind(NANO).first<{ totalNano: number; todayNano: number; weekNano: number; monthNano: number }>();
+  return {
+    rate: POLYMARKET_PLATFORM_FEE_BPS / 10_000,
+    totalNano: normalizePolicyNano(row?.totalNano),
+    todayNano: normalizePolicyNano(row?.todayNano),
+    weekNano: normalizePolicyNano(row?.weekNano),
+    monthNano: normalizePolicyNano(row?.monthNano),
+  };
 }
 
 export async function publishPredictOpsRealtime(env: Env, refreshRound = false): Promise<void> {

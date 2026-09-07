@@ -16,6 +16,7 @@ import {
   getPredictOpsDashboard,
   getPredictOpsIncidents,
   getPredictOpsRound,
+  getPredictPlatformFeeStats,
   getPredictUserAccess,
   getPredictUserInspector,
   listPredictAuditLog,
@@ -256,8 +257,8 @@ async function handlePredictOpsCallback(env: Env, adminId: number, chatId: numbe
 }
 
 async function sendPredictOpsMenu(env: Env, chatId: number, messageId?: number, notice = ''): Promise<void> {
-  const dashboard = await getPredictOpsDashboard(env);
-  const text = [notice, '🩺 Predict Operations', '', `Emergency: ${dashboard.emergencyPaused ? '🚨 PAUSED' : '✅ Normal'}`, `Maintenance: ${dashboard.maintenanceMessage ? '📝 Set' : '—'}`, '', 'یک بخش را انتخاب کنید.', 'قیمت و منبع Aster از این پنل تغییر نمی‌کند.'].filter(Boolean).join('\n');
+  const [dashboard, feeStats] = await Promise.all([getPredictOpsDashboard(env), getPredictPlatformFeeStats(env)]);
+  const text = [notice, '🩺 Predict Operations', '', `Emergency: ${dashboard.emergencyPaused ? '🚨 PAUSED' : '✅ Normal'}`, `Maintenance: ${dashboard.maintenanceMessage ? '📝 Set' : '—'}`, '', `💰 Polymarket Fee Revenue • ${(feeStats.rate * 100).toFixed(0)}%`, `Total: ${formatFeeGram(feeStats.totalNano)} GRAM`, `Today: ${formatFeeGram(feeStats.todayNano)} GRAM`, `This week: ${formatFeeGram(feeStats.weekNano)} GRAM`, `This month: ${formatFeeGram(feeStats.monthNano)} GRAM`, '', 'یک بخش را انتخاب کنید.', 'قیمت و منبع Aster از این پنل تغییر نمی‌کند.'].filter(Boolean).join('\n');
   const rows: Button[][] = [[{ text: '₿ Bitcoin', callback_data: 'botadmin:predictops:market:bitcoin' }, { text: '🥇 Gold', callback_data: 'botadmin:predictops:market:gold' }, { text: '🛢 Oil', callback_data: 'botadmin:predictops:market:oil' }], [{ text: '🔗 Bitcoin Provider', callback_data: 'botadmin:predictops:provider' }], [{ text: dashboard.emergencyPaused ? '✅ Resume All Markets' : '🚨 Emergency Pause All', callback_data: `botadmin:predictops:emergency:${dashboard.emergencyPaused ? 'off' : 'on'}` }], [{ text: '👤 User Predict Controls', callback_data: 'botadmin:predictops:useraccess' }, { text: '⛔ Blocked Users', callback_data: 'botadmin:predictops:blocked' }], [{ text: '🟢 Online in Predict', callback_data: 'botadmin:predictops:online' }, { text: '👣 Predict Visitors', callback_data: 'botadmin:predictops:visitors' }], [{ text: '🧾 Settlement Queue', callback_data: 'botadmin:predictops:queue' }, { text: '📜 Incident Log', callback_data: 'botadmin:predictops:incidents' }], [{ text: '🔐 Audit Log', callback_data: 'botadmin:predictops:audit' }, { text: '📝 Maintenance', callback_data: 'botadmin:predictops:askmaintenance' }], ...(dashboard.maintenanceMessage ? [[{ text: '🗑 حذف Maintenance Message', callback_data: 'botadmin:predictops:clearmaintenance' }]] : []), [{ text: '🔄 Refresh', callback_data: 'botadmin:predictops:refresh' }, { text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' }]];
   await upsert(env, chatId, messageId, text, rows);
 }
@@ -473,6 +474,7 @@ function marketIcon(market: PredictOpsMarket): string { return market === 'bitco
 function marketLabel(market: PredictOpsMarket): string { return market === 'bitcoin' ? 'Bitcoin' : market === 'gold' ? 'Gold' : 'Oil'; }
 function formatOpsPrice(market: PredictOpsMarket, value: number | null): string { const n = Number(value); return !Number.isFinite(n) || n <= 0 ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: market === 'bitcoin' ? 0 : 2, maximumFractionDigits: market === 'bitcoin' ? 0 : 2 }); }
 function formatGram(nano: number): string { return (Math.max(0, Number(nano) || 0) / NANO).toLocaleString('en-US', { maximumFractionDigits: 4 }); }
+function formatFeeGram(nano: number): string { return (Math.max(0, Number(nano) || 0) / NANO).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function formatSignedGram(nano: number): string { const value = Number(nano) || 0; return (value >= 0 ? '+' : '-') + formatGram(Math.abs(value)); }
 function formatOpsTime(value: string | null): string { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().replace('.000Z', 'Z') : String(value); }
 function shortRoundId(value: string): string { const parts = String(value || '').split('_'); return parts.length >= 3 ? parts.slice(-1)[0].slice(-8) : shorten(value, 18); }

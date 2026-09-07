@@ -216,7 +216,17 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
   const ends = Date.parse(String(round.ends_at || ''));
   const lockAt = betLockAtMs(round);
   const provider = String(round.market || '') === 'bitcoin' ? await getPredictRoundProvider(env, roundId) : 'vexa';
-  return { ok: true, userControls, round: { id: roundId, market: String(round.market || ''), provider, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
+  const polymarketRow = provider === 'polymarket'
+    ? await env.DB.prepare('SELECT condition_id, up_token_id, down_token_id FROM predict_polymarket_rounds WHERE round_id = ?').bind(roundId).first<{ condition_id: string; up_token_id: string; down_token_id: string }>()
+    : null;
+  const polymarket = polymarketRow ? {
+    conditionId: String(polymarketRow.condition_id || ''),
+    upTokenId: String(polymarketRow.up_token_id || ''),
+    downTokenId: String(polymarketRow.down_token_id || ''),
+    clobWsUrl: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
+    takerFeeRate: 0.07,
+  } : null;
+  return { ok: true, userControls, round: { id: roundId, market: String(round.market || ''), provider, polymarket, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
 }
 async function ensurePredictTables(env: Env): Promise<void> {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_rounds (id TEXT PRIMARY KEY, market TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, start_price REAL NOT NULL, end_price REAL, status TEXT NOT NULL DEFAULT 'open', result TEXT, settled_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
@@ -591,7 +601,7 @@ export async function setPredictUserAllAccess(env: Env, adminIdInput: unknown, u
   for (const market of TRADE_MARKETS) await setUserSectionBlocked(env, userId, `predict-${market}`, blocked, blocked ? options.expiresAt ?? null : null, { reason: options.reason, adminNote: options.adminNote });
   await appendPredictAudit(env, adminIdInput, blocked ? 'user_predict_block_all' : 'user_predict_allow_all', {
     userId,
-    detail: blocked ? `All Predict markets blocked${options.expiresAt ? ` until ${String(options.expiresAt)}` : ' permanently'}. Reason: ${cleanAuditText(options.reason, 80) || 'Manual review'}.` : 'All Predict market access restored.',
+    detail: blocked ? `All Predict markets blocked${options.expiresAt ? ` until ${String(options.expiresAt)}` : ' permanently'}. Reason: ${cleanAuditText(options.reason, 80) || 'Manual review'}.` : 'Access restored.',
   }).catch(() => undefined);
   return getPredictUserAccess(env, userId);
 }

@@ -248,8 +248,8 @@ export const PREDICT_ZONE_SCRIPT = `
     function path(points){if(!points.length)return'';var d='M'+points[0].x.toFixed(1)+' '+points[0].y.toFixed(1);for(var i=0;i<points.length-1;i++){var a=points[i],b=points[i+1],mx=(a.x+b.x)/2;d+=' C '+mx.toFixed(1)+' '+a.y.toFixed(1)+' '+mx.toFixed(1)+' '+b.y.toFixed(1)+' '+b.x.toFixed(1)+' '+b.y.toFixed(1)}return d}
     function niceTickStep(span,count){if(!isFinite(span)||span<=0)return 1;var rough=span/Math.max(1,count),power=Math.pow(10,Math.floor(Math.log(rough)/Math.LN10)),error=rough/power,factor=error>=Math.sqrt(50)?10:error>=Math.sqrt(10)?5:error>=Math.sqrt(2)?2:1;return factor*power}
     function axisPixelHeight(){var height=chart&&chart.clientHeight?chart.clientHeight:170;return Math.max(1,height*(H-P*2)/H)}
-    function axisMinGap(){return window.innerWidth<=380?42:44}
-    function axisCapacity(){return Math.max(2,Math.min(3,Math.floor(axisPixelHeight()/axisMinGap())+1))}
+    function axisMinGap(){return 36}
+    function axisCapacity(){return Math.max(3,Math.min(4,Math.floor(axisPixelHeight()/axisMinGap())+1))}
     function priceTicks(scale){
       var c=cfg(),maxCount=axisCapacity(),span=scale.max-scale.min,fixedStep=Number(c.axisStep||0),quantum=Math.max(c.step,Math.pow(10,-Math.max(0,c.decimals))),precision=Math.max(0,c.decimals+4),plotPx=axisPixelHeight(),minGap=axisMinGap(),minStepByPixels=span*(minGap/Math.max(1,plotPx)),step,first,v,ticks=[],attempt;
       if(fixedStep>0){
@@ -278,11 +278,11 @@ export const PREDICT_ZONE_SCRIPT = `
     function autoScale(prices){
       var c=cfg(),fixedStep=Number(c.axisStep||0),valid=prices.filter(function(v){return isFinite(v)&&v>0}),precision=Math.pow(10,-Math.max(0,c.decimals)),minSpan,min,max,span,mid,pad,targetMin,targetMax,outward,alpha,actualSpan,axisSpan,price,innerMin,innerMax,nextMin;
       if(fixedStep>0){
-        axisSpan=fixedStep*4;price=Number(current||last||0);
+        axisSpan=fixedStep*(axisCapacity()-1);price=Number(current||last||0);
         if(!isFinite(price)||price<=0)price=Number(valid[valid.length-1]||1);
         if(!scaleMin||!scaleMax){nextMin=Math.floor((price-axisSpan/2)/fixedStep)*fixedStep;scaleMin=nextMin;scaleMax=nextMin+axisSpan;return{min:scaleMin,max:scaleMax}}
         innerMin=scaleMin+axisSpan*.25;innerMax=scaleMax-axisSpan*.25;
-        if(price<innerMin||price>innerMax){nextMin=Math.floor((price-axisSpan/2)/fixedStep)*fixedStep;scaleMin+=(nextMin-scaleMin)*.18;scaleMax=scaleMin+axisSpan}
+        if(price<innerMin||price>innerMax){nextMin=Math.floor((price-axisSpan/2)/fixedStep)*fixedStep;scaleMin=nextMin;scaleMax=nextMin+axisSpan}
         return{min:scaleMin,max:scaleMax}
       }
       minSpan=Math.max(c.step*8,precision*8);

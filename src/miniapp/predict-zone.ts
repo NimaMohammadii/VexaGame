@@ -126,7 +126,7 @@ export const PREDICT_ZONE_SCRIPT = `
       oil:{label:'Oil',question:'Oil this month: up or down?',stream:'wss://fstream.asterdex.com/ws/clusdt@markPrice@1s',decimals:2,step:.05,symbol:'Oil'},
       gold:{label:'Gold',question:'Gold this month: up or down?',stream:'wss://fstream.asterdex.com/ws/xauusdt@markPrice@1s',decimals:2,step:.5,symbol:'Au'}
     };
-    var EVENT_CATEGORIES={world:1,tech:1,culture:1},LOCKED_CATEGORIES={world:1,tech:1,culture:1},market='bitcoin',eventMode=false,currentEvent=null,eventDeadline=0,ws=null,reconnectTimer=0,feedWatchdog=0,reconnectDelay=6000,chartMotionRaf=0,chartMotionFrame=0,clockTimer=0,seq=0,values=[],sampleTimes=[],historyValues=[],current=0,last=0,raw=0,priceFrom=0,priceTarget=0,priceAnimStarted=0,scaleMin=0,scaleMax=0,scaleFrameAt=0,readyPrice=false,entry=0,lastPointAt=0,currentRound=null,roundLockDeadline=0,balanceNano=0,balanceKnown=false,gramUsd=0,side='up',busy=false,images={},trend='flat',runtimeSuspended=true,runtimeStarted=false;
+    var EVENT_CATEGORIES={world:1,tech:1,culture:1},LOCKED_CATEGORIES={world:1,tech:1,culture:1},market='bitcoin',eventMode=false,currentEvent=null,eventDeadline=0,ws=null,reconnectTimer=0,feedWatchdog=0,feedHeartbeat=0,priceProvider='vexa',reconnectDelay=6000,chartMotionRaf=0,chartMotionFrame=0,clockTimer=0,seq=0,values=[],sampleTimes=[],historyValues=[],current=0,last=0,raw=0,priceFrom=0,priceTarget=0,priceAnimStarted=0,scaleMin=0,scaleMax=0,scaleFrameAt=0,readyPrice=false,entry=0,lastPointAt=0,currentRound=null,roundLockDeadline=0,balanceNano=0,balanceKnown=false,gramUsd=0,side='up',busy=false,images={},trend='flat',runtimeSuspended=true,runtimeStarted=false;
     var W=360,H=220,L=0,R=64,P=18,HISTORY=23,SAMPLE_MS=2800;
     var requestFrame=window.requestAnimationFrame?window.requestAnimationFrame.bind(window):function(cb){return setTimeout(function(){cb(Date.now())},16)};
     var cancelFrame=window.cancelAnimationFrame?window.cancelAnimationFrame.bind(window):function(id){clearTimeout(id)};
@@ -377,6 +377,7 @@ export const PREDICT_ZONE_SCRIPT = `
     }
     function clearReconnect(){if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=0}}
     function clearFeedWatchdog(){if(feedWatchdog){clearTimeout(feedWatchdog);feedWatchdog=0}}
+    function clearFeedHeartbeat(){if(feedHeartbeat){clearInterval(feedHeartbeat);feedHeartbeat=0}}
     function armFeedWatchdog(my,id,socket){
       clearFeedWatchdog();if(my!==seq||id!==market||eventMode||!isActive()||ws!==socket)return;
       feedWatchdog=setTimeout(function(){
@@ -384,16 +385,16 @@ export const PREDICT_ZONE_SCRIPT = `
         reconnectDelay=1000;try{socket.close()}catch(e){if(ws===socket){ws=null;scheduleReconnect(my,id)}}
       },7000);
     }
-    function stopFeed(){seq++;clearReconnect();clearFeedWatchdog();stopChartMotion();if(ws){try{ws.onopen=null;ws.onmessage=null;ws.onclose=null;ws.onerror=null;ws.close()}catch(e){}ws=null}}
+    function stopFeed(){seq++;clearReconnect();clearFeedWatchdog();clearFeedHeartbeat();stopChartMotion();if(ws){try{ws.onopen=null;ws.onmessage=null;ws.onclose=null;ws.onerror=null;ws.close()}catch(e){}ws=null}}
     function scheduleReconnect(my,id){clearReconnect();if(my!==seq||id!==market||eventMode||!isActive())return;var delay=reconnectDelay;reconnectDelay=Math.min(60000,reconnectDelay*2);reconnectTimer=setTimeout(function(){reconnectTimer=0;if(my===seq&&id===market&&isActive()&&!eventMode)connectFeed(my,id)},delay)}
     function connectFeed(my,id){
       if(my!==seq||id!==market||eventMode||!isActive())return;
-      var c=MARKETS[id]||cfg();clearReconnect();clearFeedWatchdog();
-      if(!c.stream)return;
+      var c=MARKETS[id]||cfg(),usePolymarket=id==='bitcoin'&&priceProvider==='polymarket',stream=usePolymarket?'wss://ws-live-data.polymarket.com':c.stream;clearReconnect();clearFeedWatchdog();clearFeedHeartbeat();
+      if(!stream)return;
       try{
-        var socket=new WebSocket(c.stream);ws=socket;
-        socket.onopen=function(){if(my!==seq||id!==market||ws!==socket)return;armFeedWatchdog(my,id,socket)};
-        socket.onmessage=function(e){if(my!==seq||id!==market||ws!==socket)return;try{var j=JSON.parse(e.data);if(j&&j.p!==undefined&&applyPrice(j.p,my,id)){reconnectDelay=6000;armFeedWatchdog(my,id,socket)}}catch(_){}};
+        var socket=new WebSocket(stream);ws=socket;
+        socket.onopen=function(){if(my!==seq||id!==market||ws!==socket)return;if(usePolymarket){socket.send(JSON.stringify({action:'subscribe',subscriptions:[{topic:'crypto_prices_twap_thirty',type:'update',filters:'{\"symbol\":\"btc/usd\"}'}]}));feedHeartbeat=setInterval(function(){if(ws===socket&&socket.readyState===1)try{socket.send('PING')}catch(e){}},5000)}armFeedWatchdog(my,id,socket)};
+        socket.onmessage=function(e){if(my!==seq||id!==market||ws!==socket)return;try{var j=JSON.parse(e.data),value=usePolymarket&&j&&j.payload?j.payload.value:(j&&j.p);if(value!==undefined&&applyPrice(value,my,id)){reconnectDelay=6000;armFeedWatchdog(my,id,socket)}}catch(_){}};
         socket.onclose=function(){if(my!==seq||id!==market||ws!==socket)return;ws=null;clearFeedWatchdog();scheduleReconnect(my,id)};
         socket.onerror=function(){try{socket.close()}catch(e){}};
       }catch(e){scheduleReconnect(my,id)}
@@ -439,6 +440,7 @@ export const PREDICT_ZONE_SCRIPT = `
         if(my!==seq||id!==market||eventMode)return false;
         historyValues=(Array.isArray(d&&d.history)?d.history:[]).map(Number).filter(function(v){return isFinite(v)&&v>0}).slice(-HISTORY);
         var round=d&&d.round;if(!round)throw new Error('Prediction round unavailable');
+        var nextProvider=market==='bitcoin'&&String(round.provider||'').toLowerCase()==='polymarket'?'polymarket':'vexa';if(nextProvider!==priceProvider){priceProvider=nextProvider;if(ws){var oldSocket=ws;ws=null;clearFeedWatchdog();clearFeedHeartbeat();try{oldSocket.close()}catch(e){}connectFeed(my,id)}}
         var cachedGramUsd=readGramUsd();if(cachedGramUsd>0)gramUsd=cachedGramUsd;currentRound=round;roundLockDeadline=Date.now()+Math.max(0,Number(round.lockRemainingMs||0));updateBalance(d);renderHistory(round);renderRoundMeta(round);if(Number(round.startPrice)>0){entry=Number(round.startPrice);if(start)renderMarketPrice(start,entry)}
         if(market!=='bitcoin')renderMarketPeriod(round);
         var initialPrice=Number(round.livePrice||round.startPrice||0);if(!readyPrice&&initialPrice>0)applyPrice(initialPrice,my,id);else if(readyPrice){queueDraw()}

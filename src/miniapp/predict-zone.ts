@@ -122,7 +122,7 @@ export const PREDICT_ZONE_SCRIPT = `
     root.dataset.predictRuntimeReady='1';
 
     var MARKETS={
-      bitcoin:{label:'Bitcoin',question:'Bitcoin up or down? · 5M',stream:'wss://fstream.asterdex.com/ws/btcusdt@markPrice@1s',decimals:0,step:5,axisStep:20,symbol:'₿'},
+      bitcoin:{label:'Bitcoin',question:'Bitcoin up or down? · 5M',stream:'wss://fstream.asterdex.com/ws/btcusdt@markPrice@1s',decimals:0,step:5,axisStep:10,symbol:'₿'},
       oil:{label:'Oil',question:'Oil this month: up or down?',stream:'wss://fstream.asterdex.com/ws/clusdt@markPrice@1s',decimals:2,step:.05,symbol:'Oil'},
       gold:{label:'Gold',question:'Gold this month: up or down?',stream:'wss://fstream.asterdex.com/ws/xauusdt@markPrice@1s',decimals:2,step:.5,symbol:'Au'}
     };
@@ -249,7 +249,7 @@ export const PREDICT_ZONE_SCRIPT = `
     function niceTickStep(span,count){if(!isFinite(span)||span<=0)return 1;var rough=span/Math.max(1,count),power=Math.pow(10,Math.floor(Math.log(rough)/Math.LN10)),error=rough/power,factor=error>=Math.sqrt(50)?10:error>=Math.sqrt(10)?5:error>=Math.sqrt(2)?2:1;return factor*power}
     function axisPixelHeight(){var height=chart&&chart.clientHeight?chart.clientHeight:170;return Math.max(1,height*(H-P*2)/H)}
     function axisMinGap(){return 36}
-    function axisCapacity(){return 4}
+    function axisCapacity(){return 5}
     function priceTicks(scale){
       var c=cfg(),maxCount=axisCapacity(),span=scale.max-scale.min,fixedStep=Number(c.axisStep||0),quantum=Math.max(c.step,Math.pow(10,-Math.max(0,c.decimals))),precision=Math.max(0,c.decimals+4),plotPx=axisPixelHeight(),minGap=axisMinGap(),minStepByPixels=span*(minGap/Math.max(1,plotPx)),step,first,v,ticks=[],attempt;
       if(fixedStep>0){
@@ -300,7 +300,7 @@ export const PREDICT_ZONE_SCRIPT = `
     }
     function renderPriceTicks(scale,ticks){
       if(!axisLayer||!gridLayer)return;
-      var max=4,label,lineEl,i,top,text;
+      var max=axisCapacity(),label,lineEl,i,top,text;
       while(axisLayer.children.length<max){label=document.createElement('span');label.style.opacity='0';axisLayer.appendChild(label)}
       while(gridLayer.children.length<max){lineEl=document.createElement('span');lineEl.style.opacity='0';gridLayer.appendChild(lineEl)}
       for(i=0;i<max;i++){

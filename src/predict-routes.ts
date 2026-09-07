@@ -4,7 +4,7 @@ import type { Env } from './types';
 import { publishPredictOpsState, publishPredictRoundState, type PredictOpsRealtimeState } from './section-lock-events';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, publicUserControls, setUserSectionBlocked, type UserSectionBlock } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
-import { executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
+import { executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -58,8 +58,9 @@ app.get('/app/api/predict-round', async (c) => {
   try {
     market = normalizeTradeMarket(String(c.req.query('market') || 'bitcoin'));
     const userId = await authenticateUser(c.env, c.req.query('userId'), c.req.header('x-telegram-init-data'));
-    const snapshot = await fetchMarketSnapshot(market);
-    await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
+    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+    const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
+    if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history };
@@ -89,7 +90,9 @@ app.post('/app/api/predict-bet', async (c) => {
     stakeNano = tonToNano(body.stakeTon);
     const tonUsd = cleanOptionalPrice(body.tonUsdSnapshot);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
-    const snapshot = await fetchMarketSnapshot(market);
+    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+    const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
+    if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
     const roundId = cleanDbText(round.id, 'Prediction round is not ready');
@@ -212,7 +215,8 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
   const now = Date.now();
   const ends = Date.parse(String(round.ends_at || ''));
   const lockAt = betLockAtMs(round);
-  return { ok: true, userControls, round: { id: roundId, market: String(round.market || ''), startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
+  const provider = String(round.market || '') === 'bitcoin' ? await getPredictRoundProvider(env, roundId) : 'vexa';
+  return { ok: true, userControls, round: { id: roundId, market: String(round.market || ''), provider, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
 }
 async function ensurePredictTables(env: Env): Promise<void> {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_rounds (id TEXT PRIMARY KEY, market TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, start_price REAL NOT NULL, end_price REAL, status TEXT NOT NULL DEFAULT 'open', result TEXT, settled_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
@@ -220,6 +224,10 @@ async function ensurePredictTables(env: Env): Promise<void> {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_bets (id TEXT PRIMARY KEY, round_id TEXT NOT NULL, market TEXT NOT NULL, user_id TEXT NOT NULL, side TEXT NOT NULL, stake_nano INTEGER NOT NULL, ton_usd_snapshot REAL NOT NULL DEFAULT 0, stake_usd_snapshot REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', payout_nano INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_predict_bets_round ON predict_bets(round_id)').run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_predict_bets_user_round ON predict_bets(user_id, round_id)').run();
+}
+async function getPredictProviderStateForRound(env: Env): Promise<PredictProvider> {
+  const state = await getPredictProviderState(env);
+  return state.active || state.requested;
 }
 async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPrice = 0): Promise<RoundRow> {
   await ensurePredictTables(env);
@@ -239,13 +247,13 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
     const endsAt = new Date(startMs + ROUND_MS).toISOString();
     const id = `pr_${market}_${startMs}`;
     const requestedProvider: PredictProvider = await getRequestedPredictProvider(env);
-    let startPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
+    let startPrice = 0;
     let polymarketRound: Awaited<ReturnType<typeof loadPolymarketBitcoinMarket>> | null = null;
     if (requestedProvider === 'polymarket') {
       polymarketRound = await loadPolymarketBitcoinMarket(startMs);
       if (!(Number(polymarketRound.startPrice) > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
       startPrice = Number(polymarketRound.startPrice);
-    }
+    } else startPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
     const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO predict_rounds (id, market, starts_at, ends_at, start_price, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)`).bind(id, market, startsAt, endsAt, startPrice).run();
     const row = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id = ?').bind(id).first<RoundRow>();
     if (!row) throw new Error('Could not create prediction round');

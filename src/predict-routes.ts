@@ -601,7 +601,7 @@ export async function setPredictUserAllAccess(env: Env, adminIdInput: unknown, u
   for (const market of TRADE_MARKETS) await setUserSectionBlocked(env, userId, `predict-${market}`, blocked, blocked ? options.expiresAt ?? null : null, { reason: options.reason, adminNote: options.adminNote });
   await appendPredictAudit(env, adminIdInput, blocked ? 'user_predict_block_all' : 'user_predict_allow_all', {
     userId,
-    detail: blocked ? `All Predict markets blocked${options.expiresAt ? ` until ${String(options.expiresAt)}` : ' permanently'}. Reason: ${cleanAuditText(options.reason, 80) || 'Manual review'}.` : 'Access restored.',
+    detail: blocked ? `All Predict markets blocked${options.expiresAt ? ` until ${String(options.expiresAt)}` : ' permanently'}. Reason: ${cleanAuditText(options.reason, 80) || 'Manual review'}.` : 'All Predict market access restored.',
   }).catch(() => undefined);
   return getPredictUserAccess(env, userId);
 }

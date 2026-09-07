@@ -366,6 +366,11 @@ export const PREDICT_ZONE_SCRIPT = `
       if(betAnimating){priceFrom=Number(current||to);priceTarget=to;priceAnimStarted=0;return}
       priceFrom=Number(current||to);priceTarget=to;priceAnimStarted=motionNow();startChartMotion()
     }
+    function snapChartToRoundStart(value){
+      var p=Number(value);if(!isFinite(p)||p<=0)return;
+      raw=p;last=p;current=p;priceFrom=p;priceTarget=p;priceAnimStarted=0;lastPointAt=Date.now();
+      if(live)renderMarketPrice(live,p);syncTrend();queueDraw();
+    }
     function applyPrice(value,my,id){
       if(my!==seq||id!==market||eventMode)return false;
       var p=Number(value);if(!isFinite(p)||p<=0)return false;
@@ -448,9 +453,10 @@ export const PREDICT_ZONE_SCRIPT = `
         if(my!==seq||id!==market||eventMode)return false;
         historyValues=(Array.isArray(d&&d.history)?d.history:[]).map(Number).filter(function(v){return isFinite(v)&&v>0}).slice(-HISTORY);
         var round=d&&d.round;if(!round)throw new Error('Prediction round unavailable');
+        var roundChanged=!!previousRoundId&&previousRoundId!==String(round.id||'');
         var cachedGramUsd=readGramUsd();if(cachedGramUsd>0)gramUsd=cachedGramUsd;currentRound=round;roundLockDeadline=Date.now()+Math.max(0,Number(round.lockRemainingMs||0));updateBalance(d);renderHistory(round);renderRoundMeta(round);if(Number(round.startPrice)>0){entry=Number(round.startPrice);if(start)renderMarketPrice(start,entry)}
         if(market!=='bitcoin')renderMarketPeriod(round);
-        var initialPrice=Number(round.livePrice||round.startPrice||0);if(!readyPrice&&initialPrice>0)applyPrice(initialPrice,my,id);else if(readyPrice&&historyValues.length){values=historyValues.slice(-HISTORY);queueDraw()}
+        var initialPrice=Number(round.livePrice||round.startPrice||0);if(!readyPrice&&initialPrice>0)applyPrice(initialPrice,my,id);else if(roundChanged&&entry>0){if(historyValues.length)values=historyValues.slice(-HISTORY);snapChartToRoundStart(entry)}else if(readyPrice&&historyValues.length){values=historyValues.slice(-HISTORY);queueDraw()}
         if(market==='bitcoin'&&countdown&&Number(round.remainingMs)>=0){var text=timeLeft(Number(round.remainingMs));renderCountdownText(text)}syncBetAvailability();syncTrend();updateEstimate();loadGramUsd();if(previousRoundId&&previousRoundId!==String(round.id||''))requestRoundRealtime(previousRoundId,id);requestRoundRealtime(round.id,id);return true;
       }).catch(function(){if(my!==seq||id!==market||eventMode)return false;currentRound=null;roundLockDeadline=0;clearRoundMeta();syncBetAvailability();if(trendLabel)trendLabel.textContent='Price unavailable';return false})
     }

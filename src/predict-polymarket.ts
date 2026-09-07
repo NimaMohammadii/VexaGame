@@ -63,6 +63,11 @@ type PolymarketBetRow = {
   response_json: string | null;
 };
 type GeoBlockState = { blocked: boolean; country: string; region: string };
+type PolymarketStartPriceCachePayload = { openPrice?: unknown; retryAt?: unknown };
+type EdgeCache = {
+  match(request: Request): Promise<Response | undefined>;
+  put(request: Request, response: Response): Promise<void>;
+};
 
 type TradingClient = Awaited<ReturnType<typeof createSecureClient>>;
 let tradingClientPromise: Promise<TradingClient> | null = null;
@@ -542,28 +547,61 @@ async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number): Pr
   });
   const url = `${POLYMARKET_WEB_BASE}/api/crypto/crypto-price?${query.toString()}`;
   const cacheKey = new Request(url, { method: 'GET' });
-  const cache = caches.default;
-  const cached = await cache.match(cacheKey);
+  const cache = getPolymarketEdgeCache();
+  const cached = cache ? await cache.match(cacheKey).catch(() => undefined) : undefined;
   if (cached) {
-    const data = await cached.json() as { openPrice?: unknown };
+    const data = await cached.json().catch(() => ({})) as PolymarketStartPriceCachePayload;
     const cachedPrice = Number(data.openPrice);
     if (Number.isFinite(cachedPrice) && cachedPrice > 0) return cachedPrice;
-    await cache.delete(cacheKey).catch(() => false);
+    const retryAt = Number(data.retryAt);
+    if (Number.isFinite(retryAt) && retryAt > Date.now()) throw new Error('Polymarket Bitcoin start price is unavailable: HTTP 429');
   }
+
   const response = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!response.ok) throw new Error(`Polymarket Bitcoin start price is unavailable: HTTP ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 429 && cache) {
+      const retryMs = parseRetryAfterMs(response.headers.get('retry-after'));
+      const retryAt = Date.now() + retryMs;
+      const ttlSeconds = Math.max(1, Math.ceil(retryMs / 1000));
+      const hold = new Response(JSON.stringify({ retryAt }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': `public, max-age=${ttlSeconds}`,
+        },
+      });
+      await cache.put(cacheKey, hold).catch(() => undefined);
+    }
+    throw new Error(`Polymarket Bitcoin start price is unavailable: HTTP ${response.status}`);
+  }
   const data = await response.json() as { openPrice?: unknown };
   const startPrice = Number(data.openPrice);
   if (!Number.isFinite(startPrice) || startPrice <= 0) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
-  const cachedResponse = new Response(JSON.stringify({ openPrice: startPrice }), {
-    status: 200,
-    headers: {
-      'content-type': 'application/json',
-      'cache-control': `public, max-age=${START_PRICE_CACHE_SECONDS}`,
-    },
-  });
-  await cache.put(cacheKey, cachedResponse).catch(() => undefined);
+  if (cache) {
+    const cachedResponse = new Response(JSON.stringify({ openPrice: startPrice }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': `public, max-age=${START_PRICE_CACHE_SECONDS}`,
+      },
+    });
+    await cache.put(cacheKey, cachedResponse).catch(() => undefined);
+  }
   return startPrice;
+}
+
+function getPolymarketEdgeCache(): EdgeCache | null {
+  const storage = (globalThis as unknown as { caches?: { default?: EdgeCache } }).caches;
+  return storage?.default || null;
+}
+
+function parseRetryAfterMs(value: string | null): number {
+  const text = String(value || '').trim();
+  const seconds = Number(text);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.min(60_000, Math.max(5_000, Math.ceil(seconds * 1000)));
+  const at = Date.parse(text);
+  if (Number.isFinite(at)) return Math.min(60_000, Math.max(5_000, at - Date.now()));
+  return 30_000;
 }
 
 async function fetchGammaMarketBySlug(slug: string): Promise<GammaRecord> {

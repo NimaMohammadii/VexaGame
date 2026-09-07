@@ -115,6 +115,17 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
     return ok();
   }
 
+  if (data.startsWith('botadmin:online:realonly:')) {
+    const sectionId = normalizeSectionId(data.slice('botadmin:online:realonly:'.length));
+    if (!sectionId) return ok();
+    const config = await getOnlineUserCountConfig(env);
+    config.ranges[sectionId] = { min: 0, max: 0 };
+    config.adjustments[sectionId] = { permanent: 0 };
+    await saveOnlineUserCountConfig(env, config);
+    await sendSectionMenu(env, token, chatId, sectionId, messageId, '✅ همهٔ مقادیر اعمالی حذف شد؛ عدد نمایش‌داده‌شده فقط کاربران واقعاً حاضر در بازی است.');
+    return ok();
+  }
+
   if (data.startsWith('botadmin:online:base:')) {
     const sectionId = normalizeSectionId(data.slice('botadmin:online:base:'.length));
     if (!sectionId || sectionId === 'predict') return ok();
@@ -241,6 +252,9 @@ async function sendSectionMenu(env: Env, token: string, chatId: number, sectionI
   const isPredict = sectionId === 'predict';
   const rows: Keyboard = [];
   if (!isPredict) rows.push([{ text: `✏️ مقدار پایه • ${base.min}-${base.max}`, callback_data: `botadmin:online:base:${sectionId}` }]);
+  if (!isPredict && (base.min > 0 || base.max > 0 || adjustment.permanent > 0 || timed)) {
+    rows.push([{ text: '👤 فقط کاربران واقعی (حذف همهٔ مقادیر)', callback_data: `botadmin:online:realonly:${sectionId}` }]);
+  }
   rows.push([
     { text: '➖ کم‌کردن ۱', callback_data: `botadmin:online:adjust:${sectionId}:-1` },
     { text: '➕ افزودن ۱', callback_data: `botadmin:online:adjust:${sectionId}:1` },

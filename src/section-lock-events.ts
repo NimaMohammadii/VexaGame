@@ -212,7 +212,7 @@ export class SectionLockEvents {
       const next = cleanGameId(message.gameActive);
       if (session.gameActive === next) return;
       session.gameActive = next;
-      void this.broadcastOnlineCounts();
+      await this.broadcastOnlineCounts();
       return;
     }
     if (message?.type !== 'predict-presence') return;
@@ -237,7 +237,7 @@ export class SectionLockEvents {
       session.gameActive = !session.admin ? cleanGameId(message.gameActive) : '';
       if (session.predictActive) await recordPredictVisit(this.env, userId).catch((error) => console.warn('record Predict visit failed', error));
       void this.broadcastPredictOnlineCount();
-      void this.broadcastOnlineCounts();
+      await this.broadcastOnlineCounts();
     } catch { /* invalid session cannot claim a realtime user target */ }
   }
 

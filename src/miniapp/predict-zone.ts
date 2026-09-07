@@ -253,8 +253,9 @@ export const PREDICT_ZONE_SCRIPT = `
     function priceTicks(scale){
       var c=cfg(),maxCount=axisCapacity(),span=scale.max-scale.min,fixedStep=Number(c.axisStep||0),quantum=Math.max(c.step,Math.pow(10,-Math.max(0,c.decimals))),precision=Math.max(0,c.decimals+4),plotPx=axisPixelHeight(),minGap=axisMinGap(),minStepByPixels=span*(minGap/Math.max(1,plotPx)),step,first,v,ticks=[],attempt;
       if(fixedStep>0){
-        first=Math.ceil(scale.min/fixedStep)*fixedStep;ticks=[];
-        for(v=first;v<=scale.max+fixedStep*1e-9&&ticks.length<64;v+=fixedStep)ticks.push(Number(v.toFixed(precision)));
+        step=Math.max(fixedStep,Math.ceil((minStepByPixels-1e-12)/fixedStep)*fixedStep);
+        first=Math.ceil(scale.min/step)*step;ticks=[];
+        for(v=first;v<=scale.max+step*1e-9&&ticks.length<64;v+=step)ticks.push(Number(v.toFixed(precision)));
         if(ticks.length>maxCount){
           var target=Number(current||last||((scale.min+scale.max)/2)),best=0,bestDistance=Infinity;
           for(var i=0;i<=ticks.length-maxCount;i++){
@@ -275,7 +276,7 @@ export const PREDICT_ZONE_SCRIPT = `
       return ticks.slice(0,maxCount);
     }
     function autoScale(prices){
-      var c=cfg(),valid=prices.filter(function(v){return isFinite(v)&&v>0}),precision=Math.pow(10,-Math.max(0,c.decimals)),minSpan=Math.max(c.step*8,Number(c.axisStep||0)*2,precision*8),min,max,span,mid,pad,targetMin,targetMax,outward,alpha,actualSpan;
+      var c=cfg(),valid=prices.filter(function(v){return isFinite(v)&&v>0}),precision=Math.pow(10,-Math.max(0,c.decimals)),minSpan=Math.max(c.step*8,Number(c.axisStep||0)*Math.max(3,axisCapacity()),precision*8),min,max,span,mid,pad,targetMin,targetMax,outward,alpha,actualSpan;
       if(!valid.length)valid.push(Number(current||last||1));
       min=Math.min.apply(Math,valid);max=Math.max.apply(Math,valid);span=max-min;
       if(!isFinite(span)||span<minSpan){mid=(min+max)/2;min=mid-minSpan/2;max=mid+minSpan/2;span=minSpan}

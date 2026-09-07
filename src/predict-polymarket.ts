@@ -16,10 +16,11 @@ export type PolymarketSide = 'up' | 'down';
 export type PolymarketBetStatus = 'reserved' | 'prepared' | 'matched' | 'failed';
 
 const PROVIDER_KEY = 'admin:predict-provider:v1';
+const POLYMARKET_WEB_BASE = 'https://polymarket.com';
 const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 const CLOB_BASE = 'https://clob.polymarket.com';
 const BRIDGE_BASE = 'https://bridge.polymarket.com';
-const GEOBLOCK_URL = 'https://polymarket.com/api/geoblock';
+const GEOBLOCK_URL = `${POLYMARKET_WEB_BASE}/api/geoblock`;
 const POLYMARKET_ROUND_MS = 5 * 60 * 1000;
 const PUSD_SCALE = 1_000_000;
 const RTDS_URL = 'wss://ws-live-data.polymarket.com';
@@ -261,8 +262,14 @@ export async function loadPolymarketBitcoinMarket(startMs: number): Promise<Poly
   const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
   const slug = `btc-updown-5m-${Math.floor(normalizedStart / 1000)}`;
+  const startPrice = await fetchPolymarketBitcoinStartPrice(normalizedStart);
+  return loadPolymarketBitcoinMarketBySlug(slug, startPrice);
+}
+
+async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice: number): Promise<PolymarketMarketView> {
+  if (!(Number(startPrice) > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
   const [market, event] = await Promise.all([fetchGammaMarketBySlug(slug), fetchGammaEventBySlug(slug)]);
-  const parsed = parseGammaBitcoinMarket(market, event, slug);
+  const parsed = parseGammaBitcoinMarket(market, event, slug, startPrice);
   const [upBook, downBook] = await Promise.all([fetchBook(parsed.upTokenId), fetchBook(parsed.downTokenId)]);
   return {
     ...parsed,
@@ -295,30 +302,19 @@ export async function getPolymarketRoundMarket(env: Env, roundId: string, refres
   await ensurePredictProviderTables(env);
   const row = await env.DB.prepare('SELECT * FROM predict_polymarket_rounds WHERE round_id = ?').bind(roundId).first<PolymarketRoundRow>();
   if (!row) throw new Error('Polymarket round metadata is unavailable');
-  if (refreshPrices) {
-    const fresh = await loadPolymarketBitcoinMarket(slugStartMs(row.slug));
-    await persistPolymarketRound(env, roundId, fresh);
-    return fresh;
-  }
-  const [market, event, upBook, downBook] = await Promise.all([
-    fetchGammaMarketBySlug(row.slug),
-    fetchGammaEventBySlug(row.slug),
-    fetchBook(row.up_token_id),
-    fetchBook(row.down_token_id),
-  ]);
-  const parsed = parseGammaBitcoinMarket(market, event, row.slug);
+  const round = await env.DB.prepare('SELECT start_price FROM predict_rounds WHERE id = ?').bind(roundId).first<{ start_price: number }>();
+  const startPrice = Number(round?.start_price);
+  if (!(startPrice > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
+  const fresh = await loadPolymarketBitcoinMarketBySlug(row.slug, startPrice);
+  if (refreshPrices) await persistPolymarketRound(env, roundId, fresh);
   return {
-    ...parsed,
+    ...fresh,
     upTokenId: row.up_token_id,
     downTokenId: row.down_token_id,
     conditionId: row.condition_id,
     marketId: row.market_id,
-    resolutionSource: row.resolution_source || parsed.resolutionSource,
-    rtdsTopic: row.rtds_topic || parsed.rtdsTopic,
-    upPrice: upBook.bestAsk ?? parsed.upPrice,
-    downPrice: downBook.bestAsk ?? parsed.downPrice,
-    upLiquidityUsd: upBook.askLiquidityUsd,
-    downLiquidityUsd: downBook.askLiquidityUsd,
+    resolutionSource: row.resolution_source || fresh.resolutionSource,
+    rtdsTopic: row.rtds_topic || fresh.rtdsTopic,
   };
 }
 
@@ -343,7 +339,7 @@ export async function resolvePolymarketBitcoinRound(env: Env, roundId: string): 
     else if (winner === 'down' || winner === 'no') result = 'down';
   }
   if (!result) return null;
-  return { result, finalPrice: metadataPrice(event, market, 'final') };
+  return { result, finalPrice: metadataFinalPrice(event, market) };
 }
 
 export async function executePolymarketBitcoinBet(env: Env, input: { betId: string; roundId: string; side: PolymarketSide; stakeUsd: number }): Promise<PolymarketExecution> {
@@ -523,6 +519,23 @@ async function assertPolymarketTradingAllowed(): Promise<GeoBlockState> {
   return geo;
 }
 
+async function fetchPolymarketBitcoinStartPrice(startMs: number): Promise<number> {
+  const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
+  if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
+  const query = new URLSearchParams({
+    symbol: 'BTC',
+    eventStartTime: new Date(normalizedStart).toISOString(),
+    variant: 'fiveminute',
+    endDate: new Date(normalizedStart + POLYMARKET_ROUND_MS).toISOString(),
+  });
+  const response = await fetch(`${POLYMARKET_WEB_BASE}/api/crypto/crypto-price?${query.toString()}`, { headers: { accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Polymarket Bitcoin start price is unavailable: HTTP ${response.status}`);
+  const data = await response.json() as { openPrice?: unknown };
+  const startPrice = Number(data.openPrice);
+  if (!Number.isFinite(startPrice) || startPrice <= 0) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
+  return startPrice;
+}
+
 async function fetchGammaMarketBySlug(slug: string): Promise<GammaRecord> {
   const response = await fetch(`${GAMMA_BASE}/markets/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`Polymarket Bitcoin market is unavailable: HTTP ${response.status}`);
@@ -539,7 +552,7 @@ async function fetchGammaEventBySlug(slug: string): Promise<GammaRecord> {
   return event as GammaRecord;
 }
 
-function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expectedSlug: string): PolymarketMarketView {
+function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expectedSlug: string, startPrice: number): PolymarketMarketView {
   const slug = String(market.slug || event.slug || '').trim();
   if (slug !== expectedSlug || !/^btc-updown-5m-\d{10}$/.test(slug)) throw new Error('Polymarket returned the wrong Bitcoin 5-minute market');
   if (market.closed === true || market.active === false || market.enableOrderBook === false || market.acceptingOrders === false) throw new Error('Polymarket Bitcoin market is not accepting orders');
@@ -557,6 +570,7 @@ function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expect
   const upTokenId = String(tokenIds[upIndex] || '').trim();
   const downTokenId = String(tokenIds[downIndex] || '').trim();
   if (!/^\d+$/.test(upTokenId) || !/^\d+$/.test(downTokenId)) throw new Error('Polymarket Bitcoin outcome token IDs are invalid');
+  if (!(Number(startPrice) > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
   const resolutionSource = findResolutionSource(market, event);
   const sourceText = `${resolutionSource} ${String(market.description || event.description || '')}`.toLowerCase();
   const rtdsTopic = /twap[-_ ]?30s|30[- ]second/.test(sourceText) ? 'crypto_prices_twap_thirty' : 'crypto_prices_twap_sixty';
@@ -570,8 +584,8 @@ function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expect
     downPrice: cleanProbability(prices[downIndex]),
     upLiquidityUsd: 0,
     downLiquidityUsd: 0,
-    startPrice: metadataPrice(event, market, 'start'),
-    finalPrice: metadataPrice(event, market, 'final'),
+    startPrice: Number(startPrice),
+    finalPrice: metadataFinalPrice(event, market),
     resolutionSource,
     rtdsTopic,
     rtdsSymbol: 'btc/usd',
@@ -603,8 +617,8 @@ function findResolutionSource(market: GammaRecord, event: GammaRecord): string {
   return '';
 }
 
-function metadataPrice(primary: GammaRecord, secondary: GammaRecord, kind: 'start' | 'final'): number | null {
-  const keys = kind === 'start' ? ['priceToBeat', 'price_to_beat', 'startPrice', 'start_price'] : ['finalPrice', 'final_price', 'resolutionPrice', 'resolution_price'];
+function metadataFinalPrice(primary: GammaRecord, secondary: GammaRecord): number | null {
+  const keys = ['finalPrice', 'final_price', 'resolutionPrice', 'resolution_price'];
   const records: GammaRecord[] = [primary, secondary];
   for (const source of [primary, secondary]) {
     const metadata = parseRecord(source.eventMetadata ?? source.event_metadata);

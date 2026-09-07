@@ -59,8 +59,8 @@ app.get('/app/api/predict-round', async (c) => {
     const userId = await authenticateUser(c.env, c.req.query('userId'), c.req.header('x-telegram-init-data'));
     const snapshot = await fetchMarketSnapshot(market);
     await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
+    await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
-    await settleDueRounds(c.env, market);
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history };
     await reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined);
     return c.json(response, 200, { 'cache-control': CACHE_NONE });
@@ -86,8 +86,9 @@ app.post('/app/api/predict-bet', async (c) => {
     stakeNano = tonToNano(body.stakeTon);
     const tonUsd = cleanOptionalPrice(body.tonUsdSnapshot);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
-    await settleDueRounds(c.env, market);
-    const round = await getOrCreateCurrentRound(c.env, market);
+    const snapshot = await fetchMarketSnapshot(market);
+    await settleDueRounds(c.env, market, false, snapshot.price);
+    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
     const roundId = cleanDbText(round.id, 'Prediction round is not ready');
     if (round.status !== 'open' || Date.now() >= betLockAtMs(round)) throw new Error('This prediction is closed. Wait for the next round.');
     await ensurePredictTables(c.env);
@@ -251,20 +252,20 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
   if (!existing) throw new Error('Could not create monthly prediction round');
   return existing;
 }
-async function settleDueRounds(env: Env, market: TradeMarket, force = false): Promise<number> {
+async function settleDueRounds(env: Env, market: TradeMarket, force = false, settlementPrice = 0): Promise<number> {
   await ensurePredictTables(env);
   const rows = await env.DB.prepare(`SELECT * FROM predict_rounds WHERE market = ? AND status NOT IN ('refunding','refunded') AND (status != 'settled' OR id IN (SELECT round_id FROM predict_bets WHERE status IN ('active', 'settling_payment'))) AND (datetime(ends_at) <= datetime('now') OR ? = 1) ORDER BY datetime(ends_at) ASC LIMIT 10`).bind(market, force ? 1 : 0).all<RoundRow>();
   let settled = 0;
   for (const round of rows.results || []) {
     if (!force && Date.parse(round.ends_at) > Date.now()) continue;
-    await settleRound(env, round);
+    await settleRound(env, round, settlementPrice);
     await publishPredictRoundRealtimeObserved(env, market, round.id);
     settled += 1;
   }
   if (settled > 0) await publishPredictOpsRealtime(env).catch(() => undefined);
   return settled;
 }
-async function settleRound(env: Env, round: RoundRow): Promise<void> {
+async function settleRound(env: Env, round: RoundRow, settlementPrice = 0): Promise<void> {
   const fresh = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id = ?').bind(cleanDbText(round.id, 'Prediction round is not ready')).first<RoundRow>();
   if (!fresh) return;
   const freshId = cleanDbText(fresh.id, 'Prediction round is not ready');
@@ -275,7 +276,7 @@ async function settleRound(env: Env, round: RoundRow): Promise<void> {
   let endPrice = fresh.end_price == null ? 0 : Number(fresh.end_price);
   let result: RoundResult = fresh.result === 'up' || fresh.result === 'down' || fresh.result === 'draw' ? fresh.result : null;
   if (fresh.status === 'open') {
-    const candidateEndPrice = endPrice > 0 ? endPrice : (market === 'bitcoin' ? await fetchPrice(market) : await fetchMonthlyBoundaryPrice(market, Date.parse(fresh.ends_at), 'end'));
+    const candidateEndPrice = endPrice > 0 ? endPrice : (market === 'bitcoin' ? (Number(settlementPrice) > 0 ? Number(settlementPrice) : await fetchPrice(market)) : await fetchMonthlyBoundaryPrice(market, Date.parse(fresh.ends_at), 'end'));
     const candidateResult: RoundResult = candidateEndPrice > Number(fresh.start_price) ? 'up' : candidateEndPrice < Number(fresh.start_price) ? 'down' : 'draw';
     const lock = await env.DB.prepare(`UPDATE predict_rounds SET status = 'settling', end_price = ?, result = ? WHERE id = ? AND status = 'open'`).bind(candidateEndPrice, candidateResult, freshId).run();
     if ((lock.meta?.changes || 0) > 0) {

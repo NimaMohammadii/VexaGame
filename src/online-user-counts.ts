@@ -46,13 +46,8 @@ function defaultOnlineCountConfig(): OnlineCountConfig {
   return { ranges, adjustments };
 }
 
-function defaultCountFor(id: string): OnlineCountRange {
-  const base = [180, 360];
-  const hash = id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const offset = hash % 45;
-  const min = Math.max(0, base[0] + offset);
-  const max = Math.max(min, base[1] + offset);
-  return { min, max };
+function defaultCountFor(_id: string): OnlineCountRange {
+  return { min: 0, max: 0 };
 }
 
 async function readConfig(env: Env): Promise<unknown | null> {

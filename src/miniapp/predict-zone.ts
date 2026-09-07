@@ -393,7 +393,7 @@ export const PREDICT_ZONE_SCRIPT = `
       if(!stream)return;
       try{
         var socket=new WebSocket(stream);ws=socket;
-        socket.onopen=function(){if(my!==seq||id!==market||ws!==socket)return;if(usePolymarket){socket.send(JSON.stringify({action:'subscribe',subscriptions:[{topic:'crypto_prices_twap_thirty',type:'update',filters:'{\"symbol\":\"btc/usd\"}'}]}));feedHeartbeat=setInterval(function(){if(ws===socket&&socket.readyState===1)try{socket.send('PING')}catch(e){}},5000)}armFeedWatchdog(my,id,socket)};
+        socket.onopen=function(){if(my!==seq||id!==market||ws!==socket)return;if(usePolymarket){socket.send(JSON.stringify({action:'subscribe',subscriptions:[{topic:'crypto_prices_twap_sixty',type:'update',filters:'{\"symbol\":\"btc/usd\"}'}]}));feedHeartbeat=setInterval(function(){if(ws===socket&&socket.readyState===1)try{socket.send('PING')}catch(e){}},5000)}armFeedWatchdog(my,id,socket)};
         socket.onmessage=function(e){if(my!==seq||id!==market||ws!==socket)return;try{var j=JSON.parse(e.data),value=usePolymarket&&j&&j.payload?j.payload.value:(j&&j.p);if(value!==undefined&&applyPrice(value,my,id)){reconnectDelay=6000;armFeedWatchdog(my,id,socket)}}catch(_){}};
         socket.onclose=function(){if(my!==seq||id!==market||ws!==socket)return;ws=null;clearFeedWatchdog();scheduleReconnect(my,id)};
         socket.onerror=function(){try{socket.close()}catch(e){}};

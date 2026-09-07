@@ -13,42 +13,20 @@ const liveGameLabels: Record<string, string> = {
 const hiddenCardPlayerCounts = new Set(['hilo', 'coinflip']);
 
 type LivePlayerRange = { min: number; max: number };
-type LivePlayerProfile = { offset: number; width: number; phase: number };
-
-const livePlayerProfiles: Record<string, LivePlayerProfile> = {
-  mines: { offset: -36, width: 18, phase: 5 },
-  plinko: { offset: 24, width: 32, phase: 17 },
-  wheel: { offset: 58, width: 24, phase: 41 },
-  dice: { offset: -28, width: 14, phase: 53 },
-  crash: { offset: 72, width: 38, phase: 67 },
-  hilo: { offset: -44, width: 20, phase: 79 },
-  coinflip: { offset: 10, width: -12, phase: 89 },
-  slot: { offset: 46, width: 28, phase: 101 },
-  ghostrun: { offset: 34, width: 18, phase: 109 },
-};
-
 function hashId(id: string): number {
   return id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
-function defaultRangeForGame(id: string): LivePlayerRange {
-  const profile = livePlayerProfiles[id] ?? { offset: 0, width: 0, phase: hashId(id) % 113 };
-  const min = Math.max(40, 180 + profile.offset);
-  return { min, max: Math.max(min + 35, 360 + profile.offset + profile.width) };
-}
-
-function rangedLivePlayers(id: string): number {
-  const range = defaultRangeForGame(id);
-  const width = range.max - range.min + 1;
-  return range.min + (hashId(id) * 13 + (livePlayerProfiles[id]?.phase ?? 0) * 7) % width;
+function defaultRangeForGame(_id: string): LivePlayerRange {
+  return { min: 0, max: 0 };
 }
 
 export function shouldShowLivePlayersOnCard(id: string): boolean {
   return !hiddenCardPlayerCounts.has(id);
 }
 
-export function livePlayersSeed(id: string): number {
-  return rangedLivePlayers(id);
+export function livePlayersSeed(_id: string): string {
+  return '';
 }
 
 export const GAME_LIVE_COUNT_STYLES = `
@@ -142,6 +120,7 @@ export const GAME_LIVE_COUNT_SCRIPT = `
   var adjustments={};
   var realCounts={};
   var counts={};
+  var ready=false;
   function activeGame(){var root=document.querySelector('.view.active');var id=root&&root.id||'';return games[id]?id:''}
   function isPlayZoneActive(){var root=document.getElementById('playzone');return !!(root&&root.classList.contains('active')&&!document.hidden)}
   function rangeValue(id){var range=ranges[id]||{min:0,max:0};var min=Math.max(0,Math.floor(Number(range.min)||0)),max=Math.max(min,Math.floor(Number(range.max)||0));if(max===min)return min;return min+((${JSON.stringify(Object.fromEntries(Object.keys(liveGameLabels).map((id) => [id, hashId(id)])))}[id]||0)*13%(max-min+1))}
@@ -151,14 +130,14 @@ export const GAME_LIVE_COUNT_SCRIPT = `
   function badges(title){return Array.prototype.slice.call(title.querySelectorAll('[data-game-online-badge],[data-dice-online-badge]'))}
   function stripBadges(title,keep){badges(title).forEach(function(node){if(node!==keep)node.remove()})}
   function titleText(title){return String(title.childNodes[0]&&title.childNodes[0].textContent||title.textContent||'').trim()}
-  function renderBadge(){var title=document.getElementById('brandTitle');if(!title)return;var id=activeGame();if(!id){stripBadges(title);return}if(titleText(title)!==games[id]){stripBadges(title);return}var n=count(id),badge=title.querySelector('[data-game-online-badge="'+id+'"]');stripBadges(title,badge);if(!badge){badge=document.createElement('span');badge.className='game-online-badge '+id+'-online-badge';badge.setAttribute('data-game-online-badge',id);badge.appendChild(document.createElement('i'));badge.appendChild(document.createElement('b'));title.appendChild(badge)}badge.setAttribute('aria-label',n+' live online');var b=badge.querySelector('b');if(b)b.textContent=String(n)}
+  function renderBadge(){var title=document.getElementById('brandTitle');if(!title)return;var id=activeGame();if(!ready||!id){stripBadges(title);return}if(titleText(title)!==games[id]){stripBadges(title);return}var n=count(id),badge=title.querySelector('[data-game-online-badge="'+id+'"]');stripBadges(title,badge);if(!badge){badge=document.createElement('span');badge.className='game-online-badge '+id+'-online-badge';badge.setAttribute('data-game-online-badge',id);badge.appendChild(document.createElement('i'));badge.appendChild(document.createElement('b'));title.appendChild(badge)}badge.setAttribute('aria-label',n+' live online');var b=badge.querySelector('b');if(b)b.textContent=String(n)}
   function setCount(id,value){counts[id]=Math.max(0,Math.floor(Number(value)||0));cardNodes(id).forEach(function(el){if(el.textContent!==String(counts[id])){el.classList.add('is-counting');el.textContent=String(counts[id]);setTimeout(function(){el.classList.remove('is-counting')},180)}});renderBadge();return counts[id]}
-  function refresh(){Object.keys(games).forEach(function(id){setCount(id,count(id))});renderBadge()}
-  function apply(payload){if(!payload||!payload.config)return;ranges=payload.config.ranges||ranges;adjustments=payload.config.adjustments||{};realCounts=payload.counts||{};refresh()}
+  function refresh(){if(!ready)return;Object.keys(games).forEach(function(id){setCount(id,count(id))});renderBadge()}
+  function apply(payload){if(!payload||!payload.config)return;ranges=payload.config.ranges||{};adjustments=payload.config.adjustments||{};realCounts=payload.counts||{};ready=true;refresh()}
   window.VexaLiveGameCounts={get:count,setCount:setCount,sync:function(){refresh();return Promise.resolve(true)},refresh:refresh,renderBadge:renderBadge};
   window.addEventListener('vexa:game-online',function(event){apply(event&&event.detail)});
   window.addEventListener('vexa:view-changed',renderBadge);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
-  refresh();
+  Object.keys(games).forEach(function(id){cardNodes(id).forEach(function(el){el.textContent=''})});
 })();
 `;

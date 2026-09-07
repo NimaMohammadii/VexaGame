@@ -13,13 +13,18 @@ import type { Env } from './types';
 
 export type PredictProvider = 'vexa' | 'polymarket';
 export type PolymarketSide = 'up' | 'down';
+export type PolymarketBetStatus = 'reserved' | 'prepared' | 'matched' | 'failed';
 
 const PROVIDER_KEY = 'admin:predict-provider:v1';
 const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 const CLOB_BASE = 'https://clob.polymarket.com';
 const BRIDGE_BASE = 'https://bridge.polymarket.com';
+const GEOBLOCK_URL = 'https://polymarket.com/api/geoblock';
 const POLYMARKET_ROUND_MS = 5 * 60 * 1000;
 const PUSD_SCALE = 1_000_000;
+const RTDS_URL = 'wss://ws-live-data.polymarket.com';
+
+export const POLYMARKET_RTDS_URL = RTDS_URL;
 
 type PolymarketRuntimeEnv = Env & {
   POLYMARKET_BUILDER_API_KEY?: string;
@@ -28,7 +33,7 @@ type PolymarketRuntimeEnv = Env & {
   POLYMARKET_SIGNER_PRIVATE_KEY?: string;
 };
 
-type GammaMarket = Record<string, unknown>;
+type GammaRecord = Record<string, unknown>;
 type RoundProviderRow = { round_id: string; provider: string };
 type PolymarketRoundRow = {
   round_id: string;
@@ -41,6 +46,7 @@ type PolymarketRoundRow = {
   rtds_topic: string;
   redeemed_at: string | null;
   redeem_status: string | null;
+  updated_at: string | null;
 };
 type PolymarketBetRow = {
   bet_id: string;
@@ -54,6 +60,7 @@ type PolymarketBetRow = {
   order_id: string | null;
   response_json: string | null;
 };
+type GeoBlockState = { blocked: boolean; country: string; region: string };
 
 type TradingClient = Awaited<ReturnType<typeof createSecureClient>>;
 let tradingClientPromise: Promise<TradingClient> | null = null;
@@ -70,9 +77,12 @@ export type PolymarketMarketView = {
   downPrice: number | null;
   upLiquidityUsd: number;
   downLiquidityUsd: number;
+  startPrice: number | null;
+  finalPrice: number | null;
   resolutionSource: string;
   rtdsTopic: string;
   rtdsSymbol: 'btc/usd';
+  rtdsUrl: string;
 };
 
 export type PolymarketExecution = {
@@ -93,6 +103,9 @@ export type PolymarketAccountHealth = {
   walletType: number | null;
   balanceUsd: number | null;
   bridgeEvmAddress: string | null;
+  geoblocked: boolean | null;
+  country: string | null;
+  region: string | null;
 };
 
 export type PredictProviderState = {
@@ -198,6 +211,7 @@ export function polymarketSecretsConfigured(env: Env): boolean {
 }
 
 export async function preparePolymarketForActivation(env: Env): Promise<PolymarketAccountHealth> {
+  const geo = await assertPolymarketTradingAllowed();
   const client = await getTradingClient(env);
   await ensureTradingApprovals(client);
   const [balance, bridgeEvmAddress] = await Promise.all([
@@ -211,6 +225,9 @@ export async function preparePolymarketForActivation(env: Env): Promise<Polymark
     walletType: Number(client.account.walletType),
     balanceUsd: balance,
     bridgeEvmAddress,
+    geoblocked: false,
+    country: geo.country || null,
+    region: geo.region || null,
   };
   if (!(balance > 0)) {
     const destination = bridgeEvmAddress || client.account.wallet;
@@ -220,11 +237,12 @@ export async function preparePolymarketForActivation(env: Env): Promise<Polymark
 }
 
 export async function getPolymarketAccountHealth(env: Env): Promise<PolymarketAccountHealth> {
-  if (!polymarketSecretsConfigured(env)) return { configured: false, walletAddress: null, signerAddress: null, walletType: null, balanceUsd: null, bridgeEvmAddress: null };
+  if (!polymarketSecretsConfigured(env)) return emptyAccountHealth();
   const client = await getTradingClient(env);
-  const [balance, bridgeEvmAddress] = await Promise.all([
+  const [balance, bridgeEvmAddress, geo] = await Promise.all([
     readCollateralBalanceUsd(client).catch(() => null),
     getBridgeEvmAddress(client.account.wallet).catch(() => null),
+    readPolymarketGeoblock().catch(() => null),
   ]);
   return {
     configured: true,
@@ -233,6 +251,9 @@ export async function getPolymarketAccountHealth(env: Env): Promise<PolymarketAc
     walletType: Number(client.account.walletType),
     balanceUsd: balance,
     bridgeEvmAddress,
+    geoblocked: geo ? geo.blocked : null,
+    country: geo?.country || null,
+    region: geo?.region || null,
   };
 }
 
@@ -240,12 +261,9 @@ export async function loadPolymarketBitcoinMarket(startMs: number): Promise<Poly
   const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
   const slug = `btc-updown-5m-${Math.floor(normalizedStart / 1000)}`;
-  const market = await fetchGammaMarketBySlug(slug);
-  const parsed = parseGammaBitcoinMarket(market, slug);
-  const [upBook, downBook] = await Promise.all([
-    fetchBook(parsed.upTokenId),
-    fetchBook(parsed.downTokenId),
-  ]);
+  const [market, event] = await Promise.all([fetchGammaMarketBySlug(slug), fetchGammaEventBySlug(slug)]);
+  const parsed = parseGammaBitcoinMarket(market, event, slug);
+  const [upBook, downBook] = await Promise.all([fetchBook(parsed.upTokenId), fetchBook(parsed.downTokenId)]);
   return {
     ...parsed,
     upPrice: upBook.bestAsk ?? parsed.upPrice,
@@ -282,9 +300,13 @@ export async function getPolymarketRoundMarket(env: Env, roundId: string, refres
     await persistPolymarketRound(env, roundId, fresh);
     return fresh;
   }
-  const market = await fetchGammaMarketBySlug(row.slug);
-  const parsed = parseGammaBitcoinMarket(market, row.slug);
-  const [upBook, downBook] = await Promise.all([fetchBook(row.up_token_id), fetchBook(row.down_token_id)]);
+  const [market, event, upBook, downBook] = await Promise.all([
+    fetchGammaMarketBySlug(row.slug),
+    fetchGammaEventBySlug(row.slug),
+    fetchBook(row.up_token_id),
+    fetchBook(row.down_token_id),
+  ]);
+  const parsed = parseGammaBitcoinMarket(market, event, row.slug);
   return {
     ...parsed,
     upTokenId: row.up_token_id,
@@ -304,9 +326,9 @@ export async function resolvePolymarketBitcoinRound(env: Env, roundId: string): 
   await ensurePredictProviderTables(env);
   const row = await env.DB.prepare('SELECT * FROM predict_polymarket_rounds WHERE round_id = ?').bind(roundId).first<PolymarketRoundRow>();
   if (!row) throw new Error('Polymarket round metadata is unavailable');
-  const market = await fetchGammaMarketBySlug(row.slug);
+  const [market, event] = await Promise.all([fetchGammaMarketBySlug(row.slug), fetchGammaEventBySlug(row.slug)]);
   const outcomes = parseStringArray(market.outcomes);
-  const prices = parseNumberArray(market.outcomePrices);
+  const prices = parseNumberArray(market.outcomePrices ?? market.outcome_prices);
   let result: PolymarketSide | null = null;
   for (let i = 0; i < Math.min(outcomes.length, prices.length); i += 1) {
     const label = outcomes[i].trim().toLowerCase();
@@ -316,25 +338,24 @@ export async function resolvePolymarketBitcoinRound(env: Env, roundId: string): 
     if (label === 'down' || label === 'no') result = 'down';
   }
   if (!result) {
-    const winner = String(market.winner || market.resolvedOutcome || market.result || '').trim().toLowerCase();
+    const winner = String(market.winner || market.resolvedOutcome || market.result || event.winner || event.resolvedOutcome || event.result || '').trim().toLowerCase();
     if (winner === 'up' || winner === 'yes') result = 'up';
     else if (winner === 'down' || winner === 'no') result = 'down';
   }
   if (!result) return null;
-  return { result, finalPrice: findFinitePositive(market.finalPrice, market.final_price, market.resolutionPrice, market.resolution_price) };
+  return { result, finalPrice: metadataPrice(event, market, 'final') };
 }
 
 export async function executePolymarketBitcoinBet(env: Env, input: { betId: string; roundId: string; side: PolymarketSide; stakeUsd: number }): Promise<PolymarketExecution> {
   const requestedUsd = roundMoney(input.stakeUsd);
   if (!(requestedUsd > 0)) throw new Error('A USD conversion is required for Polymarket predictions');
   await ensurePredictProviderTables(env);
+  await assertPolymarketTradingAllowed();
   const market = await getPolymarketRoundMarket(env, input.roundId, true);
   const tokenId = input.side === 'down' ? market.downTokenId : market.upTokenId;
   let row = await env.DB.prepare('SELECT * FROM predict_polymarket_bets WHERE bet_id = ?').bind(input.betId).first<PolymarketBetRow>();
   if (row) {
-    if (row.round_id !== input.roundId || row.token_id !== tokenId || Math.abs(Number(row.requested_usd) - requestedUsd) > 0.000001) {
-      throw new Error('Polymarket prediction reservation does not match the original request');
-    }
+    if (row.round_id !== input.roundId || row.token_id !== tokenId || Math.abs(Number(row.requested_usd) - requestedUsd) > 0.000001) throw new Error('Polymarket prediction reservation does not match the original request');
     if (row.status === 'matched') return executionFromRow(row);
     if (row.status === 'failed') throw new Error('The Polymarket order for this prediction already failed');
   } else {
@@ -352,18 +373,25 @@ export async function executePolymarketBitcoinBet(env: Env, input: { betId: stri
   if (row.signed_order_json) {
     signedOrder = JSON.parse(row.signed_order_json) as SignedOrder;
   } else {
-    signedOrder = await client.createMarketOrder({
-      assetId: tokenId,
-      side: OrderSide.BUY,
-      amount: requestedUsd.toFixed(6),
-      maxSpend: requestedUsd.toFixed(6),
-      orderType: OrderType.FOK,
-    });
+    try {
+      signedOrder = await client.createMarketOrder({
+        assetId: tokenId,
+        side: OrderSide.BUY,
+        amount: requestedUsd.toFixed(6),
+        maxSpend: requestedUsd.toFixed(6),
+        orderType: OrderType.FOK,
+      });
+    } catch (error) {
+      await markPolymarketBetFailed(env, input.betId);
+      throw error;
+    }
     const signedJson = JSON.stringify(signedOrder);
     await env.DB.prepare(`UPDATE predict_polymarket_bets SET signed_order_json = ?, status = 'prepared', updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status IN ('reserved','prepared')`)
       .bind(signedJson, input.betId).run();
   }
 
+  // Important: a transport failure after this point is intentionally not marked failed.
+  // The exact signed FOK order is persisted and can be retried without creating a second order.
   const response = await client.postOrder(signedOrder);
   if (!response.ok) {
     await env.DB.prepare(`UPDATE predict_polymarket_bets SET status = 'failed', response_json = ?, updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status != 'matched'`)
@@ -377,7 +405,10 @@ export async function executePolymarketBitcoinBet(env: Env, input: { betId: stri
   }
   const filledUsd = cleanAmount(response.makingAmount);
   const shares = cleanAmount(response.takingAmount);
-  if (!(filledUsd > 0) || !(shares > 0)) throw new Error('Polymarket returned an invalid matched order amount');
+  if (!(filledUsd > 0) || !(shares > 0)) {
+    await markPolymarketBetFailed(env, input.betId);
+    throw new Error('Polymarket returned an invalid matched order amount');
+  }
   await env.DB.prepare(`UPDATE predict_polymarket_bets SET status = 'matched', filled_usd = ?, shares = ?, order_id = ?, response_json = ?, updated_at = CURRENT_TIMESTAMP WHERE bet_id = ?`)
     .bind(filledUsd, shares, response.orderId, JSON.stringify(response), input.betId).run();
   const matched = await env.DB.prepare('SELECT * FROM predict_polymarket_bets WHERE bet_id = ?').bind(input.betId).first<PolymarketBetRow>();
@@ -388,6 +419,14 @@ export async function executePolymarketBitcoinBet(env: Env, input: { betId: stri
 export async function markPolymarketBetFailed(env: Env, betId: string): Promise<void> {
   await ensurePredictProviderTables(env);
   await env.DB.prepare(`UPDATE predict_polymarket_bets SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status NOT IN ('matched','failed')`).bind(betId).run();
+}
+
+export async function getPolymarketBetStatus(env: Env, betId: string): Promise<PolymarketBetStatus | null> {
+  await ensurePredictProviderTables(env);
+  const row = await env.DB.prepare('SELECT status FROM predict_polymarket_bets WHERE bet_id = ?').bind(betId).first<{ status: string }>();
+  const value = String(row?.status || '').toLowerCase();
+  if (value === 'reserved' || value === 'prepared' || value === 'matched' || value === 'failed') return value;
+  return null;
 }
 
 export async function getPolymarketBetExecution(env: Env, betId: string): Promise<PolymarketExecution | null> {
@@ -402,7 +441,9 @@ export async function redeemPolymarketBitcoinRound(env: Env, roundId: string): P
   if (!row) throw new Error('Polymarket round metadata is unavailable');
   if (row.redeemed_at) return true;
   const locked = await env.DB.prepare(`UPDATE predict_polymarket_rounds SET redeem_status = 'redeeming', updated_at = CURRENT_TIMESTAMP
-    WHERE round_id = ? AND redeemed_at IS NULL AND (redeem_status IS NULL OR redeem_status = 'failed')`).bind(roundId).run();
+    WHERE round_id = ? AND redeemed_at IS NULL AND (
+      redeem_status IS NULL OR redeem_status = 'failed' OR (redeem_status = 'redeeming' AND datetime(updated_at) <= datetime('now','-2 minutes'))
+    )`).bind(roundId).run();
   if ((locked.meta?.changes || 0) <= 0) return false;
   try {
     const client = await getTradingClient(env);
@@ -469,17 +510,41 @@ async function getBridgeEvmAddress(walletAddress: string): Promise<string | null
   return /^0x[0-9a-f]{40}$/i.test(evm) ? evm : null;
 }
 
-async function fetchGammaMarketBySlug(slug: string): Promise<GammaMarket> {
+async function readPolymarketGeoblock(): Promise<GeoBlockState> {
+  const response = await fetch(GEOBLOCK_URL, { headers: { accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Polymarket geoblock check failed: HTTP ${response.status}`);
+  const data = await response.json() as { blocked?: unknown; country?: unknown; region?: unknown };
+  return { blocked: data.blocked === true, country: String(data.country || '').trim().toUpperCase(), region: String(data.region || '').trim().toUpperCase() };
+}
+
+async function assertPolymarketTradingAllowed(): Promise<GeoBlockState> {
+  const geo = await readPolymarketGeoblock();
+  if (geo.blocked) throw new Error(`Polymarket trading is blocked from the Vexa backend region${geo.country ? ` (${geo.country}${geo.region ? `-${geo.region}` : ''})` : ''}.`);
+  return geo;
+}
+
+async function fetchGammaMarketBySlug(slug: string): Promise<GammaRecord> {
   const response = await fetch(`${GAMMA_BASE}/markets/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`Polymarket Bitcoin market is unavailable: HTTP ${response.status}`);
   const market = await response.json() as unknown;
   if (!market || typeof market !== 'object' || Array.isArray(market)) throw new Error('Polymarket returned invalid Bitcoin market metadata');
-  return market as GammaMarket;
+  return market as GammaRecord;
 }
 
-function parseGammaBitcoinMarket(market: GammaMarket, expectedSlug: string): PolymarketMarketView {
-  const slug = String(market.slug || '').trim();
+async function fetchGammaEventBySlug(slug: string): Promise<GammaRecord> {
+  const response = await fetch(`${GAMMA_BASE}/events/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Polymarket Bitcoin event is unavailable: HTTP ${response.status}`);
+  const event = await response.json() as unknown;
+  if (!event || typeof event !== 'object' || Array.isArray(event)) throw new Error('Polymarket returned invalid Bitcoin event metadata');
+  return event as GammaRecord;
+}
+
+function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expectedSlug: string): PolymarketMarketView {
+  const slug = String(market.slug || event.slug || '').trim();
   if (slug !== expectedSlug || !/^btc-updown-5m-\d{10}$/.test(slug)) throw new Error('Polymarket returned the wrong Bitcoin 5-minute market');
+  if (market.closed === true || market.active === false || market.enableOrderBook === false || market.acceptingOrders === false) throw new Error('Polymarket Bitcoin market is not accepting orders');
+  const secondsDelay = Number(market.secondsDelay ?? market.seconds_delay ?? 0);
+  if (Number.isFinite(secondsDelay) && secondsDelay > 0) throw new Error('Polymarket Bitcoin market uses delayed execution and cannot be used for Vexa Predict');
   const marketId = String(market.id || '').trim();
   const conditionId = String(market.conditionId || market.condition_id || '').trim();
   const outcomes = parseStringArray(market.outcomes);
@@ -492,9 +557,9 @@ function parseGammaBitcoinMarket(market: GammaMarket, expectedSlug: string): Pol
   const upTokenId = String(tokenIds[upIndex] || '').trim();
   const downTokenId = String(tokenIds[downIndex] || '').trim();
   if (!/^\d+$/.test(upTokenId) || !/^\d+$/.test(downTokenId)) throw new Error('Polymarket Bitcoin outcome token IDs are invalid');
-  const resolutionSource = findResolutionSource(market);
-  const sourceText = `${resolutionSource} ${String(market.description || '')}`.toLowerCase();
-  const rtdsTopic = /twap[-_ ]?30s|30[- ]second/.test(sourceText) ? 'crypto_prices_twap_thirty' : /twap[-_ ]?60s|60[- ]second/.test(sourceText) ? 'crypto_prices_twap_sixty' : 'crypto_prices_twap_sixty';
+  const resolutionSource = findResolutionSource(market, event);
+  const sourceText = `${resolutionSource} ${String(market.description || event.description || '')}`.toLowerCase();
+  const rtdsTopic = /twap[-_ ]?30s|30[- ]second/.test(sourceText) ? 'crypto_prices_twap_thirty' : 'crypto_prices_twap_sixty';
   return {
     slug,
     marketId,
@@ -505,9 +570,12 @@ function parseGammaBitcoinMarket(market: GammaMarket, expectedSlug: string): Pol
     downPrice: cleanProbability(prices[downIndex]),
     upLiquidityUsd: 0,
     downLiquidityUsd: 0,
+    startPrice: metadataPrice(event, market, 'start'),
+    finalPrice: metadataPrice(event, market, 'final'),
     resolutionSource,
     rtdsTopic,
     rtdsSymbol: 'btc/usd',
+    rtdsUrl: RTDS_URL,
   };
 }
 
@@ -515,20 +583,58 @@ async function fetchBook(tokenId: string): Promise<{ bestAsk: number | null; ask
   const response = await fetch(`${CLOB_BASE}/book?token_id=${encodeURIComponent(tokenId)}`, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`Polymarket order book is unavailable: HTTP ${response.status}`);
   const data = await response.json() as { asks?: Array<{ price?: unknown; size?: unknown }> };
-  const asks = (Array.isArray(data.asks) ? data.asks : []).map((level) => ({ price: Number(level?.price), size: Number(level?.size) })).filter((level) => Number.isFinite(level.price) && level.price > 0 && level.price < 1 && Number.isFinite(level.size) && level.size > 0).sort((a, b) => a.price - b.price);
+  const asks = (Array.isArray(data.asks) ? data.asks : [])
+    .map((level) => ({ price: Number(level?.price), size: Number(level?.size) }))
+    .filter((level) => Number.isFinite(level.price) && level.price > 0 && level.price < 1 && Number.isFinite(level.size) && level.size > 0)
+    .sort((a, b) => a.price - b.price);
   return { bestAsk: asks.length ? asks[0].price : null, askLiquidityUsd: asks.reduce((sum, level) => sum + level.price * level.size, 0) };
 }
 
-function findResolutionSource(market: GammaMarket): string {
-  const direct = String(market.resolutionSource || market.resolution_source || '').trim();
+function findResolutionSource(market: GammaRecord, event: GammaRecord): string {
+  const direct = String(market.resolutionSource || market.resolution_source || event.resolutionSource || event.resolution_source || '').trim();
   if (direct) return direct;
   const events = Array.isArray(market.events) ? market.events : [];
-  for (const event of events) {
-    if (!event || typeof event !== 'object') continue;
-    const value = String((event as Record<string, unknown>).resolutionSource || (event as Record<string, unknown>).resolution_source || '').trim();
+  for (const item of events) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as GammaRecord;
+    const value = String(record.resolutionSource || record.resolution_source || '').trim();
     if (value) return value;
   }
   return '';
+}
+
+function metadataPrice(primary: GammaRecord, secondary: GammaRecord, kind: 'start' | 'final'): number | null {
+  const keys = kind === 'start' ? ['priceToBeat', 'price_to_beat', 'startPrice', 'start_price'] : ['finalPrice', 'final_price', 'resolutionPrice', 'resolution_price'];
+  const records: GammaRecord[] = [primary, secondary];
+  for (const source of [primary, secondary]) {
+    const metadata = parseRecord(source.eventMetadata ?? source.event_metadata);
+    if (metadata) records.push(metadata);
+    const events = Array.isArray(source.events) ? source.events : [];
+    for (const item of events) {
+      if (!item || typeof item !== 'object') continue;
+      const event = item as GammaRecord;
+      records.push(event);
+      const nested = parseRecord(event.eventMetadata ?? event.event_metadata);
+      if (nested) records.push(nested);
+    }
+  }
+  for (const record of records) {
+    for (const key of keys) {
+      const value = Number(record[key]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+  }
+  return null;
+}
+
+function parseRecord(value: unknown): GammaRecord | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as GammaRecord;
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as GammaRecord : null;
+  } catch { return null; }
 }
 
 function parseStringArray(value: unknown): string[] {
@@ -561,14 +667,6 @@ function roundMoney(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n * 1_000_000) / 1_000_000 : 0;
 }
 
-function findFinitePositive(...values: unknown[]): number | null {
-  for (const value of values) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-}
-
 function slugStartMs(slug: string): number {
   const match = /^btc-updown-5m-(\d{10})$/.exec(slug);
   if (!match) throw new Error('Invalid Polymarket Bitcoin slug');
@@ -587,6 +685,10 @@ function executionFromRow(row: PolymarketBetRow): PolymarketExecution {
     orderId: row.order_id,
     status: 'matched',
   };
+}
+
+function emptyAccountHealth(): PolymarketAccountHealth {
+  return { configured: false, walletAddress: null, signerAddress: null, walletType: null, balanceUsd: null, bridgeEvmAddress: null, geoblocked: null, country: null, region: null };
 }
 
 function normalizeProvider(value: unknown): PredictProvider {

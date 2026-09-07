@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { miniAppHtml } from './miniapp-game';
-import { getOnlineUserCountConfig, ONLINE_COUNT_SECTIONS } from './online-user-counts';
 import { registerFriendGameRoutes } from './game-friend-routes';
 import { registerWheelRoutes } from './wheel-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
@@ -82,9 +81,6 @@ app.get('/assets/Plinko.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env,
 app.get('/assets/plinko-glass/:file', (c) => serveVersionedStaticAsset(c.req.raw, c.env, `/assets/plinko-glass/${c.req.param('file')}`));
 app.get('/app/health', (c) => c.json({ ok: true, page: 'game-miniapp', appUrl: `${PUBLIC_BASE_URL}/app` }));
 app.get('/health', (c) => c.json({ ok: true, service: 'vexa-game', timestamp: new Date().toISOString() }));
-app.get('/app/api/online-user-counts', async (c) =>
-  c.json({ ok: true, sections: ONLINE_COUNT_SECTIONS, ...(await getOnlineUserCountConfig(c.env)) }, 200, { 'cache-control': 'no-store' }),
-);
 app.get('/app/api/level', async (c) => {
   try {
     const initData = c.req.header('x-telegram-init-data') || c.req.query('initData') || '';

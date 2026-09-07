@@ -253,17 +253,7 @@ export const PREDICT_ZONE_SCRIPT = `
     function priceTicks(scale){
       var c=cfg(),maxCount=axisCapacity(),span=scale.max-scale.min,fixedStep=Number(c.axisStep||0),quantum=Math.max(c.step,Math.pow(10,-Math.max(0,c.decimals))),precision=Math.max(0,c.decimals+4),plotPx=axisPixelHeight(),minGap=axisMinGap(),minStepByPixels=span*(minGap/Math.max(1,plotPx)),step,first,v,ticks=[],attempt;
       if(fixedStep>0){
-        step=fixedStep;
-        first=Math.ceil(scale.min/step)*step;ticks=[];
-        for(v=first;v<=scale.max+step*1e-9&&ticks.length<64;v+=step)ticks.push(Number(v.toFixed(precision)));
-        if(ticks.length>maxCount){
-          var target=Number(current||last||((scale.min+scale.max)/2)),best=0,bestDistance=Infinity;
-          for(var i=0;i<=ticks.length-maxCount;i++){
-            var distance=Math.abs((ticks[i]+ticks[i+maxCount-1])/2-target);
-            if(distance<bestDistance){bestDistance=distance;best=i}
-          }
-          ticks=ticks.slice(best,best+maxCount)
-        }
+        for(var i=0;i<maxCount;i++)ticks.push(scale.min+i*fixedStep);
         return ticks;
       }
       step=Math.max(quantum,niceTickStep(span,Math.max(1,maxCount-1)),minStepByPixels);step=Math.ceil((step-1e-12)/quantum)*quantum;
@@ -279,7 +269,7 @@ export const PREDICT_ZONE_SCRIPT = `
       var frameNow=motionNow(),elapsed=scaleFrameAt?Math.min(64,Math.max(0,frameNow-scaleFrameAt)):32;scaleFrameAt=frameNow;
       var c=cfg(),fixedStep=Number(c.axisStep||0),valid=prices.filter(function(v){return isFinite(v)&&v>0}),precision=Math.pow(10,-Math.max(0,c.decimals)),minSpan,min,max,span,mid,pad,targetMin,targetMax,outward,alpha,actualSpan,axisSpan,price,innerMin,innerMax,nextMin;
       if(fixedStep>0){
-        axisSpan=fixedStep*axisCapacity();price=Number(current||last||0);
+        axisSpan=fixedStep*(axisCapacity()-1);price=Number(current||last||0);
         if(!isFinite(price)||price<=0)price=Number(valid[valid.length-1]||1);
         if(!scaleMin||!scaleMax){nextMin=Math.floor((price-axisSpan/2)/fixedStep)*fixedStep;scaleMin=nextMin;scaleMax=nextMin+axisSpan;return{min:scaleMin,max:scaleMax}}
         innerMin=scaleMin+axisSpan*.25;innerMax=scaleMax-axisSpan*.25;

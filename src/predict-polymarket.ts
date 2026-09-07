@@ -1,5 +1,4 @@
 import {
-  AssetType,
   OrderSide,
   OrderType,
   buildHmacSignature,
@@ -8,6 +7,7 @@ import {
   type SignedOrder,
 } from '@polymarket/client';
 import { fetchBalanceAllowance } from '@polymarket/client/actions';
+import { AssetType } from '@polymarket/bindings/clob';
 import { privateKey } from '@polymarket/client/viem';
 import type { Env } from './types';
 

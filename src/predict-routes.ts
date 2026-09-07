@@ -4,6 +4,7 @@ import type { Env } from './types';
 import { publishPredictOpsState, publishPredictRoundState, type PredictOpsRealtimeState } from './section-lock-events';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, publicUserControls, setUserSectionBlocked, type UserSectionBlock } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
+import { executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -78,6 +79,8 @@ app.post('/app/api/predict-bet', async (c) => {
   let stakeNano = 0;
   let market: TradeMarket | null = null;
   let guard: PredictBetGuard | null = null;
+  let debited = false;
+  let polymarketOrderMayExist = false;
   try {
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
     market = normalizeTradeMarket(String(body.market || 'bitcoin'));
@@ -136,11 +139,22 @@ app.post('/app/api/predict-bet', async (c) => {
     }
 
     await debitUserTonBalanceIfEnough(c.env, userId, stakeNano, { kind: 'predict', title: 'Prediction stake', referenceId: betId, referenceType: 'predict_bet', metadata: { market, side, roundId } });
-    const active = await c.env.DB.prepare("UPDATE predict_bets SET status = 'active' WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM predict_rounds WHERE id = ? AND status = 'open')").bind(betId, roundId).run();
+    debited = true;
+    const provider = await getPredictRoundProvider(c.env, roundId);
+    if (provider === 'polymarket') {
+      const stakeUsd = Number(nanoToTon(stakeNano)) * tonUsd;
+      if (!(stakeUsd > 0)) throw new Error('A current Gram/USD price is required for Polymarket predictions');
+      await executePolymarketBitcoinBet(c.env, { betId, roundId, side, stakeUsd });
+      polymarketOrderMayExist = true;
+    }
+    const active = await c.env.DB.prepare("UPDATE predict_bets SET status = 'active' WHERE id = ? AND status = 'pending'").bind(betId).run();
     if ((active.meta?.changes || 0) <= 0) {
       const fresh = await c.env.DB.prepare('SELECT * FROM predict_bets WHERE id = ?').bind(betId).first<BetRow>();
       if (!fresh || fresh.status !== 'active') {
-        await adjustUserTonBalance(c.env, userId, stakeNano, { kind: 'predict', title: 'Prediction stake rollback', referenceId: betId, referenceType: 'predict_bet', metadata: { market, side, roundId, status: 'rollback' } });
+        if (!polymarketOrderMayExist) {
+          await adjustUserTonBalance(c.env, userId, stakeNano, { kind: 'predict', title: 'Prediction stake rollback', referenceId: betId, referenceType: 'predict_bet', metadata: { market, side, roundId, status: 'rollback' } });
+          debited = false;
+        }
         throw new Error('Could not activate prediction');
       }
     }
@@ -154,7 +168,12 @@ app.post('/app/api/predict-bet', async (c) => {
     const feedError = Boolean(market && isPredictPriceFeedError(error));
     if (market && feedError) await notePredictFeedFailure(c.env, market, errorMessage).catch(() => undefined);
     let releasedReservation = false;
-    if (betId) {
+    const polymarketStatus = betId && market === 'bitcoin' ? await getPolymarketBetStatus(c.env, betId).catch(() => null) : null;
+    const preserveReservation = polymarketOrderMayExist || polymarketStatus === 'prepared' || polymarketStatus === 'matched';
+    if (debited && betId && userId && !preserveReservation) {
+      await adjustUserTonBalance(c.env, userId, stakeNano, { kind: 'predict', title: 'Prediction stake rollback', referenceId: betId, referenceType: 'predict_bet', metadata: { market, status: 'polymarket-order-failed' } }).catch(() => undefined);
+    }
+    if (betId && !preserveReservation) {
       const failed = await c.env.DB.prepare("UPDATE predict_bets SET status = 'failed' WHERE id = ? AND status = 'pending'").bind(betId).run().catch(() => null);
       releasedReservation = Number(failed?.meta?.changes || 0) > 0;
     }
@@ -219,10 +238,21 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
     const startsAt = new Date(startMs).toISOString();
     const endsAt = new Date(startMs + ROUND_MS).toISOString();
     const id = `pr_${market}_${startMs}`;
-    const startPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
-    await env.DB.prepare(`INSERT OR IGNORE INTO predict_rounds (id, market, starts_at, ends_at, start_price, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)`).bind(id, market, startsAt, endsAt, startPrice).run();
+    const requestedProvider: PredictProvider = await getRequestedPredictProvider(env);
+    let startPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
+    let polymarketRound: Awaited<ReturnType<typeof loadPolymarketBitcoinMarket>> | null = null;
+    if (requestedProvider === 'polymarket') {
+      polymarketRound = await loadPolymarketBitcoinMarket(startMs);
+      if (!(Number(polymarketRound.startPrice) > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
+      startPrice = Number(polymarketRound.startPrice);
+    }
+    const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO predict_rounds (id, market, starts_at, ends_at, start_price, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)`).bind(id, market, startsAt, endsAt, startPrice).run();
     const row = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id = ?').bind(id).first<RoundRow>();
     if (!row) throw new Error('Could not create prediction round');
+    if ((inserted.meta?.changes || 0) > 0) {
+      const provider = await rememberPredictRoundProvider(env, id, requestedProvider);
+      if (provider === 'polymarket' && polymarketRound) await persistPolymarketRound(env, id, polymarketRound);
+    }
     return row;
   }
 
@@ -273,6 +303,29 @@ async function settleRound(env: Env, round: RoundRow, settlementPrice = 0): Prom
   if (fresh.status === 'refunding' || fresh.status === 'refunded') return;
   if (fresh.status === 'settled' && Number(activeCount?.count || 0) <= 0) return;
   const market = normalizeTradeMarket(fresh.market);
+  const provider = await getPredictRoundProvider(env, freshId);
+  if (provider === 'polymarket') {
+    if (market !== 'bitcoin') throw new Error('Polymarket provider is only available for Bitcoin');
+    const resolved = await resolvePolymarketBitcoinRound(env, freshId);
+    if (!resolved) return;
+    const finalPrice = Number(resolved.finalPrice) > 0 ? Number(resolved.finalPrice) : Number(fresh.start_price);
+    const locked = await env.DB.prepare(`UPDATE predict_rounds SET status = 'settling', end_price = ?, result = ? WHERE id = ? AND status = 'open'`).bind(finalPrice, resolved.result, freshId).run();
+    if ((locked.meta?.changes || 0) <= 0 && fresh.status !== 'settling' && fresh.status !== 'settled') return;
+    const bets = (await env.DB.prepare("SELECT * FROM predict_bets WHERE round_id = ? AND status IN ('active','settling_payment')").bind(freshId).all<BetRow>()).results || [];
+    for (const bet of bets) {
+      if (bet.side !== resolved.result) {
+        await env.DB.prepare("UPDATE predict_bets SET status = 'lost', payout_nano = 0 WHERE id = ? AND status = 'active'").bind(cleanDbText(bet.id, 'Prediction bet is not ready')).run();
+        continue;
+      }
+      const execution = await getPolymarketBetExecution(env, cleanDbText(bet.id, 'Prediction bet is not ready'));
+      const rate = Number(bet.ton_usd_snapshot);
+      if (!execution || !(rate > 0)) throw new Error('Polymarket winning bet is missing its execution or Gram/USD rate');
+      await payBet(env, bet, Math.floor(execution.shares / rate * NANO), 'won');
+    }
+    const remaining = await env.DB.prepare("SELECT COUNT(*) AS count FROM predict_bets WHERE round_id = ? AND status IN ('active', 'settling_payment')").bind(freshId).first<{ count: number }>();
+    if (Number(remaining?.count || 0) <= 0) await env.DB.prepare(`UPDATE predict_rounds SET status = 'settled', end_price = ?, result = ?, settled_at = COALESCE(settled_at, CURRENT_TIMESTAMP) WHERE id = ?`).bind(finalPrice, resolved.result, freshId).run();
+    return;
+  }
   let endPrice = fresh.end_price == null ? 0 : Number(fresh.end_price);
   let result: RoundResult = fresh.result === 'up' || fresh.result === 'down' || fresh.result === 'draw' ? fresh.result : null;
   if (fresh.status === 'open') {

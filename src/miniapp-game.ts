@@ -15,24 +15,33 @@ function safeSingleQuotedJs(value: string): string {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+function replaceRequired(source: string, target: string, replacement: string): string {
+  if (!source.includes(target)) throw new Error(`Mini App boot loader target not found: ${target.slice(0, 72)}`);
+  return source.replace(target, replacement);
+}
+
 function applyBootAssetCachePolicy(shell: string): string {
-  return shell
-    .replace(
-      "jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));",
-      "try{var applyBackgrounds=window.VexaApplySectionBackgrounds;if(typeof applyBackgrounds==='function')Promise.resolve(applyBackgrounds()).catch(function(){})}catch(e){}",
-    )
-    .replace(
-      'var ready=Promise.all([',
-      `var assetsWarmed=false;try{assetsWarmed=localStorage.getItem('${BOOT_ASSET_READY_KEY}')==='1'}catch(e){}var ready=Promise.all([`,
-    )
-    .replace(
-      'progressGate(settle(playHubReady(),10000,false),18),',
-      'progressGate(assetsWarmed?Promise.resolve(true):settle(playHubReady(),10000,false),18),',
-    )
-    .replace(
-      'var gameImagesGate=progressGate(gameImagesReady(),32);',
-      `var gameImagesGate=assetsWarmed?Promise.resolve(true):progressGate(gameImagesReady().then(function(value){try{localStorage.setItem('${BOOT_ASSET_READY_KEY}','1')}catch(e){}return value}),32);`,
-    );
+  shell = replaceRequired(
+    shell,
+    '  var bootImageReady=prepareBootImage();\n  prepareBootAudio();',
+    `  var bootAssetCacheKey='${BOOT_ASSET_READY_KEY}';\n  var assetsWarmed=false;\n  try{var bootUser=window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;if(bootUser&&bootUser.id)bootAssetCacheKey+=':'+String(bootUser.id);assetsWarmed=localStorage.getItem(bootAssetCacheKey)==='1'}catch(e){}\n\n  var bootImageReady=prepareBootImage();\n  prepareBootAudio();`,
+  );
+  shell = replaceRequired(
+    shell,
+    "    jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));",
+    "    if(!assetsWarmed)jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));else try{var applyBackgrounds=window.VexaApplySectionBackgrounds;if(typeof applyBackgrounds==='function')Promise.resolve(applyBackgrounds()).catch(function(){})}catch(e){}",
+  );
+  shell = replaceRequired(
+    shell,
+    '      progressGate(settle(playHubReady(),10000,false),18),',
+    '      progressGate(assetsWarmed?Promise.resolve(true):settle(playHubReady(),10000,false),18),',
+  );
+  shell = replaceRequired(
+    shell,
+    '    var gameImagesGate=progressGate(gameImagesReady(),32);',
+    "    var gameImagesGate=assetsWarmed?Promise.resolve(true):progressGate(gameImagesReady().then(function(value){try{localStorage.setItem(bootAssetCacheKey,'1')}catch(e){}return value}),32);",
+  );
+  return shell;
 }
 
 export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {

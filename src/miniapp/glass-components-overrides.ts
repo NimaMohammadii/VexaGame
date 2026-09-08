@@ -31,7 +31,22 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
   backdrop-filter:blur(10px) saturate(1.18)!important;
   -webkit-backdrop-filter:blur(10px) saturate(1.18)!important;
 }
+#predictzone .predict-zone-countdown{font-size:18px!important}
+#predictzone .predict-zone-question-row{font-size:18px!important}
+#predictzone .predict-zone-round-meta{font-size:9.5px!important}
+#predictzone .predict-zone-live-meta>div>span{font-size:8px!important}
+#predictzone .predict-zone-live-meta strong{font-size:13px!important}
+#predictzone .predict-zone-decision-head{gap:10px!important;margin:0 3px 7px!important;font-size:10px!important;max-height:24px!important}
+#predictzone .predict-zone-decision-head strong{font-size:10px!important}
+#predictzone .predict-zone-actions{gap:8px!important;max-height:38px!important}
+#predictzone .predict-zone-choice{height:38px!important;padding:0 12px!important;font-size:12px!important}
+#predictzone .predict-zone-choice-symbol{width:17px!important;height:17px!important;font-size:16px!important}
 #predictzone .predict-zone-result-strip{
   margin:-8px 0 12px!important;
+}
+@media(max-width:380px){
+  #predictzone .predict-zone-countdown{font-size:18px!important}
+  #predictzone .predict-zone-question-row{font-size:17px!important}
+  #predictzone .predict-zone-live-meta strong{font-size:12px!important}
 }
 `;

@@ -47,13 +47,13 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
 #predictzone .predict-zone-history-card{height:28px!important}
 #predictzone .predict-zone-bet-presets button,
 #predictzone .predict-zone-bet-submit{
-  height:28px!important;
+  height:32px!important;
   padding:0 14px!important;
   background:#000!important;
   font-size:13px!important;
 }
 #predictzone .predict-zone-glass-card.bet-mode .predict-zone-bet-stage{
-  transform:translate3d(0,-27px,0)!important;
+  transform:translate3d(0,-32px,0)!important;
 }
 @media(max-width:380px){
   #predictzone .predict-zone-countdown{font-size:18px!important}

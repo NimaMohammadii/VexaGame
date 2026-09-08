@@ -77,7 +77,13 @@ app.get('/app', async (c) => {
     nft: paymentUrl('nft', nftImage),
   }));
 });
+app.get('/assets/Home.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Home.PNG'));
+app.get('/assets/Playhub.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Playhub.PNG'));
+app.get('/assets/Mines.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Mines.PNG'));
 app.get('/assets/Crash.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Crash.PNG'));
+app.get('/assets/Slotbackground.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Slotbackground.PNG'));
+app.get('/assets/Wheel.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Wheel.PNG'));
+app.get('/assets/Dice.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Dice.PNG'));
 app.get('/assets/Rocket3D.glb', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Rocket3D.glb'));
 app.get('/assets/Plinko.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Plinko.PNG'));
 app.get('/assets/plinko-glass/:file', (c) => serveVersionedStaticAsset(c.req.raw, c.env, `/assets/plinko-glass/${c.req.param('file')}`));

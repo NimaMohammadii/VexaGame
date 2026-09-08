@@ -39,11 +39,6 @@ export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMet
   }
 
   const headExtras: string[] = [];
-  const paymentPreloads = Array.from(new Set([starsUrl, gramUrl, usdtUrl, nftUrl].filter(Boolean)));
-  paymentPreloads.forEach((url) => {
-    if (url) headExtras.push(`<link rel="preload" as="image" href="${url}">`);
-  });
-
   headExtras.push(`<script>(function(){if(!document.documentElement.classList.contains('vexa-web'))return;var w=Number(screen&&screen.width)||innerWidth||0;var h=Number(screen&&screen.height)||innerHeight||0;if(Math.min(w,h)>=600)document.documentElement.classList.add('vexa-web-large')})()</script>`);
   headExtras.push(`<style>
     .vexa-large-web-gate{display:none}

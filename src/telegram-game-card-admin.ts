@@ -17,7 +17,7 @@ type Keyboard = Button[][];
 type UploadSource = { fileId: string; size?: number; type: string; via: 'photo' | 'document' | 'audio' };
 type MainMenuMediaSource = { fileId: string; size?: number; type: 'photo' | 'video' };
 type AudioGame = 'slot' | 'dice' | 'wallet-credit' | 'loading';
-type PaymentMethod = 'stars' | 'gram' | 'nft';
+type PaymentMethod = 'stars' | 'gram' | 'usdt' | 'nft';
 type PredictAsset = 'logo';
 type PredictMarket = 'bitcoin' | 'gold' | 'oil';
 
@@ -65,7 +65,7 @@ const SLOT_SYMBOLS = [
   ['watermelon', '🍉 هندوانه'], ['diamond', '💎 الماس'], ['gold', '⭐ طلایی'], ['lucky7', '7️⃣ عدد ۷'],
 ] as const;
 const PAYMENT_METHODS = [
-  ['stars', '⭐ Stars'], ['gram', '💎 Gram'], ['nft', '🖼 NFT'],
+  ['stars', '⭐ Stars'], ['gram', '💎 Gram'], ['usdt', '💵 USDT'], ['nft', '🖼 NFT'],
 ] as const;
 const PREDICT_MARKETS = [
   ['bitcoin', 'Bitcoin'], ['gold', 'Gold'], ['oil', 'Oil'],
@@ -597,7 +597,7 @@ async function sendHomePromoMenu(env: Env, token: string, chatId: number, messag
 async function sendPaymentMethodMenu(env: Env, token: string, chatId: number, messageId?: number): Promise<void> {
   const present = await Promise.all(PAYMENT_METHODS.map(([method]) => env.ASSETS.head(paymentMethodKey(method)).then(Boolean).catch(() => false)));
   const buttons = PAYMENT_METHODS.map(([method, title], index) => ({ text: `${present[index] ? '✅ ' : ''}${title}`, callback_data: `botadmin:paymentmethod:${method}` }));
-  await upsert(token, chatId, messageId, '💳 تصاویر روش پرداخت\n\nStars، Gram یا NFT را انتخاب کنید و تصویر جدیدش را بفرستید. علامت ✅ یعنی قبلاً برای آن تصویر آپلود شده است.', [
+  await upsert(token, chatId, messageId, '💳 تصاویر روش پرداخت\n\nStars، Gram، USDT یا NFT را انتخاب کنید و تصویر جدیدش را بفرستید. علامت ✅ یعنی قبلاً برای آن تصویر آپلود شده است.', [
     buttons,
     [{ text: '⬅️ تصاویر و ظاهر', callback_data: 'botadmin:imagesmenu' }],
   ]);
@@ -914,7 +914,7 @@ function normalizeTarget(value: unknown): UploadTarget | null {
   const game = normalizeGame(raw);
   return game ? { kind: 'game', game } : null;
 }
-function normalizePaymentMethod(value: unknown): PaymentMethod | null { const clean = String(value || '').replace(/\.png$/i, '').trim().toLowerCase(); return clean === 'stars' || clean === 'gram' || clean === 'nft' ? clean : null; }
+function normalizePaymentMethod(value: unknown): PaymentMethod | null { const clean = String(value || '').replace(/\.png$/i, '').trim().toLowerCase(); return clean === 'stars' || clean === 'gram' || clean === 'usdt' || clean === 'nft' ? clean : null; }
 function paymentMethodLabel(method: PaymentMethod): string { return PAYMENT_METHODS.find(([id]) => id === method)?.[1] || method; }
 function paymentMethodKey(method: PaymentMethod): string { return `payment-method/${method}`; }
 function normalizePredictAsset(value: unknown): PredictAsset | null { return String(value || '').trim().toLowerCase() === 'logo' ? 'logo' : null; }

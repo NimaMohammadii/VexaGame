@@ -273,7 +273,13 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 
   if (message) {
     if (await handleEmojiSend(env, token, message)) return;
-    if (isMenuCommand(message.text)) await deleteCurrentMenuMessage(env, token, message.chat.id).catch((error) => console.warn('Could not clear the previous bot menu', error));
+    const menuCommand = isMenuCommand(message.text);
+    const previousMenuMessageId = menuCommand
+      ? await getTelegramMenuMessageId(env, message.chat.id).catch((error) => {
+        console.warn('Could not read the previous bot menu', error);
+        return undefined;
+      })
+      : undefined;
     const adminCommand = isAdminCommand(message.text);
     const adminHandled = await handleBotAdminMessage(env, token, message, telegram as TelegramApi);
     if (adminHandled) return;
@@ -288,14 +294,16 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 
     if (isRegionCommand(message.text)) {
       await deleteIncomingMessage(token, message.chat.id, message.message_id);
-      await sendUserRegionMenu(env, token, message.chat.id, message.from?.id ?? message.chat.id);
+      await sendUserRegionMenu(env, token, message.chat.id, message.from?.id ?? message.chat.id, null);
+      await deletePreviousMenuMessage(token, message.chat.id, previousMenuMessageId);
       return;
     }
 
     if (!/^\/start(?:@[-_a-z0-9]+)?(?:\s+.*)?$/i.test(String(message.text || '').trim())) {
       await deleteIncomingMessage(token, message.chat.id, message.message_id);
     }
-    await sendGameHome(env, token, message.chat.id, undefined, telegramLanguageCode(message.from));
+    await sendGameHome(env, token, message.chat.id, menuCommand ? null : undefined, telegramLanguageCode(message.from));
+    if (menuCommand) await deletePreviousMenuMessage(token, message.chat.id, previousMenuMessageId);
   }
 }
 
@@ -332,6 +340,10 @@ function isMenuCommand(text: string | undefined): boolean {
 
 async function deleteCurrentMenuMessage(env: Env, token: string, chatId: number): Promise<void> {
   const messageId = await getTelegramMenuMessageId(env, chatId);
+  await deletePreviousMenuMessage(token, chatId, messageId);
+}
+
+async function deletePreviousMenuMessage(token: string, chatId: number, messageId: number | undefined): Promise<void> {
   if (messageId) await deleteIncomingMessage(token, chatId, messageId);
 }
 
@@ -355,7 +367,7 @@ async function handleUserRegionCallback(env: Env, token: string, q: NonNullable<
   return true;
 }
 
-async function sendUserRegionMenu(env: Env, token: string, chatId: number, userId: number, messageId?: number): Promise<void> {
+async function sendUserRegionMenu(env: Env, token: string, chatId: number, userId: number, messageId?: number | null): Promise<void> {
   const preference = await getUserRegionPreference(env, userId);
   const currentCode = preference.countryCode || '';
   const currentLanguage = preference.languageCode ? (VEXA_LOCALE_LABELS as Record<string, string>)[preference.languageCode] : '';
@@ -382,7 +394,7 @@ function isAdminCommand(text: string | undefined): boolean {
   return normalized === 'admin' || normalized === 'ادمین' || /^\/admin(?:@[-_a-z0-9]+)?$/.test(normalized);
 }
 
-async function sendGameHome(env: Env, token: string, chatId: number, existingMessageId?: number, languageCode?: string): Promise<void> {
+async function sendGameHome(env: Env, token: string, chatId: number, existingMessageId?: number | null, languageCode?: string): Promise<void> {
   const locale = localeForTelegramLanguage(languageCode);
   const media = await getMainMenuMedia(env).catch(() => null);
   const reply_markup = {
@@ -452,9 +464,9 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-async function replaceMenuMessage(env: Env, token: string, chatId: number, content: Record<string, unknown>, existingMessageId?: number): Promise<void> {
+async function replaceMenuMessage(env: Env, token: string, chatId: number, content: Record<string, unknown>, existingMessageId?: number | null): Promise<void> {
   let messageId = existingMessageId;
-  if (!messageId) {
+  if (messageId === undefined) {
     messageId = await getTelegramMenuMessageId(env, chatId).catch((error) => {
       console.warn('Could not read the previous bot menu', error);
       return undefined;

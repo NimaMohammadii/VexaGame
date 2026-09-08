@@ -33,6 +33,9 @@ const USER_REGION_OPTIONS = [
   ['MY', '🇲🇾 Malaysia'], ['TW', '🇹🇼 繁體中文'],
 ] as const;
 
+// Change to true to enable /emojisend.
+const EMOJI_SEND_ENABLED = false;
+
 const MAIN_MENU_COPY: Readonly<Record<VexaLocale, MainMenuCopy>> = {
   en: {
     tagline: 'Play, predict, and increase your chances of winning.',
@@ -267,8 +270,8 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
   }
 
   if (message) {
-    if (isMenuCommand(message.text)) await deleteCurrentMenuMessage(env, token, message.chat.id);
     if (await handleEmojiSend(env, token, message)) return;
+    if (isMenuCommand(message.text)) await deleteCurrentMenuMessage(env, token, message.chat.id);
     const adminCommand = isAdminCommand(message.text);
     const adminHandled = await handleBotAdminMessage(env, token, message, telegram as TelegramApi);
     if (adminHandled) return;
@@ -296,15 +299,18 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 
 
 async function handleEmojiSend(env: Env, token: string, message: NonNullable<TelegramUpdate['message']>): Promise<boolean> {
-  const userId = message?.from?.id;
+  const userId = message.from?.id;
   if (!userId) return false;
   const stateKey = `emoji-send:${message.chat.id}:${userId}`;
   if (/^\/emojisend(?:@[-_a-z0-9]+)?$/i.test(String(message.text || '').trim())) {
-    await env.BOT_CACHE.put(stateKey, '1', { expirationTtl: 300 }).catch(() => undefined);
     await deleteIncomingMessage(token, message.chat.id, message.message_id);
+    if (!EMOJI_SEND_ENABLED) return true;
+    await deleteCurrentMenuMessage(env, token, message.chat.id);
+    await env.BOT_CACHE.put(stateKey, '1', { expirationTtl: 300 }).catch(() => undefined);
     await replaceMenuMessage(env, token, message.chat.id, { text: 'حالا ایموجی متحرک را بفرست.' }).catch(() => undefined);
     return true;
   }
+  if (!EMOJI_SEND_ENABLED) return false;
   const waiting = await env.BOT_CACHE.get(stateKey).catch(() => null);
   const customEmojiId = message.entities?.find((entity) => entity.type === 'custom_emoji' && entity.custom_emoji_id)?.custom_emoji_id;
   if (!waiting || !customEmojiId) return false;

@@ -20,7 +20,9 @@ type NetworkConfig = {
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const LOG_BLOCK_CHUNK = 4_000;
-const MAX_OFFSET_MICROS = 9_999;
+const RANDOM_SUFFIX_MIN = 1;
+const RANDOM_SUFFIX_MAX = 99;
+const RANDOM_SUFFIX_STEP_MICROS = 100;
 const CREATE_ATTEMPTS = 12;
 const RPC_TIMEOUT_MS = 7_000;
 
@@ -134,11 +136,11 @@ export async function createUsdtDeposit(
 
   for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt += 1) {
     const expectedMicros = await nextExpectedMicros(env, config.id, requestedMicros);
-    if (expectedMicros > requestedMicros + MAX_OFFSET_MICROS) {
-      throw new Error('Too many active values for this amount. Choose a USDT amount at least 0.01 different.');
+    if (expectedMicros === null) {
+      throw new Error('Too many active deposits for this amount. Try again shortly.');
     }
 
-    const expectedAmountUsdt = microsToUsdt(expectedMicros);
+    const expectedAmountUsdt = exactUsdt4(expectedMicros);
     const amountNano = usdtMicrosToGramNano(expectedMicros, rate.gramUsd);
     if (amountNano < limits.minDepositNano) throw new Error(`Minimum deposit is ${formatTonAmount(limits.minDepositNano)} Gram`);
     if (limits.maxDepositNano && amountNano > limits.maxDepositNano) throw new Error(`Maximum deposit is ${formatTonAmount(limits.maxDepositNano)} Gram`);
@@ -446,13 +448,35 @@ async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Pr
   }
 }
 
-async function nextExpectedMicros(env: Env, network: UsdtNetwork, baseMicros: number): Promise<number> {
-  const row = await env.DB.prepare(`SELECT MAX(expected_amount_micros) AS max_micros FROM usdt_deposits
-    WHERE network=? AND expected_amount_micros>? AND expected_amount_micros<=?`)
-    .bind(network, baseMicros, baseMicros + MAX_OFFSET_MICROS)
-    .first<{ max_micros: number | null }>();
-  const current = Math.floor(Number(row?.max_micros) || baseMicros);
-  return Math.max(baseMicros + 1, current + 1);
+async function nextExpectedMicros(env: Env, network: UsdtNetwork, baseMicros: number): Promise<number | null> {
+  const minMicros = baseMicros + RANDOM_SUFFIX_MIN * RANDOM_SUFFIX_STEP_MICROS;
+  const maxMicros = baseMicros + RANDOM_SUFFIX_MAX * RANDOM_SUFFIX_STEP_MICROS;
+  const rows = await env.DB.prepare(`SELECT expected_amount_micros FROM usdt_deposits
+    WHERE network=? AND status IN ('pending','crediting')
+      AND expected_amount_micros>=? AND expected_amount_micros<=?`)
+    .bind(network, minMicros, maxMicros)
+    .all<{ expected_amount_micros: number }>();
+  const used = new Set((rows.results ?? []).map((row) => Math.floor(Number(row.expected_amount_micros) || 0)));
+  const available: number[] = [];
+  for (let suffix = RANDOM_SUFFIX_MIN; suffix <= RANDOM_SUFFIX_MAX; suffix += 1) {
+    const candidate = baseMicros + suffix * RANDOM_SUFFIX_STEP_MICROS;
+    if (!used.has(candidate)) available.push(candidate);
+  }
+  if (!available.length) return null;
+  return available[secureRandomIndex(available.length)];
+}
+
+function secureRandomIndex(maxExclusive: number): number {
+  if (!Number.isSafeInteger(maxExclusive) || maxExclusive <= 0 || maxExclusive > 4_294_967_296) {
+    throw new Error('Invalid random range');
+  }
+  const range = 4_294_967_296;
+  const limit = Math.floor(range / maxExclusive) * maxExclusive;
+  const values = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(values);
+  } while (values[0] >= limit);
+  return values[0] % maxExclusive;
 }
 
 function usdtMicrosToGramNano(micros: number, gramUsd: number): number {
@@ -471,6 +495,13 @@ function tokenUnits(micros: number, decimals: 6 | 18): string {
 function microsToUsdt(micros: number): string {
   const whole = Math.floor(micros / 1_000_000);
   const fraction = String(micros % 1_000_000).padStart(6, '0');
+  return `${whole}.${fraction}`;
+}
+
+function exactUsdt4(micros: number): string {
+  const units = Math.floor(micros / 100);
+  const whole = Math.floor(units / 10_000);
+  const fraction = String(units % 10_000).padStart(4, '0');
   return `${whole}.${fraction}`;
 }
 
@@ -630,7 +661,10 @@ async function ensureUsdtDepositsTable(env: Env): Promise<void> {
   )`).run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_usdt_deposits_user ON usdt_deposits(user_id, created_at)').run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_usdt_deposits_status ON usdt_deposits(status, network)').run();
-  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposits_expected_amount ON usdt_deposits(network, expected_amount_micros)').run();
+  await env.DB.batch([
+    env.DB.prepare('DROP INDEX IF EXISTS idx_usdt_deposits_expected_amount'),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposits_active_expected_amount ON usdt_deposits(network, expected_amount_micros) WHERE status IN ('pending','crediting')"),
+  ]);
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposits_tx_hash ON usdt_deposits(network, tx_hash) WHERE tx_hash IS NOT NULL').run();
 }
 

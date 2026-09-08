@@ -25,6 +25,8 @@ const RANDOM_SUFFIX_MAX = 99;
 const RANDOM_SUFFIX_STEP_MICROS = 100;
 const CREATE_ATTEMPTS = 12;
 const RPC_TIMEOUT_MS = 7_000;
+const DEPOSIT_TTL_MINUTES = 15;
+const EXPIRED_AMOUNT_REUSE_COOLDOWN_MINUTES = 30;
 
 // Binance-Peg USDT/BSC-USD token used for USDT transfers on BNB Smart Chain.
 const BSC_USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955';
@@ -121,6 +123,7 @@ export async function createUsdtDeposit(
   const requestedMicros = normalizeRequestedUsdtMicros(amountInput);
   await assertUserNotBanned(env, userId);
   await Promise.all([ensureUsdtDepositsTable(env), ensureTonTransactionsTable(env)]);
+  await expireStalePendingUsdtDeposits(env);
 
   const rpcUrl = cleanRpcUrl(config.rpcUrl(env), config.label);
   const treasuryAddress = cleanTreasuryAddress(config.treasuryAddress(env), config.id);
@@ -181,6 +184,18 @@ export async function createUsdtDeposit(
           (id,user_id,kind,title,description,amount_nano,balance_after_nano,status,reference_id,reference_type,metadata_json,created_at)
           VALUES (?,?,'deposit','USDT deposit',?,?,COALESCE((SELECT ton_balance_nano FROM app_users WHERE telegram_user_id=?),0),'pending',?,'usdt_deposit',?,CURRENT_TIMESTAMP)`)
           .bind(transactionId, userId, `${expectedAmountUsdt} USDT (${config.label})`, amountNano, userId, depositId, metadataJson),
+        env.DB.prepare(`UPDATE usdt_deposits
+          SET status='expired', claim_token=NULL, updated_at=CURRENT_TIMESTAMP
+          WHERE user_id=? AND status='pending' AND id<>?`)
+          .bind(userId, depositId),
+        env.DB.prepare(`UPDATE ton_transactions
+          SET status='expired'
+          WHERE user_id=? AND kind='deposit' AND reference_type='usdt_deposit' AND status='pending' AND reference_id<>?
+            AND EXISTS (
+              SELECT 1 FROM usdt_deposits d
+              WHERE d.id=ton_transactions.reference_id AND d.user_id=? AND d.status='expired'
+            )`)
+          .bind(userId, depositId, userId),
       ]);
     } catch (error) {
       if (isExpectedAmountCollision(error)) continue;
@@ -200,7 +215,8 @@ export async function createUsdtDeposit(
 export async function getUsdtDeposit(env: Env, userIdInput: unknown, depositIdInput: unknown): Promise<UsdtDeposit | null> {
   const userId = cleanUserId(userIdInput);
   const depositId = cleanDepositId(depositIdInput);
-  await ensureUsdtDepositsTable(env);
+  await Promise.all([ensureUsdtDepositsTable(env), ensureTonTransactionsTable(env)]);
+  await expireStalePendingUsdtDeposits(env);
   const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
     .bind(depositId, userId)
     .first<UsdtDepositRow>();
@@ -211,6 +227,7 @@ export async function verifyUsdtDeposit(env: Env, userIdInput: unknown, depositI
   const userId = cleanUserId(userIdInput);
   const depositId = cleanDepositId(depositIdInput);
   await Promise.all([ensureUsdtDepositsTable(env), ensureTonTransactionsTable(env)]);
+  await expireStalePendingUsdtDeposits(env);
 
   const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
     .bind(depositId, userId)
@@ -448,11 +465,30 @@ async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Pr
   }
 }
 
+async function expireStalePendingUsdtDeposits(env: Env): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE usdt_deposits
+      SET status='expired', claim_token=NULL, updated_at=CURRENT_TIMESTAMP
+      WHERE status='pending' AND created_at<=datetime('now','-${DEPOSIT_TTL_MINUTES} minutes')`),
+    env.DB.prepare(`UPDATE ton_transactions
+      SET status='expired'
+      WHERE kind='deposit' AND reference_type='usdt_deposit' AND status='pending'
+        AND EXISTS (
+          SELECT 1 FROM usdt_deposits d
+          WHERE d.id=ton_transactions.reference_id AND d.user_id=ton_transactions.user_id AND d.status='expired'
+        )`),
+  ]);
+}
+
 async function nextExpectedMicros(env: Env, network: UsdtNetwork, baseMicros: number): Promise<number | null> {
   const minMicros = baseMicros + RANDOM_SUFFIX_MIN * RANDOM_SUFFIX_STEP_MICROS;
   const maxMicros = baseMicros + RANDOM_SUFFIX_MAX * RANDOM_SUFFIX_STEP_MICROS;
   const rows = await env.DB.prepare(`SELECT expected_amount_micros FROM usdt_deposits
-    WHERE network=? AND status IN ('pending','crediting')
+    WHERE network=?
+      AND (
+        status IN ('pending','crediting')
+        OR (status='expired' AND updated_at>datetime('now','-${EXPIRED_AMOUNT_REUSE_COOLDOWN_MINUTES} minutes'))
+      )
       AND expected_amount_micros>=? AND expected_amount_micros<=?`)
     .bind(network, minMicros, maxMicros)
     .all<{ expected_amount_micros: number }>();

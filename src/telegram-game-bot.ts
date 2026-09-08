@@ -35,6 +35,8 @@ const USER_REGION_OPTIONS = [
 
 // Change to true to enable /emojisend.
 const EMOJI_SEND_ENABLED = false;
+// Telegram currently rejects custom emoji for this bot. Change to true only after the bot has Telegram custom-emoji access.
+const MENU_CUSTOM_EMOJI_ENABLED = false;
 
 const MAIN_MENU_COPY: Readonly<Record<VexaLocale, MainMenuCopy>> = {
   en: {
@@ -366,12 +368,7 @@ async function sendUserRegionMenu(env: Env, token: string, chatId: number, userI
       : `<b>${icon} Region &amp; Language</b>\n\n<b>Current:</b> ${currentCode} · ${currentLanguage}\n\nChoose a region below.`;
     return replaceMenuMessage(env, token, chatId, { text: title, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } }, messageId);
   };
-  try {
-    await send(true);
-  } catch (error) {
-    if (!isCustomEmojiFailure(error)) throw error;
-    await send(false);
-  }
+  await send(MENU_CUSTOM_EMOJI_ENABLED);
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -400,12 +397,7 @@ async function sendGameHome(env: Env, token: string, chatId: number, existingMes
       ? { [media.type]: media.fileId, text, parse_mode: 'HTML', reply_markup }
       : { text, parse_mode: 'HTML', reply_markup }, existingMessageId);
   };
-  try {
-    await send(true);
-  } catch (error) {
-    if (!isCustomEmojiFailure(error)) throw error;
-    await send(false);
-  }
+  await send(MENU_CUSTOM_EMOJI_ENABLED);
 }
 
 function telegramLanguageCode(user: unknown): string | undefined {
@@ -427,7 +419,7 @@ function localeForTelegramLanguage(languageCode: string | undefined): VexaLocale
   return byBase ?? DEFAULT_VEXA_LOCALE;
 }
 
-function mainMenuText(locale: VexaLocale, useCustomEmoji = true): string {
+function mainMenuText(locale: VexaLocale, useCustomEmoji = MENU_CUSTOM_EMOJI_ENABLED): string {
   const copy = MAIN_MENU_COPY[locale] ?? MAIN_MENU_COPY[DEFAULT_VEXA_LOCALE];
   const line = (value: string) => `<b>${escapeHtml(stylizeLatin(value))}</b>`;
   const icon = (id: string, fallback: string) => useCustomEmoji ? `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>` : fallback;
@@ -454,10 +446,6 @@ function stylizeLatin(value: string): string {
     if (code >= 48 && code <= 57) return String.fromCodePoint(0x1D7EC + code - 48);
     return char;
   }).join('');
-}
-
-function isCustomEmojiFailure(error: unknown): boolean {
-  return /custom emoji|emoji.*not allowed|can't parse entities/i.test(error instanceof Error ? error.message : String(error));
 }
 
 function escapeHtml(value: string): string {

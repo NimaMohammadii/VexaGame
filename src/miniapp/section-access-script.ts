@@ -167,7 +167,7 @@ export const SECTION_ACCESS_SCRIPT = `
     if(signature===last)return;
     last=signature;if(lock)render(lock);else remove();
   }
-  function reapply(){expireLocks();applyPredictMarketLocks();renderPredictOps();syncPredictPresence();sendGamePresence();flushPredictRoundSync();return Promise.resolve(cache)}
+  function reapply(){if(!liveSocket)connectLive();expireLocks();applyPredictMarketLocks();renderPredictOps();syncPredictPresence();sendGamePresence();flushPredictRoundSync();return Promise.resolve(cache)}
   document.addEventListener('click',function(event){
     var target=event.target&&event.target.closest&&event.target.closest('#predictzone [data-predict-choice],#predictzone [data-predict-bet-submit],#predictzone [data-predict-bet-preset]');
     if(!target)return;
@@ -178,7 +178,7 @@ export const SECTION_ACCESS_SCRIPT = `
   window.VexaSectionLocks={reload:reapply,refresh:function(){if(liveSocket)try{liveSocket.close()}catch(e){}else connectLive();return Promise.resolve(cache)}};
   window.addEventListener('vexa:predict-round-sync-request',function(event){requestPredictRoundSync(event&&event.detail)});
   window.addEventListener('vexa:section-mounted',function(){queueMicrotask(reapply)});
-  window.addEventListener('vexa:view-changed',function(){queueMicrotask(function(){renderPredictOps();syncPredictPresence();sendGamePresence();flushPredictRoundSync()})});
+  window.addEventListener('vexa:view-changed',function(){queueMicrotask(function(){if(!liveSocket)connectLive();renderPredictOps();syncPredictPresence();sendGamePresence();flushPredictRoundSync()})});
   document.addEventListener('visibilitychange',function(){if(document.hidden){sendPredictPresence(false);sendGamePresence(true);clearTimeout(liveReconnectTimer);clearPredictUserExpiry()}else{refreshPredictUserAccess();schedulePredictUserExpiry();if(!liveSocket)connectLive();else{syncPredictPresence();sendGamePresence();flushPredictRoundSync()}}});
   window.addEventListener('online',function(){refreshPredictUserAccess();if(!liveSocket)connectLive();else{syncPredictPresence();sendGamePresence();flushPredictRoundSync()}});
   window.addEventListener('pagehide',function(){sendPredictPresence(false);sendGamePresence(true)});

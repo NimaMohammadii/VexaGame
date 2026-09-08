@@ -1,8 +1,12 @@
 import type { Env } from './types';
 import { assertUserNotBanned, ensureTonBalanceColumn, getUserControls } from './user-controls';
 import { getFinanceLimits } from './admin-finance-controls';
+import { getStarsGramRate } from './stars-deposits';
 import { ensureTonTransactionsTable } from './ton-transactions';
 import { publishLiveActivity } from './live-activity';
+import { createPublicClient, encodeFunctionData, getAddress, http, isAddress, keccak256, parseAbi } from 'viem';
+import { mnemonicToAccount } from 'viem/accounts';
+import { bsc } from 'viem/chains';
 
 const TON_NANO = 1_000_000_000;
 const MIN_WITHDRAW_NANO = 10 * TON_NANO;
@@ -10,12 +14,28 @@ const MAX_WITHDRAW_NANO = 100 * TON_NANO;
 const DAILY_WITHDRAW_LIMIT_NANO = 100 * TON_NANO;
 const DEFAULT_TON_WITHDRAW_WALLET_ADDRESS = 'UQBM3omem7qMV3hoELAxiFEBRlldbRfRoHGKHobgdq0yUxvs';
 const TONCENTER_BASE = 'https://toncenter.com/api/v2';
+const BSC_CHAIN_ID = 56;
+const BSC_USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955' as const;
+const BSC_USDT_DECIMALS = 18;
+const BSC_USDT_MICRO_SCALE = 1_000_000;
+const BSC_USDT_MICRO_TO_UNITS = 10n ** BigInt(BSC_USDT_DECIMALS - 6);
+const EXPECTED_BSC_WITHDRAW_WALLET = '0x7D53be6a6C16e2C2C93e0bEd57596a3FB4f72c82';
+const BSC_USDT_ABI = parseAbi([
+  'function balanceOf(address account) view returns (uint256)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+]);
+
+export type WithdrawalPayoutMethod = 'gram' | 'usdt-bep20';
 
 type WithdrawRow = {
   id: string;
   user_id: string;
   wallet_address: string;
   amount_nano: number;
+  payout_asset?: string | null;
+  payout_network?: string | null;
+  payout_amount_units?: string | null;
+  payout_rate_usd?: number | null;
   status: string;
   tx_hash?: string | null;
   submission_ref?: string | null;
@@ -34,6 +54,10 @@ export type TonWithdrawal = {
   amountNano: number;
   amountTon: number;
   amountGram: number;
+  payoutAsset?: 'GRAM' | 'USDT';
+  payoutNetwork?: 'TON' | 'BEP20';
+  payoutAmountUsdt?: string | null;
+  payoutRateUsd?: number | null;
   status: string;
   txHash: string | null;
   submissionRef: string | null;
@@ -48,7 +72,8 @@ export type TonWithdrawal = {
 type PreparedPayout = {
   submissionRef: string;
   sourceWallet: string;
-  seqno: number;
+  sequence: number;
+  txHash: string | null;
   sendOnce(): Promise<void>;
 };
 
@@ -62,9 +87,24 @@ type OpenedWithdrawalWallet = {
   }): Promise<void>;
 };
 
-export async function createTonWithdrawal(env: Env, userIdInput: unknown, amountTonInput: unknown, walletInput: unknown): Promise<TonWithdrawal> {
+type PayoutSnapshot = {
+  asset: 'GRAM' | 'USDT';
+  network: 'TON' | 'BEP20';
+  amountUnits: string | null;
+  rateUsd: number | null;
+  amountUsdt: string | null;
+};
+
+export async function createTonWithdrawal(
+  env: Env,
+  userIdInput: unknown,
+  amountTonInput: unknown,
+  walletInput: unknown,
+  payoutMethodInput?: unknown,
+): Promise<TonWithdrawal> {
   const userId = cleanUserId(userIdInput);
-  const wallet = cleanWallet(walletInput);
+  const payoutMethod = cleanPayoutMethod(payoutMethodInput, walletInput);
+  const wallet = cleanWithdrawalWallet(walletInput, payoutMethod);
   const amountNano = tonToNano(amountTonInput);
   await assertUserNotBanned(env, userId);
   const limits = await getFinanceLimits(env);
@@ -81,11 +121,22 @@ export async function createTonWithdrawal(env: Env, userIdInput: unknown, amount
     ensureTonBalanceColumn(env),
     ensureTonTransactionsTable(env),
   ]);
+  const payout = await buildPayoutSnapshot(amountNano, payoutMethod);
 
   const id = 'wd_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
   const transactionId = `finance_withdraw:${id}`;
-  const description = 'Withdrawal request to ' + shortWallet(wallet);
-  const metadataJson = JSON.stringify({ walletAddress: wallet, displayCurrency: 'Gram' });
+  const description = payout.asset === 'USDT'
+    ? `${payout.amountUsdt} USDT (BEP20) to ${shortWallet(wallet)}`
+    : 'Withdrawal request to ' + shortWallet(wallet);
+  const metadataJson = JSON.stringify({
+    walletAddress: wallet,
+    displayCurrency: 'Gram',
+    payoutAsset: payout.asset,
+    payoutNetwork: payout.network,
+    payoutAmountUsdt: payout.amountUsdt,
+    payoutRateUsd: payout.rateUsd,
+  });
+  const title = payout.asset === 'USDT' ? 'USDT withdrawal' : 'Gram withdrawal';
 
   const results = await env.DB.batch([
     env.DB.prepare(`INSERT INTO app_users (telegram_user_id, current_section, ton_balance_nano, last_seen_at, updated_at)
@@ -104,17 +155,17 @@ export async function createTonWithdrawal(env: Env, userIdInput: unknown, amount
         ) + ? <= ?`)
       .bind(amountNano, userId, amountNano, userId, amountNano, DAILY_WITHDRAW_LIMIT_NANO),
     env.DB.prepare(`INSERT INTO ton_withdrawals
-      (id, user_id, wallet_address, amount_nano, status, created_at, updated_at)
-      SELECT ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      (id, user_id, wallet_address, amount_nano, payout_asset, payout_network, payout_amount_units, payout_rate_usd, status, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       WHERE changes() = 1`)
-      .bind(id, userId, wallet, amountNano),
+      .bind(id, userId, wallet, amountNano, payout.asset, payout.network, payout.amountUnits, payout.rateUsd),
     env.DB.prepare(`INSERT INTO ton_transactions
       (id, user_id, kind, title, description, amount_nano, balance_after_nano, status, reference_id, reference_type, metadata_json, created_at)
-      SELECT ?, ?, 'withdraw', 'Gram withdrawal', ?, ?, a.ton_balance_nano, 'pending', ?, 'ton_withdrawal', ?, CURRENT_TIMESTAMP
+      SELECT ?, ?, 'withdraw', ?, ?, ?, a.ton_balance_nano, 'pending', ?, 'ton_withdrawal', ?, CURRENT_TIMESTAMP
       FROM app_users a
       JOIN ton_withdrawals w ON w.id = ? AND w.user_id = a.telegram_user_id
       WHERE a.telegram_user_id = ? AND w.status = 'pending'`)
-      .bind(transactionId, userId, description, -amountNano, id, metadataJson, id, userId),
+      .bind(transactionId, userId, title, description, -amountNano, id, metadataJson, id, userId),
   ]);
 
   const reserved = Number(results[1]?.meta?.changes ?? 0) === 1;
@@ -171,37 +222,36 @@ export async function approveTonWithdrawal(env: Env, withdrawalIdInput: unknown)
     prepared = await prepareWithdrawalPayout(env, row);
   } catch (error) {
     const message = cleanError(error);
-    const metadataJson = JSON.stringify({ walletAddress: row.wallet_address, errorMessage: message, displayCurrency: 'Gram' }).slice(0, 2000);
+    const metadataJson = withdrawalMetadata(row, { errorMessage: message });
     await env.DB.batch([
       env.DB.prepare(`UPDATE ton_withdrawals
         SET status='failed', error_message=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND status IN ('pending','failed')`).bind(message, id),
       env.DB.prepare(`UPDATE ton_transactions
-        SET status='failed', title='Gram withdrawal', description=?, metadata_json=?
+        SET status='failed', title=?, description=?, metadata_json=?
         WHERE reference_type='ton_withdrawal' AND reference_id=? AND kind='withdraw' AND amount_nano<0
           AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND status='failed')`)
-        .bind('Payout preparation failed: ' + message, metadataJson, id, id),
+        .bind(withdrawalTitle(row), 'Payout preparation failed: ' + message, metadataJson, id, id),
     ]);
     throw new Error(message);
   }
 
-  const processingMetadata = JSON.stringify({
-    walletAddress: row.wallet_address,
+  const processingMetadata = withdrawalMetadata(row, {
     sourceWallet: prepared.sourceWallet,
     submissionRef: prepared.submissionRef,
-    seqno: prepared.seqno,
-    displayCurrency: 'Gram',
-  }).slice(0, 2000);
+    sequence: prepared.sequence,
+    txHash: prepared.txHash,
+  });
   const locked = await env.DB.batch([
     env.DB.prepare(`UPDATE ton_withdrawals
-      SET status='processing', submission_ref=?, error_message=NULL,
+      SET status='processing', submission_ref=?, tx_hash=COALESCE(tx_hash, ?), error_message=NULL,
           approved_at=COALESCE(approved_at,CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status IN ('pending','failed')`).bind(prepared.submissionRef, id),
+      WHERE id=? AND status IN ('pending','failed')`).bind(prepared.submissionRef, prepared.txHash, id),
     env.DB.prepare(`UPDATE ton_transactions
-      SET status='processing', title='Gram withdrawal submitting', description='Single payout submission started', metadata_json=?
+      SET status='processing', title=?, description='Single payout submission started', metadata_json=?
       WHERE reference_type='ton_withdrawal' AND reference_id=? AND kind='withdraw' AND amount_nano<0
         AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND status='processing' AND submission_ref=?)`)
-      .bind(processingMetadata, id, id, prepared.submissionRef),
+      .bind(withdrawalTitle(row, 'submitting'), processingMetadata, id, id, prepared.submissionRef),
   ]);
   if ((locked[0]?.meta?.changes ?? 0) !== 1) {
     const current = await env.DB.prepare('SELECT * FROM ton_withdrawals WHERE id = ?').bind(id).first<WithdrawRow>();
@@ -211,52 +261,50 @@ export async function approveTonWithdrawal(env: Env, withdrawalIdInput: unknown)
 
   try {
     await prepared.sendOnce();
-    const submittedMetadata = JSON.stringify({
-      walletAddress: row.wallet_address,
+    const submittedMetadata = withdrawalMetadata(row, {
       sourceWallet: prepared.sourceWallet,
       submissionRef: prepared.submissionRef,
-      seqno: prepared.seqno,
+      sequence: prepared.sequence,
+      txHash: prepared.txHash,
       sourceStatus: 'processing',
-      displayCurrency: 'Gram',
-    }).slice(0, 2000);
+    });
     await env.DB.batch([
       env.DB.prepare(`UPDATE ton_withdrawals
         SET error_message=NULL, updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND status='processing' AND submission_ref=?`).bind(id, prepared.submissionRef),
       env.DB.prepare(`UPDATE ton_transactions
-        SET status='processing', title='Gram withdrawal submitted', description='Submitted once; no automatic resend or polling', metadata_json=?
+        SET status='processing', title=?, description='Submitted once; no automatic resend or polling', metadata_json=?
         WHERE reference_type='ton_withdrawal' AND reference_id=? AND kind='withdraw' AND amount_nano<0
           AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND status='processing' AND submission_ref=?)`)
-        .bind(submittedMetadata, id, id, prepared.submissionRef),
+        .bind(withdrawalTitle(row, 'submitted'), submittedMetadata, id, id, prepared.submissionRef),
     ]);
   } catch (error) {
     const message = cleanError(error);
     const safeMessage = `Submission state uncertain. Do not resend or refund automatically. ${message}`;
-    const uncertainMetadata = JSON.stringify({
-      walletAddress: row.wallet_address,
+    const uncertainMetadata = withdrawalMetadata(row, {
       sourceWallet: prepared.sourceWallet,
       submissionRef: prepared.submissionRef,
-      seqno: prepared.seqno,
+      sequence: prepared.sequence,
+      txHash: prepared.txHash,
       errorMessage: message,
       sourceStatus: 'processing',
-      displayCurrency: 'Gram',
-    }).slice(0, 2000);
+    });
     await env.DB.batch([
       env.DB.prepare(`UPDATE ton_withdrawals
         SET error_message=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND status='processing' AND submission_ref=?`)
         .bind(cleanText(safeMessage, 240), id, prepared.submissionRef),
       env.DB.prepare(`UPDATE ton_transactions
-        SET status='processing', title='Gram withdrawal submission uncertain', description=?, metadata_json=?
+        SET status='processing', title=?, description=?, metadata_json=?
         WHERE reference_type='ton_withdrawal' AND reference_id=? AND kind='withdraw' AND amount_nano<0
           AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND status='processing' AND submission_ref=?)`)
-        .bind(safeMessage, uncertainMetadata, id, id, prepared.submissionRef),
+        .bind(withdrawalTitle(row, 'submission uncertain'), safeMessage, uncertainMetadata, id, id, prepared.submissionRef),
     ]);
     throw new Error(safeMessage);
   }
 
   const processing = await env.DB.prepare('SELECT * FROM ton_withdrawals WHERE id = ?').bind(id).first<WithdrawRow>();
-  return rowToWithdrawal(processing ?? { ...row, status: 'processing', submission_ref: prepared.submissionRef });
+  return rowToWithdrawal(processing ?? { ...row, status: 'processing', submission_ref: prepared.submissionRef, tx_hash: prepared.txHash });
 }
 
 export async function markTonWithdrawalPaid(env: Env, withdrawalIdInput: unknown): Promise<TonWithdrawal> {
@@ -268,21 +316,20 @@ export async function markTonWithdrawalPaid(env: Env, withdrawalIdInput: unknown
   if (row.status !== 'processing') throw new Error('Only a processing withdrawal can be marked paid');
   if (!row.submission_ref) throw new Error('Processing withdrawal has no submission reference');
 
-  const metadataJson = JSON.stringify({
-    walletAddress: row.wallet_address,
+  const metadataJson = withdrawalMetadata(row, {
     submissionRef: row.submission_ref,
-    displayCurrency: 'Gram',
+    txHash: row.tx_hash || null,
     sourceStatus: 'paid',
-  }).slice(0, 2000);
+  });
   const results = await env.DB.batch([
     env.DB.prepare(`UPDATE ton_withdrawals
       SET status='paid', paid_at=CURRENT_TIMESTAMP, error_message=NULL, updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND status='processing' AND submission_ref IS NOT NULL`).bind(id),
     env.DB.prepare(`UPDATE ton_transactions
-      SET status='completed', title='Gram withdrawal paid', description='Withdrawal completed', metadata_json=?
+      SET status='completed', title=?, description='Withdrawal completed', metadata_json=?
       WHERE reference_type='ton_withdrawal' AND reference_id=? AND kind='withdraw' AND amount_nano<0
         AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND status='paid')`)
-      .bind(metadataJson, id, id),
+      .bind(withdrawalTitle(row, 'paid'), metadataJson, id, id),
   ]);
   if ((results[0]?.meta?.changes ?? 0) !== 1) throw new Error('Withdrawal status changed before finalization');
 
@@ -302,8 +349,9 @@ export async function rejectTonWithdrawal(env: Env, withdrawalIdInput: unknown, 
   const reason = cleanText(reasonInput, 180) || 'Rejected by admin';
   const amountNano = Math.abs(Number(row.amount_nano || 0));
   const refundTransactionId = `finance_withdraw_refund:${id}`;
-  const originalMetadata = JSON.stringify({ walletAddress: row.wallet_address, reason, displayCurrency: 'Gram', sourceStatus: 'rejected' }).slice(0, 2000);
-  const refundMetadata = JSON.stringify({ walletAddress: row.wallet_address, reason, displayCurrency: 'Gram', sourceStatus: 'rejected', refund: true }).slice(0, 2000);
+  const originalMetadata = withdrawalMetadata(row, { reason, sourceStatus: 'rejected' });
+  const refundMetadata = withdrawalMetadata(row, { reason, sourceStatus: 'rejected', refund: true });
+  const titleBase = isUsdtBep20Row(row) ? 'USDT withdrawal' : 'Gram withdrawal';
   const results = await env.DB.batch([
     env.DB.prepare(`UPDATE ton_withdrawals
       SET status='rejecting', error_message=?, updated_at=CURRENT_TIMESTAMP
@@ -316,18 +364,18 @@ export async function rejectTonWithdrawal(env: Env, withdrawalIdInput: unknown, 
       WHERE telegram_user_id=? AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND user_id=? AND status='rejecting')`)
       .bind(amountNano, row.user_id, id, row.user_id),
     env.DB.prepare(`UPDATE ton_transactions
-      SET status='rejected', title='Gram withdrawal rejected', description=?, metadata_json=?
+      SET status='rejected', title=?, description=?, metadata_json=?
       WHERE reference_type='ton_withdrawal' AND reference_id=? AND kind='withdraw' AND amount_nano<0
         AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND user_id=? AND status='rejecting')`)
-      .bind(reason, originalMetadata, id, id, row.user_id),
+      .bind(`${titleBase} rejected`, reason, originalMetadata, id, id, row.user_id),
     env.DB.prepare(`INSERT INTO ton_transactions
       (id,user_id,kind,title,description,amount_nano,balance_after_nano,status,reference_id,reference_type,metadata_json,created_at)
-      SELECT ?,?,'withdraw','Gram withdrawal refunded','Rejected withdrawal refunded',?,u.ton_balance_nano,'completed',?,'ton_withdrawal_refund',?,CURRENT_TIMESTAMP
+      SELECT ?,?,'withdraw',?,'Rejected withdrawal refunded',?,u.ton_balance_nano,'completed',?,'ton_withdrawal_refund',?,CURRENT_TIMESTAMP
       FROM app_users u
       WHERE u.telegram_user_id=?
         AND EXISTS (SELECT 1 FROM ton_withdrawals WHERE id=? AND user_id=? AND status='rejecting')
         AND NOT EXISTS (SELECT 1 FROM ton_transactions WHERE id=?)`)
-      .bind(refundTransactionId, row.user_id, amountNano, id, refundMetadata, row.user_id, id, row.user_id, refundTransactionId),
+      .bind(refundTransactionId, row.user_id, `${titleBase} refunded`, amountNano, id, refundMetadata, row.user_id, id, row.user_id, refundTransactionId),
     env.DB.prepare(`UPDATE ton_withdrawals
       SET status='rejected', rejected_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND user_id=? AND status='rejecting'`).bind(id, row.user_id),
@@ -358,7 +406,31 @@ function formatGramAmount(nano: number): string {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+async function buildPayoutSnapshot(amountNano: number, payoutMethod: WithdrawalPayoutMethod): Promise<PayoutSnapshot> {
+  if (payoutMethod === 'gram') {
+    return { asset: 'GRAM', network: 'TON', amountUnits: null, rateUsd: null, amountUsdt: null };
+  }
+  const rate = await getStarsGramRate();
+  const gramUsd = Number(rate.gramUsd);
+  if (!Number.isFinite(gramUsd) || gramUsd <= 0) throw new Error('GRAM/USD rate is unavailable');
+  const amountGram = amountNano / TON_NANO;
+  const payoutMicros = Math.floor((amountGram * gramUsd + Number.EPSILON) * BSC_USDT_MICRO_SCALE);
+  if (!Number.isSafeInteger(payoutMicros) || payoutMicros <= 0) throw new Error('USDT payout amount is too small');
+  const amountUnits = (BigInt(payoutMicros) * BSC_USDT_MICRO_TO_UNITS).toString();
+  return {
+    asset: 'USDT',
+    network: 'BEP20',
+    amountUnits,
+    rateUsd: gramUsd,
+    amountUsdt: formatUsdtMicros(payoutMicros),
+  };
+}
+
 async function prepareWithdrawalPayout(env: Env, row: WithdrawRow): Promise<PreparedPayout> {
+  return isUsdtBep20Row(row) ? prepareBscUsdtWithdrawalPayout(env, row) : prepareGramWithdrawalPayout(env, row);
+}
+
+async function prepareGramWithdrawalPayout(env: Env, row: WithdrawRow): Promise<PreparedPayout> {
   const mnemonic = withdrawalMnemonic(env);
   const configuredAddress = envValue(env, 'TON_WITHDRAW_WALLET_ADDRESS') || DEFAULT_TON_WITHDRAW_WALLET_ADDRESS;
   const { mnemonicToPrivateKey, internal, SendMode, TonClient } = await loadTonSdk();
@@ -373,7 +445,7 @@ async function prepareWithdrawalPayout(env: Env, row: WithdrawRow): Promise<Prep
   const amountNano = Math.floor(Number(row.amount_nano || 0));
   if (!Number.isSafeInteger(amountNano) || amountNano <= 0) throw new Error('Invalid withdrawal amount');
   const sourceWallet = wallet.address.toString({ bounceable: false });
-  const submissionRef = await makeSubmissionRef(row, sourceWallet, seqno);
+  const submissionRef = await makeSubmissionRef(row, sourceWallet, seqno, 'gram');
   const message = internal({
     to: row.wallet_address,
     value: BigInt(amountNano),
@@ -384,7 +456,8 @@ async function prepareWithdrawalPayout(env: Env, row: WithdrawRow): Promise<Prep
   return {
     submissionRef,
     sourceWallet,
-    seqno,
+    sequence: seqno,
+    txHash: null,
     sendOnce: () => openedWallet.sendTransfer({
       secretKey: keyPair.secretKey,
       seqno,
@@ -394,8 +467,70 @@ async function prepareWithdrawalPayout(env: Env, row: WithdrawRow): Promise<Prep
   };
 }
 
-async function makeSubmissionRef(row: WithdrawRow, sourceWallet: string, seqno: number): Promise<string> {
-  const input = `${row.id}|${row.user_id}|${row.wallet_address}|${row.amount_nano}|${sourceWallet}|${seqno}`;
+async function prepareBscUsdtWithdrawalPayout(env: Env, row: WithdrawRow): Promise<PreparedPayout> {
+  const mnemonic = bscWithdrawalMnemonic(env);
+  const rpcUrl = envValue(env, 'GETBLOCK_BSC_RPC_URL');
+  if (!rpcUrl) throw new Error('GETBLOCK_BSC_RPC_URL is not configured');
+  const amountUnits = cleanPositiveBigInt(row.payout_amount_units, 'USDT payout amount');
+  const recipient = cleanEvmAddress(row.wallet_address);
+  const account = mnemonicToAccount(mnemonic);
+  if (account.address.toLowerCase() !== EXPECTED_BSC_WITHDRAW_WALLET.toLowerCase()) {
+    throw new Error('USDT_BSC_WITHDRAW_MNEMONIC does not match the configured withdrawal wallet');
+  }
+  const client = createPublicClient({ chain: bsc, transport: http(rpcUrl, { timeout: 10_000 }) });
+  const chainId = await client.getChainId();
+  if (chainId !== BSC_CHAIN_ID) throw new Error(`BSC RPC returned chain ${chainId}, expected ${BSC_CHAIN_ID}`);
+
+  const [tokenBalance, nativeBalance, nonce, gasPrice] = await Promise.all([
+    client.readContract({
+      address: BSC_USDT_CONTRACT,
+      abi: BSC_USDT_ABI,
+      functionName: 'balanceOf',
+      args: [account.address],
+    }),
+    client.getBalance({ address: account.address }),
+    client.getTransactionCount({ address: account.address, blockTag: 'pending' }),
+    client.getGasPrice(),
+  ]);
+  if (tokenBalance < amountUnits) throw new Error('USDT withdrawal wallet does not have enough USDT');
+
+  const data = encodeFunctionData({
+    abi: BSC_USDT_ABI,
+    functionName: 'transfer',
+    args: [recipient, amountUnits],
+  });
+  const estimatedGas = await client.estimateGas({ account: account.address, to: BSC_USDT_CONTRACT, data, value: 0n });
+  const gas = (estimatedGas * 120n + 99n) / 100n;
+  const requiredGasWei = gas * gasPrice;
+  if (nativeBalance < requiredGasWei) throw new Error('USDT withdrawal wallet does not have enough BNB for gas');
+
+  const signedTransaction = await account.signTransaction({
+    chainId: BSC_CHAIN_ID,
+    type: 'legacy',
+    to: BSC_USDT_CONTRACT,
+    data,
+    value: 0n,
+    gas,
+    gasPrice,
+    nonce,
+  });
+  const txHash = keccak256(signedTransaction);
+  const submissionRef = `usdt-bep20:${txHash}`;
+
+  return {
+    submissionRef,
+    sourceWallet: account.address,
+    sequence: nonce,
+    txHash,
+    sendOnce: async () => {
+      const sentHash = await client.sendRawTransaction({ serializedTransaction: signedTransaction });
+      if (sentHash.toLowerCase() !== txHash.toLowerCase()) throw new Error('BSC RPC returned an unexpected transaction hash');
+    },
+  };
+}
+
+async function makeSubmissionRef(row: WithdrawRow, sourceWallet: string, sequence: number, method: string): Promise<string> {
+  const input = `${method}|${row.id}|${row.user_id}|${row.wallet_address}|${row.amount_nano}|${sourceWallet}|${sequence}`;
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   const hash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
   return `gram-submit:${hash}`;
@@ -440,6 +575,10 @@ async function ensureTonWithdrawalsTable(env: Env): Promise<void> {
     user_id TEXT NOT NULL,
     wallet_address TEXT NOT NULL,
     amount_nano INTEGER NOT NULL,
+    payout_asset TEXT NOT NULL DEFAULT 'GRAM',
+    payout_network TEXT NOT NULL DEFAULT 'TON',
+    payout_amount_units TEXT,
+    payout_rate_usd REAL,
     status TEXT NOT NULL DEFAULT 'pending',
     tx_hash TEXT,
     submission_ref TEXT,
@@ -450,6 +589,10 @@ async function ensureTonWithdrawalsTable(env: Env): Promise<void> {
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
+  await env.DB.prepare("ALTER TABLE ton_withdrawals ADD COLUMN payout_asset TEXT NOT NULL DEFAULT 'GRAM'").run().catch(() => undefined);
+  await env.DB.prepare("ALTER TABLE ton_withdrawals ADD COLUMN payout_network TEXT NOT NULL DEFAULT 'TON'").run().catch(() => undefined);
+  await env.DB.prepare('ALTER TABLE ton_withdrawals ADD COLUMN payout_amount_units TEXT').run().catch(() => undefined);
+  await env.DB.prepare('ALTER TABLE ton_withdrawals ADD COLUMN payout_rate_usd REAL').run().catch(() => undefined);
   await env.DB.prepare('ALTER TABLE ton_withdrawals ADD COLUMN tx_hash TEXT').run().catch(() => undefined);
   await env.DB.prepare('ALTER TABLE ton_withdrawals ADD COLUMN submission_ref TEXT').run().catch(() => undefined);
   await env.DB.prepare('ALTER TABLE ton_withdrawals ADD COLUMN error_message TEXT').run().catch(() => undefined);
@@ -464,6 +607,7 @@ async function ensureTonWithdrawalsTable(env: Env): Promise<void> {
 
 function rowToWithdrawal(row: WithdrawRow): TonWithdrawal {
   const amount = Number(row.amount_nano || 0) / TON_NANO;
+  const usdt = isUsdtBep20Row(row);
   return {
     id: row.id,
     userId: row.user_id,
@@ -471,6 +615,10 @@ function rowToWithdrawal(row: WithdrawRow): TonWithdrawal {
     amountNano: Number(row.amount_nano || 0),
     amountTon: amount,
     amountGram: amount,
+    payoutAsset: usdt ? 'USDT' : 'GRAM',
+    payoutNetwork: usdt ? 'BEP20' : 'TON',
+    payoutAmountUsdt: usdt ? formatUsdtUnits(row.payout_amount_units) : null,
+    payoutRateUsd: usdt && Number.isFinite(Number(row.payout_rate_usd)) ? Number(row.payout_rate_usd) : null,
     status: row.status,
     txHash: row.tx_hash || null,
     submissionRef: row.submission_ref || null,
@@ -489,6 +637,10 @@ function fallbackRow(id: string, userId: string, wallet: string, amountNano: num
     user_id: userId,
     wallet_address: wallet,
     amount_nano: amountNano,
+    payout_asset: 'GRAM',
+    payout_network: 'TON',
+    payout_amount_units: null,
+    payout_rate_usd: null,
     status,
     tx_hash: null,
     submission_ref: null,
@@ -512,11 +664,34 @@ function tonToNano(value: unknown): number {
   return nano;
 }
 
-function cleanWallet(value: unknown): string {
+function cleanPayoutMethod(value: unknown, walletInput: unknown): WithdrawalPayoutMethod {
+  const method = String(value ?? '').trim().toLowerCase();
+  if (!method) return isAddress(String(walletInput ?? '').trim()) ? 'usdt-bep20' : 'gram';
+  if (method === 'gram') return 'gram';
+  if (method === 'usdt-bep20') return 'usdt-bep20';
+  throw new Error('Unsupported withdrawal method');
+}
+
+function cleanWithdrawalWallet(value: unknown, method: WithdrawalPayoutMethod): string {
+  if (method === 'usdt-bep20') return cleanEvmAddress(value);
   const wallet = String(value ?? '').trim().slice(0, 120);
   if (!wallet) throw new Error('Enter your Gram wallet address');
   if (!/^[A-Za-z0-9_\-:]{24,120}$/.test(wallet)) throw new Error('Enter a valid Gram wallet address');
   return wallet;
+}
+
+function cleanEvmAddress(value: unknown): `0x${string}` {
+  const wallet = String(value ?? '').trim();
+  if (!isAddress(wallet)) throw new Error('Enter a valid BEP20 wallet address');
+  return getAddress(wallet);
+}
+
+function cleanPositiveBigInt(value: unknown, label: string): bigint {
+  const text = String(value ?? '').trim();
+  if (!/^[0-9]+$/.test(text)) throw new Error(`Invalid ${label}`);
+  const amount = BigInt(text);
+  if (amount <= 0n) throw new Error(`Invalid ${label}`);
+  return amount;
 }
 
 function shortWallet(wallet: string): string {
@@ -553,6 +728,53 @@ function withdrawalMnemonic(env: Env): string[] {
   const words = value.replace(/[\n,]+/g, ' ').split(/\s+/).map((word) => word.trim()).filter(Boolean);
   if (words.length !== 24) throw new Error('TON_WITHDRAW_MNEMONIC must contain 24 words');
   return words;
+}
+
+function bscWithdrawalMnemonic(env: Env): string {
+  const value = envValue(env, 'USDT_BSC_WITHDRAW_MNEMONIC');
+  if (!value) throw new Error('USDT_BSC_WITHDRAW_MNEMONIC is not configured');
+  const words = value.replace(/[\n,]+/g, ' ').split(/\s+/).map((word) => word.trim()).filter(Boolean);
+  if (![12, 15, 18, 21, 24].includes(words.length)) throw new Error('USDT_BSC_WITHDRAW_MNEMONIC is invalid');
+  return words.join(' ');
+}
+
+function isUsdtBep20Row(row: WithdrawRow): boolean {
+  return String(row.payout_asset || 'GRAM').toUpperCase() === 'USDT' && String(row.payout_network || 'TON').toUpperCase() === 'BEP20';
+}
+
+function formatUsdtMicros(micros: number): string {
+  const whole = Math.floor(micros / BSC_USDT_MICRO_SCALE);
+  const fraction = String(micros % BSC_USDT_MICRO_SCALE).padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : String(whole);
+}
+
+function formatUsdtUnits(value: unknown): string | null {
+  try {
+    const units = cleanPositiveBigInt(value, 'USDT payout amount');
+    const micros = units / BSC_USDT_MICRO_TO_UNITS;
+    const whole = micros / BigInt(BSC_USDT_MICRO_SCALE);
+    const fraction = String(micros % BigInt(BSC_USDT_MICRO_SCALE)).padStart(6, '0').replace(/0+$/, '');
+    return fraction ? `${whole}.${fraction}` : String(whole);
+  } catch {
+    return null;
+  }
+}
+
+function withdrawalTitle(row: WithdrawRow, suffix = ''): string {
+  const base = isUsdtBep20Row(row) ? 'USDT withdrawal' : 'Gram withdrawal';
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+function withdrawalMetadata(row: WithdrawRow, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    walletAddress: row.wallet_address,
+    displayCurrency: 'Gram',
+    payoutAsset: isUsdtBep20Row(row) ? 'USDT' : 'GRAM',
+    payoutNetwork: isUsdtBep20Row(row) ? 'BEP20' : 'TON',
+    payoutAmountUsdt: isUsdtBep20Row(row) ? formatUsdtUnits(row.payout_amount_units) : null,
+    payoutRateUsd: row.payout_rate_usd ?? null,
+    ...extra,
+  }).slice(0, 2000);
 }
 
 async function sameTonAddress(left: string, right: string): Promise<boolean> {

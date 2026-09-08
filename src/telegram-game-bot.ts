@@ -273,7 +273,7 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 
   if (message) {
     if (await handleEmojiSend(env, token, message)) return;
-    if (isMenuCommand(message.text)) await deleteCurrentMenuMessage(env, token, message.chat.id);
+    if (isMenuCommand(message.text)) await deleteCurrentMenuMessage(env, token, message.chat.id).catch((error) => console.warn('Could not clear the previous bot menu', error));
     const adminCommand = isAdminCommand(message.text);
     const adminHandled = await handleBotAdminMessage(env, token, message, telegram as TelegramApi);
     if (adminHandled) return;
@@ -453,7 +453,13 @@ function escapeHtml(value: string): string {
 }
 
 async function replaceMenuMessage(env: Env, token: string, chatId: number, content: Record<string, unknown>, existingMessageId?: number): Promise<void> {
-  const messageId = existingMessageId ?? await getTelegramMenuMessageId(env, chatId);
+  let messageId = existingMessageId;
+  if (!messageId) {
+    messageId = await getTelegramMenuMessageId(env, chatId).catch((error) => {
+      console.warn('Could not read the previous bot menu', error);
+      return undefined;
+    });
+  }
   const photo = typeof content.photo === 'string' ? content.photo : '';
   const video = typeof content.video === 'string' ? content.video : '';
   const mediaFileId = video || photo;
@@ -481,7 +487,7 @@ async function replaceMenuMessage(env: Env, token: string, chatId: number, conte
       ...(parseMode ? { parse_mode: parseMode } : {}),
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     });
-    if (sent?.message_id) await setTelegramMenuMessageId(env, chatId, sent.message_id);
+    if (sent?.message_id) await setTelegramMenuMessageId(env, chatId, sent.message_id).catch((error) => console.warn('Could not save the bot menu message', error));
     return;
   }
 

@@ -308,7 +308,7 @@ async function handleUserRegionCallback(env: Env, token: string, q: NonNullable<
   }
   const preference = await setUserRegionPreference(env, q.from.id, countryCode);
   await telegram(token, 'answerCallbackQuery', { callback_query_id: q.id, text: preference.mode === 'automatic' ? 'Automatic detection enabled' : 'Region updated' }).catch(() => undefined);
-  await sendGameHome(env, token, chatId, q.message?.message_id, telegramLanguageCode(q.from));
+  await sendGameHome(env, token, chatId, q.message?.message_id, preference.languageCode ?? telegramLanguageCode(q.from));
   return true;
 }
 

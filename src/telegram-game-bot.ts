@@ -267,6 +267,7 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
   }
 
   if (message) {
+    if (await handlePrimaryAdminCustomEmoji(env, token, message)) return;
     const adminCommand = isAdminCommand(message.text);
     const adminHandled = await handleBotAdminMessage(env, token, message, telegram as TelegramApi);
     if (adminHandled) return;
@@ -290,6 +291,24 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
     }
     await sendGameHome(env, token, message.chat.id, undefined, telegramLanguageCode(message.from));
   }
+}
+
+
+async function handlePrimaryAdminCustomEmoji(env: Env, token: string, message: TelegramUpdate['message'] & {}): Promise<boolean> {
+  const customEmojiId = message?.entities?.find((entity) => entity.type === 'custom_emoji' && entity.custom_emoji_id)?.custom_emoji_id;
+  if (!customEmojiId || !isPrimaryBotAdmin(env, message.from?.id)) return false;
+  await deleteIncomingMessage(token, message.chat.id, message.message_id);
+  await telegram(token, 'sendMessage', {
+    chat_id: message.chat.id,
+    text: `Custom emoji ID:\n<code>${customEmojiId}</code>`,
+    parse_mode: 'HTML',
+  }).catch(() => undefined);
+  return true;
+}
+
+function isPrimaryBotAdmin(env: Env, userId: unknown): boolean {
+  const primaryAdminId = String(env.BOT_ADMIN ?? '').split(/[\s,;]+/).map((value) => value.trim()).find((value) => /^\d+$/.test(value));
+  return Boolean(primaryAdminId) && primaryAdminId === String(userId ?? '');
 }
 
 function isRegionCommand(text: string | undefined): boolean {

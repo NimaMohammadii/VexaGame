@@ -653,7 +653,7 @@ async function getTradingClient(env: Env): Promise<TradingClient> {
       const apiKey: ApiKeyAuthorization = {
         get isBuilderKey() { return true; },
         get supportGasless() { return true; },
-        async authorize(request: Parameters<ApiKeyAuthorization['authorize']>[0]) {
+        async authorize(request: { method: 'DELETE' | 'GET' | 'PATCH' | 'POST'; path: string; body?: string }) {
           const timestamp = Math.floor(Date.now() / 1000);
           return {
             POLY_BUILDER_API_KEY: key,

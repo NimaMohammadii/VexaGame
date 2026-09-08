@@ -42,7 +42,14 @@ import {
   type PredictUserMarketAccess,
 } from './predict-routes';
 import { ensurePredictVisitorTracking, getPredictOnlineUserIds } from './section-lock-events';
-import { getPolymarketAccountHealth, getPredictProviderState, setRequestedPredictProvider } from './predict-polymarket';
+import {
+  executePolymarketWithdrawal,
+  getPolymarketAccountHealth,
+  getPredictProviderState,
+  preparePolymarketWithdrawalToSigner,
+  setRequestedPredictProvider,
+  type PolymarketWithdrawalPreview,
+} from './predict-polymarket';
 import { upsertTelegramTextMenu } from './telegram-menu-state';
 import { clearSectionLock, getSectionAccess, setSectionLock } from './section-access';
 
@@ -61,6 +68,7 @@ type PredictOpsInputState =
   | { mode: 'user-max-limit'; userId: string }
   | { mode: 'user-daily-limit'; userId: string }
   | { mode: 'market-exposure'; market: PredictOpsMarket }
+  | { mode: 'polymarket-withdraw-amount' }
   | { mode: 'user-block-note'; userId: string; target: BlockTarget; duration: BlockDuration };
 type AdminEvent = { id: string; source_market_id: string; source_url: string; category: string; question: string; description: string | null; closes_at: string; resolution_source: string | null; status: string; result: string | null; featured: number; created_at: string; updated_at: string; published_at: string | null; settled_at: string | null };
 type PredictOpsUserRow = { telegram_user_id: string; username: string | null; first_name: string | null };
@@ -145,6 +153,12 @@ async function handleMessage(env: Env, message: Message): Promise<Response | nul
     await telegram(env.BOT_TOKEN, 'deleteMessage', { chat_id: message.chat.id, message_id: message.message_id }).catch(() => undefined);
     if (text === '/cancel' || text === 'لغو') { await clearPredictOpsState(env, adminId); await sendPredictOpsMenu(env, message.chat.id); return ok(); }
     try {
+      if (opsState.mode === 'polymarket-withdraw-amount') {
+        const preview = await preparePolymarketWithdrawalToSigner(env, text);
+        await clearPredictOpsState(env, adminId);
+        await sendPolymarketWithdrawalConfirm(env, message.chat.id, undefined, preview);
+        return ok();
+      }
       if (opsState.mode === 'maintenance') {
         if (!text) throw new Error('پیام نمی‌تواند خالی باشد.');
         if (text.length > 180) throw new Error('پیام نگهداری باید حداکثر ۱۸۰ کاراکتر باشد.');
@@ -195,6 +209,19 @@ async function handleMessage(env: Env, message: Message): Promise<Response | nul
 async function handlePredictOpsCallback(env: Env, adminId: number, chatId: number, messageId: number | undefined, data: string): Promise<void> {
   if (data === 'botadmin:predictops:menu' || data === 'botadmin:predictops:refresh') { await publishPredictOpsRealtime(env); await sendPredictOpsMenu(env, chatId, messageId); return; }
   if (data === 'botadmin:predictops:provider') { await sendPredictProviderMenu(env, chatId, messageId); return; }
+  if (data === 'botadmin:predictops:polydeposit') { await sendPolymarketDeposit(env, chatId, messageId); return; }
+  if (data === 'botadmin:predictops:polywithdraw') {
+    await savePredictOpsState(env, adminId, { mode: 'polymarket-withdraw-amount' });
+    const health = await getPolymarketAccountHealth(env);
+    await upsert(env, chatId, messageId, `➖ Polymarket Withdraw\n\nمبلغ pUSD را بفرست.\n\nBalance: ${formatUsd(health.balanceUsd)} pUSD\nDestination: Polygon / USDC\nWallet: ${health.signerAddress || '—'}\n\nمثال: 25`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:provider' }]]);
+    return;
+  }
+  if (data.startsWith('botadmin:predictops:polywithdrawconfirm:')) {
+    const requestId = data.slice('botadmin:predictops:polywithdrawconfirm:'.length);
+    const result = await executePolymarketWithdrawal(env, requestId);
+    await sendPredictProviderMenu(env, chatId, messageId, `✅ ${formatUsd(result.amountUsd)} pUSD به Bridge برداشت ارسال شد.\nDestination: Polygon / USDC\nRecipient: ${result.recipientAddress}${result.txHash ? `\nTx: ${result.txHash}` : ''}`);
+    return;
+  }
   if (data === 'botadmin:predictops:provider:vexa' || data === 'botadmin:predictops:provider:polymarket') {
     const provider = data.endsWith(':polymarket') ? 'polymarket' : 'vexa';
     if (provider === 'polymarket' && !(await getPredictProviderState(env)).polymarketConfigured) {
@@ -221,7 +248,7 @@ async function handlePredictOpsCallback(env: Env, adminId: number, chatId: numbe
   if (data === 'botadmin:predictops:blocked' || data.startsWith('botadmin:predictops:blocked:')) { const page = data === 'botadmin:predictops:blocked' ? 0 : Number(data.slice('botadmin:predictops:blocked:'.length)) || 0; await sendPredictBlockedUsers(env, chatId, messageId, page); return; }
   if (data === 'botadmin:predictops:usersearch') { await savePredictOpsState(env, adminId, { mode: 'user-access' }); await upsert(env, chatId, messageId, '🔎 جستجوی کاربر\n\nآیدی عددی، یوزرنیم یا اسم کاربر را بفرستید.', [[{ text: 'لغو', callback_data: 'botadmin:predictops:useraccess' }]]); return; }
   if (data.startsWith('botadmin:predictops:u:')) { await sendPredictUserPanel(env, chatId, messageId, cleanPredictUserId(data.slice('botadmin:predictops:u:'.length))); return; }
-  if (data.startsWith('botadmin:predictops:uba:')) { const parts = data.split(':'); await sendPredictBlockDuration(env, chatId, messageId, cleanPredictUserId(parts[3]), cleanBlockTarget(parts[4])); return; }
+  if (data.startsWith('botadmin:predictops:uba:')) { const parts = data.split(':'), userId = cleanPredictUserId(parts[3]), target = cleanBlockTarget(parts[4]); await sendPredictBlockDuration(env, chatId, messageId, userId, target); return; }
   if (data.startsWith('botadmin:predictops:ubp:')) {
     const parts = data.split(':'), userId = cleanPredictUserId(parts[3]), target = cleanBlockTarget(parts[4]), duration = cleanBlockDuration(parts[5]); await savePredictOpsState(env, adminId, { mode: 'user-block-note', userId, target, duration });
     await upsert(env, chatId, messageId, `📝 دلیل محدودیت\n\nبرای ${blockTargetLabel(target)} • ${durationLabel(duration)}\n\nبه این شکل بفرستید:\nReason | internal admin note\n\nمثال:\nManual review | رفتار حساب نیاز به بررسی دارد\n\nیادداشت فقط داخل پنل ادمین دیده می‌شود.`, [[{ text: 'ثبت بدون یادداشت', callback_data: `botadmin:predictops:ubd:${userId}:${target}:${duration}` }, { text: 'لغو', callback_data: `botadmin:predictops:u:${userId}` }]]); return;
@@ -300,23 +327,57 @@ async function sendPredictProviderMenu(env: Env, chatId: number, messageId?: num
     state.switchPending ? 'تغییر در پایان راند فعلی اعمال می‌شود.' : '',
     state.polymarketConfigured ? '' : '⚠️ Polymarket wallet secrets are incomplete.',
     '',
-    '💼 Polymarket Treasury — read only',
+    '💼 Polymarket Treasury',
     `Balance: ${balance}`,
     `Account wallet: ${health?.walletAddress || '—'}`,
     `Signer: ${health?.signerAddress || '—'}`,
     `Wallet type: ${walletType}`,
     `Deposit bridge: ${health?.bridgeEvmAddress ? 'Ready' : '—'}`,
     `Backend geo check: ${geo}`,
-    '',
-    'این صفحه فقط وضعیت کیف‌پول فعلی Vexa را می‌خواند و هیچ پولی جابه‌جا نمی‌کند.',
     notice,
   ].filter(Boolean).join('\n');
   await upsert(env, chatId, messageId, text, [
     [{ text: `${state.requested === 'polymarket' ? '✅ ' : ''}Polymarket shared wallet`, callback_data: 'botadmin:predictops:provider:polymarket' }],
     [{ text: `${state.requested === 'vexa' ? '✅ ' : ''}Vexa internal`, callback_data: 'botadmin:predictops:provider:vexa' }],
+    [{ text: '➕ Deposit', callback_data: 'botadmin:predictops:polydeposit' }, { text: '➖ Withdraw', callback_data: 'botadmin:predictops:polywithdraw' }],
     [{ text: '🔄 Refresh wallet', callback_data: 'botadmin:predictops:provider' }],
     [{ text: '⬅️ Predict Ops', callback_data: 'botadmin:predictops:menu' }],
   ]);
+}
+
+async function sendPolymarketDeposit(env: Env, chatId: number, messageId?: number): Promise<void> {
+  const health = await getPolymarketAccountHealth(env);
+  if (!health.configured) throw new Error('Polymarket wallet is not configured.');
+  if (!health.bridgeEvmAddress) throw new Error('Polymarket EVM deposit address is unavailable.');
+  const text = [
+    '➕ Polymarket Deposit',
+    '',
+    'EVM deposit address:',
+    health.bridgeEvmAddress,
+    '',
+    `Polymarket wallet: ${health.walletAddress || '—'}`,
+    '',
+    'از MetaMask روی یک شبکه و توکن پشتیبانی‌شده به همین آدرس بفرست. Bridge آن را به pUSD حساب Polymarket تبدیل می‌کند.',
+    'قبل از ارسال، شبکه/توکن و حداقل مبلغ را مطابق لیست فعلی Bridge بررسی کن.',
+  ].join('\n');
+  await upsert(env, chatId, messageId, text, [[{ text: '🔄 Refresh address', callback_data: 'botadmin:predictops:polydeposit' }], [{ text: '⬅️ Polymarket', callback_data: 'botadmin:predictops:provider' }]]);
+}
+
+async function sendPolymarketWithdrawalConfirm(env: Env, chatId: number, messageId: number | undefined, preview: PolymarketWithdrawalPreview): Promise<void> {
+  const estimated = preview.estimatedOutputUsd == null ? '—' : `$${formatUsd(preview.estimatedOutputUsd)} USDC`;
+  const minimum = preview.minReceived == null ? '—' : `$${formatUsd(preview.minReceived)} USDC`;
+  const text = [
+    '⚠️ Confirm Polymarket Withdrawal',
+    '',
+    `Amount: ${formatUsd(preview.amountUsd)} pUSD`,
+    `Destination: ${preview.destinationChain} / ${preview.destinationToken}`,
+    `Recipient: ${preview.recipientAddress}`,
+    `Estimated output: ${estimated}`,
+    `Minimum received: ${minimum}`,
+    '',
+    'با Confirm انتقال واقعی pUSD از Treasury به Bridge انجام می‌شود.',
+  ].join('\n');
+  await upsert(env, chatId, messageId, text, [[{ text: '✅ Confirm withdrawal', callback_data: `botadmin:predictops:polywithdrawconfirm:${preview.requestId}` }], [{ text: 'لغو', callback_data: 'botadmin:predictops:provider' }]]);
 }
 
 async function sendPredictOpsMarket(env: Env, chatId: number, messageId: number | undefined, market: PredictOpsMarket, notice = ''): Promise<void> {
@@ -523,6 +584,7 @@ function formatOpsPrice(market: PredictOpsMarket, value: number | null): string 
 function formatGram(nano: number): string { return (Math.max(0, Number(nano) || 0) / NANO).toLocaleString('en-US', { maximumFractionDigits: 4 }); }
 function formatFeeGram(nano: number): string { return (Math.max(0, Number(nano) || 0) / NANO).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function formatSignedGram(nano: number): string { const value = Number(nano) || 0; return (value >= 0 ? '+' : '-') + formatGram(Math.abs(value)); }
+function formatUsd(value: number | null): string { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '—'; }
 function formatOpsTime(value: string | null): string { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().replace('.000Z', 'Z') : String(value); }
 function shortRoundId(value: string): string { const parts = String(value || '').split('_'); return parts.length >= 3 ? parts.slice(-1)[0].slice(-8) : shorten(value, 18); }
 function roundStatusIcon(round: PredictOpsRoundView): string { return round.due ? '⚠️' : round.status === 'settled' ? '✅' : round.status === 'refunded' ? '↩️' : round.status === 'refunding' ? '🟠' : round.status === 'open' ? '🟢' : '🟡'; }
@@ -537,7 +599,7 @@ async function readState(env: Env, userId: number): Promise<InputState | null> {
 function clearState(env: Env, userId: number): Promise<void> { return env.BOT_CACHE.delete(stateKey(userId)).catch(() => undefined); }
 function stateKey(userId: number): string { return STATE_PREFIX + String(userId); }
 async function savePredictOpsState(env: Env, userId: number, state: PredictOpsInputState): Promise<void> { await env.BOT_CACHE.put(predictOpsStateKey(userId), JSON.stringify(state), { expirationTtl: 900 }); }
-async function readPredictOpsState(env: Env, userId: number): Promise<PredictOpsInputState | null> { const raw = await env.BOT_CACHE.get(predictOpsStateKey(userId)).catch(() => null); if (!raw) return null; try { const state = JSON.parse(raw) as PredictOpsInputState; if (!state || typeof state !== 'object' || typeof state.mode !== 'string') return null; if (state.mode === 'maintenance' || state.mode === 'user-access') return state; if ((state.mode === 'user-note' || state.mode === 'user-max-limit' || state.mode === 'user-daily-limit') && typeof state.userId === 'string') return state; if (state.mode === 'market-exposure' && (state.market === 'bitcoin' || state.market === 'gold' || state.market === 'oil')) return state; if (state.mode === 'user-block-note' && typeof state.userId === 'string') return state; return null; } catch { return null; } }
+async function readPredictOpsState(env: Env, userId: number): Promise<PredictOpsInputState | null> { const raw = await env.BOT_CACHE.get(predictOpsStateKey(userId)).catch(() => null); if (!raw) return null; try { const state = JSON.parse(raw) as PredictOpsInputState; if (!state || typeof state !== 'object' || typeof state.mode !== 'string') return null; if (state.mode === 'maintenance' || state.mode === 'user-access' || state.mode === 'polymarket-withdraw-amount') return state; if ((state.mode === 'user-note' || state.mode === 'user-max-limit' || state.mode === 'user-daily-limit') && typeof state.userId === 'string') return state; if (state.mode === 'market-exposure' && (state.market === 'bitcoin' || state.market === 'gold' || state.market === 'oil')) return state; if (state.mode === 'user-block-note' && typeof state.userId === 'string') return state; return null; } catch { return null; } }
 function clearPredictOpsState(env: Env, userId: number): Promise<void> { return env.BOT_CACHE.delete(predictOpsStateKey(userId)).catch(() => undefined); }
 function predictOpsStateKey(userId: number): string { return PREDICT_OPS_STATE_PREFIX + String(userId); }
 function isAdmin(env: Env, userId: unknown): boolean { return String(env.BOT_ADMIN || '').split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean).includes(String(userId || '')); }

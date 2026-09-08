@@ -21,9 +21,7 @@ type NetworkConfig = {
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const LOG_BLOCK_CHUNK = 4_000;
 const MAX_OFFSET_MICROS = 9_999;
-const RESERVATION_ATTEMPTS = 48;
-const QUOTE_TTL_MS = 6 * 60 * 60 * 1_000;
-const RESERVATION_TTL_MS = 48 * 60 * 60 * 1_000;
+const CREATE_ATTEMPTS = 12;
 const RPC_TIMEOUT_MS = 7_000;
 
 // Binance-Peg USDT/BSC-USD token used for USDT transfers on BNB Smart Chain.
@@ -66,18 +64,12 @@ type UsdtDepositRow = {
   treasury_address: string;
   start_block: number;
   last_scanned_block: number;
-  expires_at_ms: number;
   status: string;
   tx_hash: string | null;
   claim_token: string | null;
   credited_at: string | null;
   created_at: string;
   updated_at: string;
-};
-
-type AmountReservationRow = {
-  deposit_id: string;
-  reserved_until_ms: number;
 };
 
 type RpcResponse<T> = {
@@ -112,12 +104,16 @@ export type UsdtDeposit = {
   txHash: string | null;
   treasuryAddress: string;
   tokenContract: string;
-  expiresAt: string;
   createdAt: string;
   updatedAt: string;
 };
 
-export async function createUsdtDeposit(env: Env, userIdInput: unknown, networkInput: unknown, amountInput: unknown): Promise<UsdtDeposit> {
+export async function createUsdtDeposit(
+  env: Env,
+  userIdInput: unknown,
+  networkInput: unknown,
+  amountInput: unknown,
+): Promise<UsdtDeposit> {
   const userId = cleanUserId(userIdInput);
   const config = networkConfig(networkInput);
   const requestedMicros = normalizeRequestedUsdtMicros(amountInput);
@@ -134,60 +130,78 @@ export async function createUsdtDeposit(env: Env, userIdInput: unknown, networkI
     getStarsGramRate(),
     getFinanceLimits(env),
   ]);
-  const depositId = 'usdt_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
-  const expectedMicros = await reserveExpectedMicros(env, config.id, requestedMicros, depositId);
-  const expectedAmountUsdt = microsToUsdt(expectedMicros);
-  const amountNano = usdtMicrosToGramNano(expectedMicros, rate.gramUsd);
-
-  if (amountNano < limits.minDepositNano) {
-    await releaseReservation(env, depositId);
-    throw new Error(`Minimum deposit is ${formatTonAmount(limits.minDepositNano)} Gram`);
-  }
-  if (limits.maxDepositNano && amountNano > limits.maxDepositNano) {
-    await releaseReservation(env, depositId);
-    throw new Error(`Maximum deposit is ${formatTonAmount(limits.maxDepositNano)} Gram`);
-  }
-
-  const expectedUnits = tokenUnits(expectedMicros, config.decimals);
-  const transactionId = `finance_usdtdep:${depositId}`;
-  const expiresAtMs = Date.now() + QUOTE_TTL_MS;
   const requestedAmountUsdt = compactUsdt(requestedMicros);
-  const metadataJson = JSON.stringify({
-    asset: 'USDT',
-    network: config.id,
-    networkLabel: config.label,
-    requestedAmountUsdt,
-    expectedAmountUsdt,
-    gramUsd: rate.gramUsd,
-    displayCurrency: 'Gram',
-  });
 
-  try {
-    await env.DB.batch([
-      env.DB.prepare(`INSERT INTO usdt_deposits
-        (id,user_id,network,requested_amount_usdt,expected_amount_usdt,expected_amount_micros,expected_units,amount_nano,gram_usd,treasury_address,start_block,last_scanned_block,expires_at_ms,status,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
-        .bind(depositId, userId, config.id, requestedAmountUsdt, expectedAmountUsdt, expectedMicros, expectedUnits, amountNano, rate.gramUsd, treasuryAddress, latestBlock, latestBlock - 1, expiresAtMs),
-      env.DB.prepare(`INSERT INTO ton_transactions
-        (id,user_id,kind,title,description,amount_nano,balance_after_nano,status,reference_id,reference_type,metadata_json,created_at)
-        VALUES (?,?,'deposit','USDT deposit',?,?,COALESCE((SELECT ton_balance_nano FROM app_users WHERE telegram_user_id=?),0),'pending',?,'usdt_deposit',?,CURRENT_TIMESTAMP)`)
-        .bind(transactionId, userId, `${expectedAmountUsdt} USDT (${config.label})`, amountNano, userId, depositId, metadataJson),
-    ]);
-  } catch (error) {
-    await releaseReservation(env, depositId);
-    throw error;
+  for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt += 1) {
+    const expectedMicros = await nextExpectedMicros(env, config.id, requestedMicros);
+    if (expectedMicros > requestedMicros + MAX_OFFSET_MICROS) {
+      throw new Error('Too many active values for this amount. Choose a USDT amount at least 0.01 different.');
+    }
+
+    const expectedAmountUsdt = microsToUsdt(expectedMicros);
+    const amountNano = usdtMicrosToGramNano(expectedMicros, rate.gramUsd);
+    if (amountNano < limits.minDepositNano) throw new Error(`Minimum deposit is ${formatTonAmount(limits.minDepositNano)} Gram`);
+    if (limits.maxDepositNano && amountNano > limits.maxDepositNano) throw new Error(`Maximum deposit is ${formatTonAmount(limits.maxDepositNano)} Gram`);
+
+    const expectedUnits = tokenUnits(expectedMicros, config.decimals);
+    const depositId = 'usdt_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+    const transactionId = `finance_usdtdep:${depositId}`;
+    const metadataJson = JSON.stringify({
+      asset: 'USDT',
+      network: config.id,
+      networkLabel: config.label,
+      requestedAmountUsdt,
+      expectedAmountUsdt,
+      gramUsd: rate.gramUsd,
+      displayCurrency: 'Gram',
+    });
+
+    try {
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO usdt_deposits
+          (id,user_id,network,requested_amount_usdt,expected_amount_usdt,expected_amount_micros,expected_units,amount_nano,gram_usd,treasury_address,start_block,last_scanned_block,status,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+          .bind(
+            depositId,
+            userId,
+            config.id,
+            requestedAmountUsdt,
+            expectedAmountUsdt,
+            expectedMicros,
+            expectedUnits,
+            amountNano,
+            rate.gramUsd,
+            treasuryAddress,
+            latestBlock,
+            latestBlock - 1,
+          ),
+        env.DB.prepare(`INSERT INTO ton_transactions
+          (id,user_id,kind,title,description,amount_nano,balance_after_nano,status,reference_id,reference_type,metadata_json,created_at)
+          VALUES (?,?,'deposit','USDT deposit',?,?,COALESCE((SELECT ton_balance_nano FROM app_users WHERE telegram_user_id=?),0),'pending',?,'usdt_deposit',?,CURRENT_TIMESTAMP)`)
+          .bind(transactionId, userId, `${expectedAmountUsdt} USDT (${config.label})`, amountNano, userId, depositId, metadataJson),
+      ]);
+    } catch (error) {
+      if (isExpectedAmountCollision(error)) continue;
+      throw error;
+    }
+
+    const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
+      .bind(depositId, userId)
+      .first<UsdtDepositRow>();
+    if (!row) throw new Error('USDT deposit creation failed');
+    return rowToDeposit(row);
   }
 
-  const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?').bind(depositId, userId).first<UsdtDepositRow>();
-  if (!row) throw new Error('USDT deposit creation failed');
-  return rowToDeposit(row);
+  throw new Error('Could not reserve a unique USDT payment amount. Try again.');
 }
 
 export async function getUsdtDeposit(env: Env, userIdInput: unknown, depositIdInput: unknown): Promise<UsdtDeposit | null> {
   const userId = cleanUserId(userIdInput);
   const depositId = cleanDepositId(depositIdInput);
   await ensureUsdtDepositsTable(env);
-  const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?').bind(depositId, userId).first<UsdtDepositRow>();
+  const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
+    .bind(depositId, userId)
+    .first<UsdtDepositRow>();
   return row ? rowToDeposit(row) : null;
 }
 
@@ -195,9 +209,12 @@ export async function verifyUsdtDeposit(env: Env, userIdInput: unknown, depositI
   const userId = cleanUserId(userIdInput);
   const depositId = cleanDepositId(depositIdInput);
   await Promise.all([ensureUsdtDepositsTable(env), ensureTonTransactionsTable(env)]);
-  const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?').bind(depositId, userId).first<UsdtDepositRow>();
+
+  const row = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
+    .bind(depositId, userId)
+    .first<UsdtDepositRow>();
   if (!row) throw new Error('USDT deposit not found');
-  if (row.status === 'completed' || row.status === 'expired') return rowToDeposit(row);
+  if (row.status === 'completed') return rowToDeposit(row);
   if (row.status !== 'pending') return rowToDeposit(row);
 
   const config = networkConfig(row.network);
@@ -210,26 +227,31 @@ export async function verifyUsdtDeposit(env: Env, userIdInput: unknown, depositI
   }
   await assertChainId(rpcUrl, config);
 
-  const finalBlock = await finalizedBlockNumber(rpcUrl);
   const fromBlock = Math.max(row.start_block, row.last_scanned_block + 1);
+  const finalizedBlock = await finalizedBlockNumber(rpcUrl, config);
   let match: RpcLog | null = null;
-  if (finalBlock >= fromBlock) {
-    match = await findTransfer(rpcUrl, config, treasuryRpcAddress, row.expected_units, fromBlock, finalBlock);
+  let scannedThrough: number | null = null;
+
+  if (finalizedBlock !== null) {
+    if (finalizedBlock >= fromBlock) {
+      match = await findTransfer(rpcUrl, config, treasuryRpcAddress, row.expected_units, fromBlock, finalizedBlock);
+      scannedThrough = finalizedBlock;
+    }
+  } else {
+    match = await findTransferToFinalizedTag(rpcUrl, config, treasuryRpcAddress, row.expected_units, fromBlock);
   }
 
   if (!match) {
-    const expired = Date.now() > normalizedExpiresAtMs(row);
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE usdt_deposits
-        SET last_scanned_block=MAX(last_scanned_block, ?), status=CASE WHEN ?=1 THEN 'expired' ELSE status END, updated_at=CURRENT_TIMESTAMP
+    if (scannedThrough !== null) {
+      await env.DB.prepare(`UPDATE usdt_deposits
+        SET last_scanned_block=MAX(last_scanned_block, ?), updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND user_id=? AND status='pending'`)
-        .bind(finalBlock, expired ? 1 : 0, row.id, row.user_id),
-      env.DB.prepare(`UPDATE ton_transactions
-        SET status=CASE WHEN ?=1 THEN 'expired' ELSE status END
-        WHERE user_id=? AND kind='deposit' AND reference_type='usdt_deposit' AND reference_id=? AND status='pending'`)
-        .bind(expired ? 1 : 0, row.user_id, row.id),
-    ]);
-    const pending = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?').bind(row.id, row.user_id).first<UsdtDepositRow>();
+        .bind(scannedThrough, row.id, row.user_id)
+        .run();
+    }
+    const pending = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
+      .bind(row.id, row.user_id)
+      .first<UsdtDepositRow>();
     return rowToDeposit(pending ?? row);
   }
 
@@ -249,6 +271,8 @@ export async function verifyUsdtDeposit(env: Env, userIdInput: unknown, depositI
     txHash,
     displayCurrency: 'Gram',
   });
+  const matchedBlock = hexNumber(match.blockNumber);
+  const cursorBlock = scannedThrough === null ? matchedBlock : scannedThrough;
 
   let results;
   try {
@@ -256,7 +280,7 @@ export async function verifyUsdtDeposit(env: Env, userIdInput: unknown, depositI
       env.DB.prepare(`UPDATE usdt_deposits
         SET status='crediting', tx_hash=?, claim_token=?, last_scanned_block=MAX(last_scanned_block, ?), updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND user_id=? AND status='pending' AND claim_token IS NULL`)
-        .bind(txHash, claim, finalBlock, row.id, row.user_id),
+        .bind(txHash, claim, cursorBlock, row.id, row.user_id),
       env.DB.prepare(`INSERT INTO app_users (telegram_user_id,current_section,ton_balance_nano,last_seen_at,updated_at)
         VALUES (?,'home',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
         ON CONFLICT(telegram_user_id) DO NOTHING`).bind(row.user_id),
@@ -283,7 +307,9 @@ export async function verifyUsdtDeposit(env: Env, userIdInput: unknown, depositI
   }
 
   const applied = Number(results[0]?.meta?.changes || 0) > 0;
-  const completed = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?').bind(row.id, row.user_id).first<UsdtDepositRow>();
+  const completed = await env.DB.prepare('SELECT * FROM usdt_deposits WHERE id = ? AND user_id = ?')
+    .bind(row.id, row.user_id)
+    .first<UsdtDepositRow>();
   const finalRow = completed ?? row;
 
   if (applied && finalRow.status === 'completed') {
@@ -313,23 +339,58 @@ async function findTransfer(
   const expected = BigInt(expectedUnits);
   for (let start = fromBlock; start <= toBlock; start += LOG_BLOCK_CHUNK) {
     const end = Math.min(toBlock, start + LOG_BLOCK_CHUNK - 1);
-    const logs = await rpcCall<RpcLog[]>(rpcUrl, 'eth_getLogs', [{
-      fromBlock: blockHex(start),
-      toBlock: blockHex(end),
-      address: config.tokenContract,
-      topics: [TRANSFER_TOPIC, null, destinationTopic],
-    }]);
-    const matches = (Array.isArray(logs) ? logs : [])
-      .filter((log) => !log.removed)
-      .filter((log) => String(log.address || '').toLowerCase() === config.tokenContract)
-      .filter((log) => Array.isArray(log.topics) && String(log.topics[0] || '').toLowerCase() === TRANSFER_TOPIC)
-      .filter((log) => String(log.topics?.[2] || '').toLowerCase() === destinationTopic)
-      .filter((log) => hexBigInt(log.data) === expected)
-      .filter((log) => /^0x[0-9a-f]{64}$/i.test(String(log.transactionHash || '')))
-      .sort(compareLogs);
-    if (matches.length) return matches[0];
+    const logs = await getTransferLogs(rpcUrl, config, destinationTopic, blockHex(start), blockHex(end));
+    const match = matchingTransfer(logs, config, destinationTopic, expected);
+    if (match) return match;
   }
   return null;
+}
+
+async function findTransferToFinalizedTag(
+  rpcUrl: string,
+  config: NetworkConfig,
+  treasuryRpcAddress: string,
+  expectedUnits: string,
+  fromBlock: number,
+): Promise<RpcLog | null> {
+  const destinationTopic = addressTopic(treasuryRpcAddress);
+  const expected = BigInt(expectedUnits);
+  try {
+    const logs = await getTransferLogs(rpcUrl, config, destinationTopic, blockHex(fromBlock), 'finalized');
+    return matchingTransfer(logs, config, destinationTopic, expected);
+  } catch (error) {
+    if (config.id === 'trc20') {
+      throw new Error('TRC20 finalized log queries are not available on the configured RPC endpoint');
+    }
+    throw error;
+  }
+}
+
+async function getTransferLogs(
+  rpcUrl: string,
+  config: NetworkConfig,
+  destinationTopic: string,
+  fromBlock: string,
+  toBlock: string,
+): Promise<RpcLog[]> {
+  return await rpcCall<RpcLog[]>(rpcUrl, 'eth_getLogs', [{
+    fromBlock,
+    toBlock,
+    address: config.tokenContract,
+    topics: [TRANSFER_TOPIC, null, destinationTopic],
+  }]);
+}
+
+function matchingTransfer(logsInput: RpcLog[], config: NetworkConfig, destinationTopic: string, expected: bigint): RpcLog | null {
+  const matches = (Array.isArray(logsInput) ? logsInput : [])
+    .filter((log) => !log.removed)
+    .filter((log) => String(log.address || '').toLowerCase() === config.tokenContract)
+    .filter((log) => Array.isArray(log.topics) && String(log.topics[0] || '').toLowerCase() === TRANSFER_TOPIC)
+    .filter((log) => String(log.topics?.[2] || '').toLowerCase() === destinationTopic)
+    .filter((log) => hexBigInt(log.data) === expected)
+    .filter((log) => /^0x[0-9a-f]{64}$/i.test(String(log.transactionHash || '')))
+    .sort(compareLogs);
+  return matches[0] ?? null;
 }
 
 function compareLogs(a: RpcLog, b: RpcLog): number {
@@ -344,11 +405,19 @@ async function latestBlockNumber(rpcUrl: string): Promise<number> {
   return block;
 }
 
-async function finalizedBlockNumber(rpcUrl: string): Promise<number> {
-  const block = await rpcCall<RpcBlock | null>(rpcUrl, 'eth_getBlockByNumber', ['finalized', false]);
-  const number = hexNumber(block?.number);
-  if (!Number.isSafeInteger(number) || number < 1) throw new Error('Could not read finalized blockchain height');
-  return number;
+async function finalizedBlockNumber(rpcUrl: string, config: NetworkConfig): Promise<number | null> {
+  try {
+    const block = await rpcCall<RpcBlock | null>(rpcUrl, 'eth_getBlockByNumber', ['finalized', false]);
+    const number = hexNumber(block?.number);
+    if (!Number.isSafeInteger(number) || number < 1) throw new Error('Could not read finalized blockchain height');
+    return number;
+  } catch (error) {
+    // BSC documents the finalized block tag for eth_getBlockByNumber. TRON's
+    // JSON-RPC documentation guarantees finalized for eth_getLogs, while block
+    // tag support is method-specific, so TRC20 safely falls back to finalized logs.
+    if (config.id === 'trc20') return null;
+    throw error;
+  }
 }
 
 async function assertChainId(rpcUrl: string, config: NetworkConfig): Promise<void> {
@@ -377,45 +446,13 @@ async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Pr
   }
 }
 
-async function reserveExpectedMicros(env: Env, network: UsdtNetwork, baseMicros: number, depositId: string): Promise<number> {
-  for (let attempt = 0; attempt < RESERVATION_ATTEMPTS; attempt += 1) {
-    const candidate = baseMicros + secureOffsetMicros();
-    const now = Date.now();
-    const existing = await env.DB.prepare(`SELECT deposit_id,reserved_until_ms FROM usdt_deposit_amount_reservations
-      WHERE network=? AND expected_amount_micros=?`).bind(network, candidate).first<AmountReservationRow>();
-    if (existing && Number(existing.reserved_until_ms) > now) continue;
-
-    if (existing) {
-      await env.DB.batch([
-        env.DB.prepare(`UPDATE usdt_deposits SET status='expired', updated_at=CURRENT_TIMESTAMP
-          WHERE id=? AND status='pending'`).bind(existing.deposit_id),
-        env.DB.prepare(`UPDATE ton_transactions SET status='expired'
-          WHERE kind='deposit' AND reference_type='usdt_deposit' AND reference_id=? AND status='pending'`).bind(existing.deposit_id),
-        env.DB.prepare(`DELETE FROM usdt_deposit_amount_reservations
-          WHERE network=? AND expected_amount_micros=? AND reserved_until_ms<=?`)
-          .bind(network, candidate, now),
-      ]);
-    }
-
-    const reservedUntilMs = now + RESERVATION_TTL_MS;
-    const result = await env.DB.prepare(`INSERT OR IGNORE INTO usdt_deposit_amount_reservations
-      (network,expected_amount_micros,deposit_id,reserved_until_ms,created_at)
-      VALUES (?,?,?,?,CURRENT_TIMESTAMP)`)
-      .bind(network, candidate, depositId, reservedUntilMs)
-      .run();
-    if (Number(result.meta?.changes || 0) > 0) return candidate;
-  }
-  throw new Error('Could not reserve a unique USDT payment amount. Try again.');
-}
-
-async function releaseReservation(env: Env, depositId: string): Promise<void> {
-  await env.DB.prepare('DELETE FROM usdt_deposit_amount_reservations WHERE deposit_id=?').bind(depositId).run().catch(() => undefined);
-}
-
-function secureOffsetMicros(): number {
-  const value = new Uint32Array(1);
-  crypto.getRandomValues(value);
-  return 1 + (Number(value[0]) % MAX_OFFSET_MICROS);
+async function nextExpectedMicros(env: Env, network: UsdtNetwork, baseMicros: number): Promise<number> {
+  const row = await env.DB.prepare(`SELECT MAX(expected_amount_micros) AS max_micros FROM usdt_deposits
+    WHERE network=? AND expected_amount_micros>? AND expected_amount_micros<=?`)
+    .bind(network, baseMicros, baseMicros + MAX_OFFSET_MICROS)
+    .first<{ max_micros: number | null }>();
+  const current = Math.floor(Number(row?.max_micros) || baseMicros);
+  return Math.max(baseMicros + 1, current + 1);
 }
 
 function usdtMicrosToGramNano(micros: number, gramUsd: number): number {
@@ -486,7 +523,9 @@ async function rpcAddress(address: string, network: UsdtNetwork): Promise<string
   const checksum = decoded.slice(21);
   const first = new Uint8Array(await crypto.subtle.digest('SHA-256', payload));
   const second = new Uint8Array(await crypto.subtle.digest('SHA-256', first));
-  for (let i = 0; i < 4; i += 1) if (checksum[i] !== second[i]) throw new Error('TRC20 treasury address checksum is invalid');
+  for (let i = 0; i < 4; i += 1) {
+    if (checksum[i] !== second[i]) throw new Error('TRC20 treasury address checksum is invalid');
+  }
   return '0x' + bytesHex(payload.slice(1));
 }
 
@@ -533,7 +572,11 @@ function hexNumber(value: unknown): number {
 function hexBigInt(value: unknown): bigint {
   const text = String(value || '');
   if (!/^0x[0-9a-f]+$/i.test(text)) return -1n;
-  try { return BigInt(text); } catch { return -1n; }
+  try {
+    return BigInt(text);
+  } catch {
+    return -1n;
+  }
 }
 
 function cleanTxHash(value: unknown): string {
@@ -554,15 +597,14 @@ function cleanDepositId(value: unknown): string {
   return id;
 }
 
-function isTxHashCollision(error: unknown): boolean {
-  return /unique constraint failed:.*usdt_deposits.*tx_hash/i.test(String(error instanceof Error ? error.message : error || ''));
+function isExpectedAmountCollision(error: unknown): boolean {
+  return /unique constraint failed:\s*usdt_deposits\.network,\s*usdt_deposits\.expected_amount_micros/i.test(
+    String(error instanceof Error ? error.message : error || ''),
+  );
 }
 
-function normalizedExpiresAtMs(row: UsdtDepositRow): number {
-  const value = Math.floor(Number(row.expires_at_ms) || 0);
-  if (value > 0) return value;
-  const created = Date.parse(row.created_at || '');
-  return Number.isFinite(created) ? created + QUOTE_TTL_MS : Date.now() + QUOTE_TTL_MS;
+function isTxHashCollision(error: unknown): boolean {
+  return /unique constraint failed:.*usdt_deposits.*tx_hash/i.test(String(error instanceof Error ? error.message : error || ''));
 }
 
 async function ensureUsdtDepositsTable(env: Env): Promise<void> {
@@ -579,7 +621,6 @@ async function ensureUsdtDepositsTable(env: Env): Promise<void> {
     treasury_address TEXT NOT NULL,
     start_block INTEGER NOT NULL,
     last_scanned_block INTEGER NOT NULL,
-    expires_at_ms INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     tx_hash TEXT,
     claim_token TEXT,
@@ -587,23 +628,10 @@ async function ensureUsdtDepositsTable(env: Env): Promise<void> {
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
-  await env.DB.prepare('ALTER TABLE usdt_deposits ADD COLUMN expires_at_ms INTEGER').run().catch(() => undefined);
-  await env.DB.prepare('UPDATE usdt_deposits SET expires_at_ms=? WHERE expires_at_ms IS NULL OR expires_at_ms<=0')
-    .bind(Date.now() + QUOTE_TTL_MS).run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS usdt_deposit_amount_reservations (
-    network TEXT NOT NULL,
-    expected_amount_micros INTEGER NOT NULL,
-    deposit_id TEXT NOT NULL UNIQUE,
-    reserved_until_ms INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY(network, expected_amount_micros)
-  )`).run();
-  await env.DB.prepare('DROP INDEX IF EXISTS idx_usdt_deposits_expected_amount').run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_usdt_deposits_user ON usdt_deposits(user_id, created_at)').run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_usdt_deposits_status ON usdt_deposits(status, network)').run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_usdt_deposits_expected_lookup ON usdt_deposits(network, expected_amount_micros, created_at)').run();
+  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposits_expected_amount ON usdt_deposits(network, expected_amount_micros)').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposits_tx_hash ON usdt_deposits(network, tx_hash) WHERE tx_hash IS NOT NULL').run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_usdt_reservations_expiry ON usdt_deposit_amount_reservations(reserved_until_ms)').run();
 }
 
 function rowToDeposit(row: UsdtDepositRow): UsdtDeposit {
@@ -621,7 +649,6 @@ function rowToDeposit(row: UsdtDepositRow): UsdtDeposit {
     txHash: row.tx_hash,
     treasuryAddress: row.treasury_address,
     tokenContract: config.tokenContract,
-    expiresAt: new Date(normalizedExpiresAtMs(row)).toISOString(),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

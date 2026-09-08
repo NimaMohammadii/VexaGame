@@ -1,4 +1,5 @@
 import { livePlayersSeed, shouldShowLivePlayersOnCard } from './game-live-counts';
+import { CRASH_ROCKET_MODEL_URL } from './crash';
 
 const playZoneGames = [
   ['mines', 'Mines', 'Reveal safe tiles and cash out', 'Play'],
@@ -39,7 +40,8 @@ function gameCard([id, label, _description, action]: typeof playZoneGames[number
 const PLAY_ZONE_IMAGE_VERSION_SCRIPT = `
 (function(){
   var KEY='vexa:game-card-images:v1';
-  var hasCached=false,started=false,readyResolve=null;
+  var CRASH_ROCKET_URL=${JSON.stringify(CRASH_ROCKET_MODEL_URL)};
+  var hasCached=false,started=false,readyResolve=null,crashRocketWarmed=false;
   function timedFetch(url,opt,ms){
     if(typeof AbortController==='undefined')return fetch(url,opt);
     var controller=new AbortController();
@@ -49,6 +51,7 @@ const PLAY_ZONE_IMAGE_VERSION_SCRIPT = `
   }
   function visibility(){return window.VexaPlayZoneVisibility||null}
   function shouldLoad(id){var state=visibility();return !!(state&&state.ready&&!state.isHidden(id))}
+  function warmCrashRocket(){if(crashRocketWarmed||!shouldLoad('crash'))return;crashRocketWarmed=true;fetch(CRASH_ROCKET_URL,{cache:'force-cache',credentials:'same-origin'}).catch(function(){})}
   function apply(images){
     if(!images||typeof images!=='object')return false;
     var applied=false;
@@ -99,6 +102,7 @@ const PLAY_ZONE_IMAGE_VERSION_SCRIPT = `
   }
   window.VexaRefreshPlayZoneImages=refresh;
   window.__vexaPlayZoneImagesReady=new Promise(function(resolve){readyResolve=resolve});
+  window.addEventListener('vexa:home-ready',warmCrashRocket,{once:true});
   window.addEventListener('vexa:play-zone-visibility-ready',start);
   if(window.VexaPlayZoneVisibility&&window.VexaPlayZoneVisibility.ready)start();
 })();

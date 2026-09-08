@@ -4,7 +4,16 @@ type MenuMessageRow = { message_id: number };
 type TelegramApi = (token: string, method: string, payload: unknown) => Promise<unknown>;
 type TelegramSentMessage = { message_id?: number; result?: { message_id?: number } };
 
+async function ensureTelegramMenuMessages(env: Env): Promise<void> {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS telegram_menu_messages (
+    chat_id INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+}
+
 export async function getTelegramMenuMessageId(env: Env, chatId: number): Promise<number | undefined> {
+  await ensureTelegramMenuMessages(env);
   const row = await env.DB.prepare('SELECT message_id FROM telegram_menu_messages WHERE chat_id = ?')
     .bind(chatId)
     .first<MenuMessageRow>();
@@ -13,6 +22,7 @@ export async function getTelegramMenuMessageId(env: Env, chatId: number): Promis
 }
 
 export async function setTelegramMenuMessageId(env: Env, chatId: number, messageId: number): Promise<void> {
+  await ensureTelegramMenuMessages(env);
   await env.DB.prepare(`INSERT INTO telegram_menu_messages (chat_id, message_id, updated_at)
     VALUES (?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, updated_at = CURRENT_TIMESTAMP`)

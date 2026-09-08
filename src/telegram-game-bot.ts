@@ -357,12 +357,21 @@ async function sendUserRegionMenu(env: Env, token: string, chatId: number, userI
   const preference = await getUserRegionPreference(env, userId);
   const currentCode = preference.countryCode || '';
   const currentLanguage = preference.languageCode ? (VEXA_LOCALE_LABELS as Record<string, string>)[preference.languageCode] : '';
-  const title = preference.mode === 'automatic'
-    ? '<b><tg-emoji emoji-id="5321275372333979355">🌐</tg-emoji> Region &amp; Language</b>\n\n<b>Automatic (System)</b>\nYour region and language will be selected automatically.'
-    : `<b><tg-emoji emoji-id="5321275372333979355">🌐</tg-emoji> Region &amp; Language</b>\n\n<b>Current:</b> ${currentCode} · ${currentLanguage}\n\nChoose a region below.`;
   const rows = chunk(USER_REGION_OPTIONS.map(([code, label]) => ({ text: `${currentCode === code ? '✓ ' : ''}${label}`, callback_data: `vexa:region:${code}` })), 2);
   rows.push([{ text: `${preference.mode === 'automatic' ? '✓ ' : ''}Automatic (System)`, callback_data: 'vexa:region:AUTO' }]);
-  await replaceMenuMessage(env, token, chatId, { text: title, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } }, messageId);
+  const send = (useCustomEmoji: boolean) => {
+    const icon = useCustomEmoji ? '<tg-emoji emoji-id="5321275372333979355">🌐</tg-emoji>' : '🌐';
+    const title = preference.mode === 'automatic'
+      ? `<b>${icon} Region &amp; Language</b>\n\n<b>Automatic (System)</b>\nYour region and language will be selected automatically.`
+      : `<b>${icon} Region &amp; Language</b>\n\n<b>Current:</b> ${currentCode} · ${currentLanguage}\n\nChoose a region below.`;
+    return replaceMenuMessage(env, token, chatId, { text: title, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } }, messageId);
+  };
+  try {
+    await send(true);
+  } catch (error) {
+    if (!isCustomEmojiFailure(error)) throw error;
+    await send(false);
+  }
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -378,7 +387,6 @@ function isAdminCommand(text: string | undefined): boolean {
 
 async function sendGameHome(env: Env, token: string, chatId: number, existingMessageId?: number, languageCode?: string): Promise<void> {
   const locale = localeForTelegramLanguage(languageCode);
-  const text = mainMenuText(locale);
   const media = await getMainMenuMedia(env).catch(() => null);
   const reply_markup = {
     inline_keyboard: [[{
@@ -386,9 +394,18 @@ async function sendGameHome(env: Env, token: string, chatId: number, existingMes
       web_app: { url: `${PUBLIC_BASE_URL}/app` },
     }]],
   };
-  await replaceMenuMessage(env, token, chatId, media
-    ? { [media.type]: media.fileId, text, parse_mode: 'HTML', reply_markup }
-    : { text, parse_mode: 'HTML', reply_markup }, existingMessageId);
+  const send = (useCustomEmoji: boolean) => {
+    const text = mainMenuText(locale, useCustomEmoji);
+    return replaceMenuMessage(env, token, chatId, media
+      ? { [media.type]: media.fileId, text, parse_mode: 'HTML', reply_markup }
+      : { text, parse_mode: 'HTML', reply_markup }, existingMessageId);
+  };
+  try {
+    await send(true);
+  } catch (error) {
+    if (!isCustomEmojiFailure(error)) throw error;
+    await send(false);
+  }
 }
 
 function telegramLanguageCode(user: unknown): string | undefined {
@@ -410,21 +427,22 @@ function localeForTelegramLanguage(languageCode: string | undefined): VexaLocale
   return byBase ?? DEFAULT_VEXA_LOCALE;
 }
 
-function mainMenuText(locale: VexaLocale): string {
+function mainMenuText(locale: VexaLocale, useCustomEmoji = true): string {
   const copy = MAIN_MENU_COPY[locale] ?? MAIN_MENU_COPY[DEFAULT_VEXA_LOCALE];
   const line = (value: string) => `<b>${escapeHtml(stylizeLatin(value))}</b>`;
+  const icon = (id: string, fallback: string) => useCustomEmoji ? `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>` : fallback;
   return [
     `🎪 ${line('Vexa Game')}`,
     '',
     line(copy.tagline),
     '',
-    `<tg-emoji emoji-id="5319247469165433798">🧩</tg-emoji> ${line(copy.quickGames)}`,
-    `<tg-emoji emoji-id="5231005931550030290">💸</tg-emoji> ${line(copy.predictions)}`,
+    `${icon('5319247469165433798', '🧩')} ${line(copy.quickGames)}`,
+    `${icon('5231005931550030290', '💸')} ${line(copy.predictions)}`,
     `🎟 ${line(copy.lotteries)}`,
     '',
-    `<tg-emoji emoji-id="5203996991054432397">🎁</tg-emoji> ${line(copy.dailyChance)}`,
+    `${icon('5203996991054432397', '🎁')} ${line(copy.dailyChance)}`,
     '',
-    `${line(copy.ready)} <tg-emoji emoji-id="5231102735817918643">👇🏼</tg-emoji>`,
+    `${line(copy.ready)} ${icon('5231102735817918643', '👇🏼')}`,
   ].join('\n');
 }
 
@@ -436,6 +454,10 @@ function stylizeLatin(value: string): string {
     if (code >= 48 && code <= 57) return String.fromCodePoint(0x1D7EC + code - 48);
     return char;
   }).join('');
+}
+
+function isCustomEmojiFailure(error: unknown): boolean {
+  return /custom emoji|emoji.*not allowed|can't parse entities/i.test(error instanceof Error ? error.message : String(error));
 }
 
 function escapeHtml(value: string): string {

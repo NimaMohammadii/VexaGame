@@ -74,9 +74,15 @@ export type TelegramDocument = {
   file_size?: number;
 };
 
+export type TelegramMessageEntity = {
+  type: string;
+  custom_emoji_id?: string;
+};
+
 export type TelegramMessage = {
   message_id: number;
   text?: string;
+  entities?: TelegramMessageEntity[];
   caption?: string;
   successful_payment?: TelegramSuccessfulPayment;
   contact?: TelegramContact;

@@ -159,7 +159,7 @@ async function handleMessage(env: Env, message: Message): Promise<Response | nul
       if (opsState.mode === 'polymarket-withdraw-amount') {
         const amount = cleanPolymarketWithdrawalAmountInput(text);
         await savePredictOpsState(env, adminId, { mode: 'polymarket-withdraw-address', destination: opsState.destination, amount });
-        await upsert(env, message.chat.id, undefined, `➖ Polymarket Withdraw\n\nAmount: ${amount} pUSD\nDestination: ${withdrawDestinationLabel(opsState.destination)}\n\nحالا آدرس مقصد EVM را بفرست.\nمثال: 0x1234...`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:polywithdraw' }]]);
+        await upsert(env, message.chat.id, undefined, `➖ 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗪𝗶𝘁𝗵𝗱𝗿𝗮𝘄\n\n💰 𝗔𝗺𝗼𝘂𝗻𝘁\n${amount} pUSD\n\n🌐 𝗗𝗲𝘀𝘁𝗶𝗻𝗮𝘁𝗶𝗼𝗻\n${withdrawDestinationLabel(opsState.destination)}\n\n📍 آدرس مقصد EVM را بفرست.\nمثال: 0x1234...`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:polywithdraw' }]]);
         return ok();
       }
       if (opsState.mode === 'polymarket-withdraw-address') {
@@ -230,7 +230,7 @@ async function handlePredictOpsCallback(env: Env, adminId: number, chatId: numbe
     const destination: PolymarketBridgeDestination = data.endsWith(':bsc-usdt') ? 'bsc-usdt' : 'polygon-usdc';
     const [health, asset] = await Promise.all([getPolymarketAccountHealth(env), getPolymarketBridgeAsset(destination)]);
     await savePredictOpsState(env, adminId, { mode: 'polymarket-withdraw-amount', destination });
-    await upsert(env, chatId, messageId, `➖ Polymarket Withdraw\n\nمبلغ pUSD را بفرست.\n\nBalance: ${formatUsd(health.balanceUsd)} pUSD\nDestination: ${asset.chainName} / ${asset.tokenSymbol}${destination === 'bsc-usdt' ? ' (BEP20)' : ''}${asset.minCheckoutUsd == null ? '' : `\nMinimum: $${formatUsd(asset.minCheckoutUsd)}`}\n\nبعد از مبلغ، آدرس مقصد را خودت وارد می‌کنی.\nمثال مبلغ: 25`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:polywithdraw' }]]);
+    await upsert(env, chatId, messageId, `➖ 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗪𝗶𝘁𝗵𝗱𝗿𝗮𝘄\n\n💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲\n${formatUsd(health.balanceUsd)} pUSD\n\n🌐 𝗡𝗲𝘁𝘄𝗼𝗿𝗸\n${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''}\n\n💵 𝗔𝘀𝘀𝗲𝘁\n${asset.tokenSymbol}${asset.minCheckoutUsd == null ? '' : `\nMinimum: $${formatUsd(asset.minCheckoutUsd)}`}\n\nمبلغ pUSD را بفرست. بعد از مبلغ، آدرس مقصد را خودت وارد می‌کنی.\nمثال: 25`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:polywithdraw' }]]);
     return;
   }
   if (data.startsWith('botadmin:predictops:polywithdrawconfirm:')) {
@@ -337,33 +337,44 @@ async function sendPredictProviderMenu(env: Env, chatId: number, messageId?: num
         ? `Blocked${health.country ? ` (${health.country}${health.region ? `-${health.region}` : ''})` : ''}`
         : `Allowed from backend${health.country ? ` (${health.country}${health.region ? `-${health.region}` : ''})` : ''}`;
   const text = [
-    '🔗 Bitcoin Provider',
+    '🔗 𝗕𝗶𝘁𝗰𝗼𝗶𝗻 𝗣𝗿𝗼𝘃𝗶𝗱𝗲𝗿',
     '',
-    `Requested: ${state.requested}`,
+    `𝗥𝗲𝗾𝘂𝗲𝘀𝘁𝗲𝗱: ${state.requested}`,
     active,
     state.switchPending ? 'تغییر در پایان راند فعلی اعمال می‌شود.' : '',
     state.polymarketConfigured ? '' : '⚠️ Polymarket wallet secrets are incomplete.',
     '',
-    '💼 Polymarket Treasury',
-    `Balance: ${balance}`,
-    `Account wallet: ${health?.walletAddress || '—'}`,
-    `Signer: ${health?.signerAddress || '—'}`,
-    `Wallet type: ${walletType}`,
-    `Deposit bridge: ${health?.bridgeEvmAddress ? 'Ready' : '—'}`,
-    `Backend geo check: ${geo}`,
-    notice,
+    '💼 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗧𝗿𝗲𝗮𝘀𝘂𝗿𝘆',
+    `💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲: ${balance}`,
+    `🧩 𝗪𝗮𝗹𝗹𝗲𝘁 𝘁𝘆𝗽𝗲: ${walletType}`,
+    `🌍 𝗕𝗮𝗰𝗸𝗲𝗻𝗱: ${geo}`,
+    `📥 𝗗𝗲𝗽𝗼𝘀𝗶𝘁 𝗯𝗿𝗶𝗱𝗴𝗲: ${health?.bridgeEvmAddress ? 'Ready' : '—'}`,
+    '',
+    '𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝘄𝗮𝗹𝗹𝗲𝘁',
+    health?.walletAddress || '—',
+    '',
+    '𝗦𝗶𝗴𝗻𝗲𝗿',
+    health?.signerAddress || '—',
+    notice ? `\n${notice}` : '',
   ].filter(Boolean).join('\n');
-  await upsert(env, chatId, messageId, text, [
+  const rows: Button[][] = [
     [{ text: `${state.requested === 'polymarket' ? '✅ ' : ''}Polymarket shared wallet`, callback_data: 'botadmin:predictops:provider:polymarket' }],
     [{ text: `${state.requested === 'vexa' ? '✅ ' : ''}Vexa internal`, callback_data: 'botadmin:predictops:provider:vexa' }],
     [{ text: '➕ Deposit', callback_data: 'botadmin:predictops:polydeposit' }, { text: '➖ Withdraw', callback_data: 'botadmin:predictops:polywithdraw' }],
+  ];
+  const copyRow: Button[] = [];
+  if (health?.walletAddress) copyRow.push(copyTextButton('📋 Account wallet', health.walletAddress));
+  if (health?.signerAddress) copyRow.push(copyTextButton('📋 Signer', health.signerAddress));
+  if (copyRow.length) rows.push(copyRow);
+  rows.push(
     [{ text: '🔄 Refresh wallet', callback_data: 'botadmin:predictops:provider' }],
     [{ text: '⬅️ Predict Ops', callback_data: 'botadmin:predictops:menu' }],
-  ]);
+  );
+  await upsert(env, chatId, messageId, text, rows);
 }
 
 async function sendPolymarketDepositMenu(env: Env, chatId: number, messageId?: number): Promise<void> {
-  await upsert(env, chatId, messageId, '➕ Polymarket Deposit\n\nارز و شبکه واریز را انتخاب کن.', [
+  await upsert(env, chatId, messageId, '➕ 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗗𝗲𝗽𝗼𝘀𝗶𝘁\n\n💳 ارز و شبکه واریز را انتخاب کن.\n\nهر گزینه آدرس Deposit مخصوص Treasury را نمایش می‌دهد.', [
     [{ text: 'USDC • Polygon', callback_data: 'botadmin:predictops:polydeposit:polygon-usdc' }],
     [{ text: 'USDT • BNB Smart Chain (BEP20)', callback_data: 'botadmin:predictops:polydeposit:bsc-usdt' }],
     [{ text: '⬅️ Polymarket', callback_data: 'botadmin:predictops:provider' }],
@@ -375,26 +386,36 @@ async function sendPolymarketDeposit(env: Env, chatId: number, messageId: number
   if (!health.configured) throw new Error('Polymarket wallet is not configured.');
   if (!health.bridgeEvmAddress) throw new Error('Polymarket EVM deposit address is unavailable.');
   const text = [
-    '➕ Polymarket Deposit',
+    '➕ 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗗𝗲𝗽𝗼𝘀𝗶𝘁',
     '',
-    `Asset: ${asset.tokenSymbol}`,
-    `Network: ${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''}`,
-    asset.minCheckoutUsd == null ? '' : `Minimum: $${formatUsd(asset.minCheckoutUsd)}`,
-    `Token contract: ${asset.tokenAddress}`,
+    `💵 𝗔𝘀𝘀𝗲𝘁: ${asset.tokenSymbol}`,
+    `🌐 𝗡𝗲𝘁𝘄𝗼𝗿𝗸: ${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''}`,
+    asset.minCheckoutUsd == null ? '' : `🔻 𝗠𝗶𝗻𝗶𝗺𝘂𝗺: $${formatUsd(asset.minCheckoutUsd)}`,
     '',
-    'Deposit address:',
+    '📥 𝗗𝗲𝗽𝗼𝘀𝗶𝘁 𝗮𝗱𝗱𝗿𝗲𝘀𝘀',
     health.bridgeEvmAddress,
     '',
-    `Polymarket wallet: ${health.walletAddress || '—'}`,
+    '💼 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝘄𝗮𝗹𝗹𝗲𝘁',
+    health.walletAddress || '—',
     '',
-    `فقط ${asset.tokenSymbol} را روی ${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''} به همین آدرس بفرست. Bridge آن را به pUSD حساب Polymarket تبدیل می‌کند.`,
+    '🪙 𝗧𝗼𝗸𝗲𝗻 𝗰𝗼𝗻𝘁𝗿𝗮𝗰𝘁',
+    asset.tokenAddress,
+    '',
+    `⚠️ فقط ${asset.tokenSymbol} را روی ${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''} به Deposit address بالا بفرست. Bridge آن را به pUSD حساب Polymarket تبدیل می‌کند.`,
   ].filter(Boolean).join('\n');
-  await upsert(env, chatId, messageId, text, [[{ text: '🔄 Refresh', callback_data: `botadmin:predictops:polydeposit:${destination}` }], [{ text: '⬅️ Deposit methods', callback_data: 'botadmin:predictops:polydeposit' }]]);
+  const rows: Button[][] = [
+    [copyTextButton('📋 Copy deposit address', health.bridgeEvmAddress)],
+    ...(health.walletAddress ? [[copyTextButton('📋 Copy Polymarket wallet', health.walletAddress)]] : []),
+    [copyTextButton('📋 Copy token contract', asset.tokenAddress)],
+    [{ text: '🔄 Refresh', callback_data: `botadmin:predictops:polydeposit:${destination}` }],
+    [{ text: '⬅️ Deposit methods', callback_data: 'botadmin:predictops:polydeposit' }],
+  ];
+  await upsert(env, chatId, messageId, text, rows);
 }
 
 async function sendPolymarketWithdrawMenu(env: Env, chatId: number, messageId?: number): Promise<void> {
   const health = await getPolymarketAccountHealth(env);
-  await upsert(env, chatId, messageId, `➖ Polymarket Withdraw\n\nBalance: ${formatUsd(health.balanceUsd)} pUSD\n\nارز و شبکه برداشت را انتخاب کن.`, [
+  await upsert(env, chatId, messageId, `➖ 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗪𝗶𝘁𝗵𝗱𝗿𝗮𝘄\n\n💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲\n${formatUsd(health.balanceUsd)} pUSD\n\n💳 ارز و شبکه برداشت را انتخاب کن.\nبعد از انتخاب، مبلغ و آدرس مقصد را وارد می‌کنی.`, [
     [{ text: 'USDC • Polygon', callback_data: 'botadmin:predictops:polywithdraw:polygon-usdc' }],
     [{ text: 'USDT • BNB Smart Chain (BEP20)', callback_data: 'botadmin:predictops:polywithdraw:bsc-usdt' }],
     [{ text: '⬅️ Polymarket', callback_data: 'botadmin:predictops:provider' }],
@@ -405,17 +426,23 @@ async function sendPolymarketWithdrawalConfirm(env: Env, chatId: number, message
   const estimated = preview.estimatedOutputUsd == null ? '—' : `$${formatUsd(preview.estimatedOutputUsd)} ${preview.destinationToken}`;
   const minimum = preview.minReceived == null ? '—' : `$${formatUsd(preview.minReceived)} ${preview.destinationToken}`;
   const text = [
-    '⚠️ Confirm Polymarket Withdrawal',
+    '⚠️ 𝗖𝗼𝗻𝗳𝗶𝗿𝗺 𝗣𝗼𝗹𝘆𝗺𝗮𝗿𝗸𝗲𝘁 𝗪𝗶𝘁𝗵𝗱𝗿𝗮𝘄',
     '',
-    `Amount: ${formatUsd(preview.amountUsd)} pUSD`,
-    `Destination: ${preview.destinationChain} / ${preview.destinationToken}${preview.destinationToken === 'USDT' ? ' (BEP20)' : ''}`,
-    `Recipient: ${preview.recipientAddress}`,
-    `Estimated output: ${estimated}`,
-    `Minimum received: ${minimum}`,
+    `💰 𝗔𝗺𝗼𝘂𝗻𝘁: ${formatUsd(preview.amountUsd)} pUSD`,
+    `🌐 𝗗𝗲𝘀𝘁𝗶𝗻𝗮𝘁𝗶𝗼𝗻: ${preview.destinationChain} / ${preview.destinationToken}${preview.destinationToken === 'USDT' ? ' (BEP20)' : ''}`,
+    `📈 𝗘𝘀𝘁𝗶𝗺𝗮𝘁𝗲𝗱: ${estimated}`,
+    `🛡 𝗠𝗶𝗻𝗶𝗺𝘂𝗺 𝗿𝗲𝗰𝗲𝗶𝘃𝗲𝗱: ${minimum}`,
     '',
-    'با Confirm انتقال واقعی pUSD از Treasury به Bridge انجام می‌شود.',
+    '📍 𝗥𝗲𝗰𝗶𝗽𝗶𝗲𝗻𝘁',
+    preview.recipientAddress,
+    '',
+    'با Confirm انتقال واقعی pUSD از Treasury به Bridge انجام می‌شود. آدرس مقصد را یک‌بار دیگر بررسی کن.',
   ].join('\n');
-  await upsert(env, chatId, messageId, text, [[{ text: '✅ Confirm withdrawal', callback_data: `botadmin:predictops:polywithdrawconfirm:${preview.requestId}` }], [{ text: 'لغو', callback_data: 'botadmin:predictops:provider' }]]);
+  await upsert(env, chatId, messageId, text, [
+    [copyTextButton('📋 Copy recipient', preview.recipientAddress)],
+    [{ text: '✅ Confirm withdrawal', callback_data: `botadmin:predictops:polywithdrawconfirm:${preview.requestId}` }],
+    [{ text: 'لغو', callback_data: 'botadmin:predictops:provider' }],
+  ]);
 }
 
 async function sendPredictOpsMarket(env: Env, chatId: number, messageId: number | undefined, market: PredictOpsMarket, notice = ''): Promise<void> {
@@ -611,6 +638,7 @@ function cleanBlockDuration(value: unknown): BlockDuration { const v = String(va
 function cleanPolymarketWithdrawalAmountInput(value: unknown): string { const text = String(value ?? '').trim(); if (!/^\d+(?:\.\d{1,6})?$/.test(text) || Number(text) <= 0) throw new Error('مبلغ pUSD نامعتبر است. حداکثر ۶ رقم اعشار وارد کن.'); return text; }
 function cleanEvmAddress(value: unknown): string { const address = String(value ?? '').trim(); if (!/^0x[0-9a-f]{40}$/i.test(address)) throw new Error('آدرس مقصد نامعتبر است. یک آدرس EVM معتبر با 0x وارد کن.'); return address; }
 function withdrawDestinationLabel(destination: PolymarketBridgeDestination): string { return destination === 'bsc-usdt' ? 'BNB Smart Chain / USDT (BEP20)' : 'Polygon / USDC'; }
+function copyTextButton(label: string, value: string): Button { return { text: label, copy_text: { text: value } } as unknown as Button; }
 function gramInputToNano(value: unknown): number { const n = Number(String(value ?? '').trim()); if (!Number.isFinite(n) || n < 0 || n > 9_000_000_000) throw new Error('مقدار GRAM نامعتبر است.'); const nano = Math.floor(n * NANO); if (!Number.isSafeInteger(nano)) throw new Error('مقدار بیش از حد بزرگ است.'); return nano; }
 function formatRemaining(value: number | null): string { const ms = Math.max(0, Number(value) || 0), minutes = Math.ceil(ms / 60000); if (minutes >= 1440) return `${Math.ceil(minutes / 1440)}d`; if (minutes >= 60) return `${Math.ceil(minutes / 60)}h`; return `${minutes}m`; }
 function predictUserLabel(user: PredictOpsUserRow): string { const name = String(user.first_name || '').replace(/[<>]/g, '').trim(), username = String(user.username || '').replace(/^@+/, '').replace(/[^0-9A-Za-z_]/g, '').slice(0, 64); return name && username ? `${name} (@${username})` : name || (username ? `@${username}` : 'User'); }

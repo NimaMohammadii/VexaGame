@@ -100,10 +100,10 @@ export async function createTonWithdrawal(
   userIdInput: unknown,
   amountTonInput: unknown,
   walletInput: unknown,
-  payoutMethodInput: unknown = 'gram',
+  payoutMethodInput?: unknown,
 ): Promise<TonWithdrawal> {
   const userId = cleanUserId(userIdInput);
-  const payoutMethod = cleanPayoutMethod(payoutMethodInput);
+  const payoutMethod = cleanPayoutMethod(payoutMethodInput, walletInput);
   const wallet = cleanWithdrawalWallet(walletInput, payoutMethod);
   const amountNano = tonToNano(amountTonInput);
   await assertUserNotBanned(env, userId);
@@ -664,8 +664,9 @@ function tonToNano(value: unknown): number {
   return nano;
 }
 
-function cleanPayoutMethod(value: unknown): WithdrawalPayoutMethod {
-  const method = String(value ?? 'gram').trim().toLowerCase();
+function cleanPayoutMethod(value: unknown, walletInput: unknown): WithdrawalPayoutMethod {
+  const method = String(value ?? '').trim().toLowerCase();
+  if (!method) return isAddress(String(walletInput ?? '').trim()) ? 'usdt-bep20' : 'gram';
   if (method === 'gram') return 'gram';
   if (method === 'usdt-bep20') return 'usdt-bep20';
   throw new Error('Unsupported withdrawal method');

@@ -45,9 +45,11 @@ import { ensurePredictVisitorTracking, getPredictOnlineUserIds } from './section
 import {
   executePolymarketWithdrawal,
   getPolymarketAccountHealth,
+  getPolymarketBridgeAsset,
   getPredictProviderState,
   preparePolymarketWithdrawalToSigner,
   setRequestedPredictProvider,
+  type PolymarketBridgeDestination,
   type PolymarketWithdrawalPreview,
 } from './predict-polymarket';
 import { upsertTelegramTextMenu } from './telegram-menu-state';
@@ -68,7 +70,7 @@ type PredictOpsInputState =
   | { mode: 'user-max-limit'; userId: string }
   | { mode: 'user-daily-limit'; userId: string }
   | { mode: 'market-exposure'; market: PredictOpsMarket }
-  | { mode: 'polymarket-withdraw-amount' }
+  | { mode: 'polymarket-withdraw-amount'; destination: PolymarketBridgeDestination }
   | { mode: 'user-block-note'; userId: string; target: BlockTarget; duration: BlockDuration };
 type AdminEvent = { id: string; source_market_id: string; source_url: string; category: string; question: string; description: string | null; closes_at: string; resolution_source: string | null; status: string; result: string | null; featured: number; created_at: string; updated_at: string; published_at: string | null; settled_at: string | null };
 type PredictOpsUserRow = { telegram_user_id: string; username: string | null; first_name: string | null };
@@ -154,7 +156,7 @@ async function handleMessage(env: Env, message: Message): Promise<Response | nul
     if (text === '/cancel' || text === 'لغو') { await clearPredictOpsState(env, adminId); await sendPredictOpsMenu(env, message.chat.id); return ok(); }
     try {
       if (opsState.mode === 'polymarket-withdraw-amount') {
-        const preview = await preparePolymarketWithdrawalToSigner(env, text);
+        const preview = await preparePolymarketWithdrawalToSigner(env, text, opsState.destination);
         await clearPredictOpsState(env, adminId);
         await sendPolymarketWithdrawalConfirm(env, message.chat.id, undefined, preview);
         return ok();
@@ -209,17 +211,24 @@ async function handleMessage(env: Env, message: Message): Promise<Response | nul
 async function handlePredictOpsCallback(env: Env, adminId: number, chatId: number, messageId: number | undefined, data: string): Promise<void> {
   if (data === 'botadmin:predictops:menu' || data === 'botadmin:predictops:refresh') { await publishPredictOpsRealtime(env); await sendPredictOpsMenu(env, chatId, messageId); return; }
   if (data === 'botadmin:predictops:provider') { await sendPredictProviderMenu(env, chatId, messageId); return; }
-  if (data === 'botadmin:predictops:polydeposit') { await sendPolymarketDeposit(env, chatId, messageId); return; }
-  if (data === 'botadmin:predictops:polywithdraw') {
-    await savePredictOpsState(env, adminId, { mode: 'polymarket-withdraw-amount' });
-    const health = await getPolymarketAccountHealth(env);
-    await upsert(env, chatId, messageId, `➖ Polymarket Withdraw\n\nمبلغ pUSD را بفرست.\n\nBalance: ${formatUsd(health.balanceUsd)} pUSD\nDestination: Polygon / USDC\nWallet: ${health.signerAddress || '—'}\n\nمثال: 25`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:provider' }]]);
+  if (data === 'botadmin:predictops:polydeposit') { await sendPolymarketDepositMenu(env, chatId, messageId); return; }
+  if (data === 'botadmin:predictops:polydeposit:polygon-usdc' || data === 'botadmin:predictops:polydeposit:bsc-usdt') {
+    const destination: PolymarketBridgeDestination = data.endsWith(':bsc-usdt') ? 'bsc-usdt' : 'polygon-usdc';
+    await sendPolymarketDeposit(env, chatId, messageId, destination);
+    return;
+  }
+  if (data === 'botadmin:predictops:polywithdraw') { await sendPolymarketWithdrawMenu(env, chatId, messageId); return; }
+  if (data === 'botadmin:predictops:polywithdraw:polygon-usdc' || data === 'botadmin:predictops:polywithdraw:bsc-usdt') {
+    const destination: PolymarketBridgeDestination = data.endsWith(':bsc-usdt') ? 'bsc-usdt' : 'polygon-usdc';
+    const [health, asset] = await Promise.all([getPolymarketAccountHealth(env), getPolymarketBridgeAsset(destination)]);
+    await savePredictOpsState(env, adminId, { mode: 'polymarket-withdraw-amount', destination });
+    await upsert(env, chatId, messageId, `➖ Polymarket Withdraw\n\nمبلغ pUSD را بفرست.\n\nBalance: ${formatUsd(health.balanceUsd)} pUSD\nDestination: ${asset.chainName} / ${asset.tokenSymbol}${destination === 'bsc-usdt' ? ' (BEP20)' : ''}\nWallet: ${health.signerAddress || '—'}${asset.minCheckoutUsd == null ? '' : `\nMinimum: $${formatUsd(asset.minCheckoutUsd)}`}\n\nمثال: 25`, [[{ text: 'لغو', callback_data: 'botadmin:predictops:polywithdraw' }]]);
     return;
   }
   if (data.startsWith('botadmin:predictops:polywithdrawconfirm:')) {
     const requestId = data.slice('botadmin:predictops:polywithdrawconfirm:'.length);
     const result = await executePolymarketWithdrawal(env, requestId);
-    await sendPredictProviderMenu(env, chatId, messageId, `✅ ${formatUsd(result.amountUsd)} pUSD به Bridge برداشت ارسال شد.\nDestination: Polygon / USDC\nRecipient: ${result.recipientAddress}${result.txHash ? `\nTx: ${result.txHash}` : ''}`);
+    await sendPredictProviderMenu(env, chatId, messageId, `✅ ${formatUsd(result.amountUsd)} pUSD به Bridge برداشت ارسال شد.\nDestination: ${result.destinationChain} / ${result.destinationToken}${result.destinationToken === 'USDT' ? ' (BEP20)' : ''}\nRecipient: ${result.recipientAddress}${result.txHash ? `\nTx: ${result.txHash}` : ''}`);
     return;
   }
   if (data === 'botadmin:predictops:provider:vexa' || data === 'botadmin:predictops:provider:polymarket') {
@@ -345,32 +354,53 @@ async function sendPredictProviderMenu(env: Env, chatId: number, messageId?: num
   ]);
 }
 
-async function sendPolymarketDeposit(env: Env, chatId: number, messageId?: number): Promise<void> {
-  const health = await getPolymarketAccountHealth(env);
+async function sendPolymarketDepositMenu(env: Env, chatId: number, messageId?: number): Promise<void> {
+  await upsert(env, chatId, messageId, '➕ Polymarket Deposit\n\nارز و شبکه واریز را انتخاب کن.', [
+    [{ text: 'USDC • Polygon', callback_data: 'botadmin:predictops:polydeposit:polygon-usdc' }],
+    [{ text: 'USDT • BNB Smart Chain (BEP20)', callback_data: 'botadmin:predictops:polydeposit:bsc-usdt' }],
+    [{ text: '⬅️ Polymarket', callback_data: 'botadmin:predictops:provider' }],
+  ]);
+}
+
+async function sendPolymarketDeposit(env: Env, chatId: number, messageId: number | undefined, destination: PolymarketBridgeDestination): Promise<void> {
+  const [health, asset] = await Promise.all([getPolymarketAccountHealth(env), getPolymarketBridgeAsset(destination)]);
   if (!health.configured) throw new Error('Polymarket wallet is not configured.');
   if (!health.bridgeEvmAddress) throw new Error('Polymarket EVM deposit address is unavailable.');
   const text = [
     '➕ Polymarket Deposit',
     '',
-    'EVM deposit address:',
+    `Asset: ${asset.tokenSymbol}`,
+    `Network: ${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''}`,
+    asset.minCheckoutUsd == null ? '' : `Minimum: $${formatUsd(asset.minCheckoutUsd)}`,
+    `Token contract: ${asset.tokenAddress}`,
+    '',
+    'Deposit address:',
     health.bridgeEvmAddress,
     '',
     `Polymarket wallet: ${health.walletAddress || '—'}`,
     '',
-    'از MetaMask روی یک شبکه و توکن پشتیبانی‌شده به همین آدرس بفرست. Bridge آن را به pUSD حساب Polymarket تبدیل می‌کند.',
-    'قبل از ارسال، شبکه/توکن و حداقل مبلغ را مطابق لیست فعلی Bridge بررسی کن.',
-  ].join('\n');
-  await upsert(env, chatId, messageId, text, [[{ text: '🔄 Refresh address', callback_data: 'botadmin:predictops:polydeposit' }], [{ text: '⬅️ Polymarket', callback_data: 'botadmin:predictops:provider' }]]);
+    `فقط ${asset.tokenSymbol} را روی ${asset.chainName}${destination === 'bsc-usdt' ? ' (BEP20)' : ''} به همین آدرس بفرست. Bridge آن را به pUSD حساب Polymarket تبدیل می‌کند.`,
+  ].filter(Boolean).join('\n');
+  await upsert(env, chatId, messageId, text, [[{ text: '🔄 Refresh', callback_data: `botadmin:predictops:polydeposit:${destination}` }], [{ text: '⬅️ Deposit methods', callback_data: 'botadmin:predictops:polydeposit' }]]);
+}
+
+async function sendPolymarketWithdrawMenu(env: Env, chatId: number, messageId?: number): Promise<void> {
+  const health = await getPolymarketAccountHealth(env);
+  await upsert(env, chatId, messageId, `➖ Polymarket Withdraw\n\nBalance: ${formatUsd(health.balanceUsd)} pUSD\n\nارز و شبکه برداشت را انتخاب کن.`, [
+    [{ text: 'USDC • Polygon', callback_data: 'botadmin:predictops:polywithdraw:polygon-usdc' }],
+    [{ text: 'USDT • BNB Smart Chain (BEP20)', callback_data: 'botadmin:predictops:polywithdraw:bsc-usdt' }],
+    [{ text: '⬅️ Polymarket', callback_data: 'botadmin:predictops:provider' }],
+  ]);
 }
 
 async function sendPolymarketWithdrawalConfirm(env: Env, chatId: number, messageId: number | undefined, preview: PolymarketWithdrawalPreview): Promise<void> {
-  const estimated = preview.estimatedOutputUsd == null ? '—' : `$${formatUsd(preview.estimatedOutputUsd)} USDC`;
-  const minimum = preview.minReceived == null ? '—' : `$${formatUsd(preview.minReceived)} USDC`;
+  const estimated = preview.estimatedOutputUsd == null ? '—' : `$${formatUsd(preview.estimatedOutputUsd)} ${preview.destinationToken}`;
+  const minimum = preview.minReceived == null ? '—' : `$${formatUsd(preview.minReceived)} ${preview.destinationToken}`;
   const text = [
     '⚠️ Confirm Polymarket Withdrawal',
     '',
     `Amount: ${formatUsd(preview.amountUsd)} pUSD`,
-    `Destination: ${preview.destinationChain} / ${preview.destinationToken}`,
+    `Destination: ${preview.destinationChain} / ${preview.destinationToken}${preview.destinationToken === 'USDT' ? ' (BEP20)' : ''}`,
     `Recipient: ${preview.recipientAddress}`,
     `Estimated output: ${estimated}`,
     `Minimum received: ${minimum}`,
@@ -599,7 +629,7 @@ async function readState(env: Env, userId: number): Promise<InputState | null> {
 function clearState(env: Env, userId: number): Promise<void> { return env.BOT_CACHE.delete(stateKey(userId)).catch(() => undefined); }
 function stateKey(userId: number): string { return STATE_PREFIX + String(userId); }
 async function savePredictOpsState(env: Env, userId: number, state: PredictOpsInputState): Promise<void> { await env.BOT_CACHE.put(predictOpsStateKey(userId), JSON.stringify(state), { expirationTtl: 900 }); }
-async function readPredictOpsState(env: Env, userId: number): Promise<PredictOpsInputState | null> { const raw = await env.BOT_CACHE.get(predictOpsStateKey(userId)).catch(() => null); if (!raw) return null; try { const state = JSON.parse(raw) as PredictOpsInputState; if (!state || typeof state !== 'object' || typeof state.mode !== 'string') return null; if (state.mode === 'maintenance' || state.mode === 'user-access' || state.mode === 'polymarket-withdraw-amount') return state; if ((state.mode === 'user-note' || state.mode === 'user-max-limit' || state.mode === 'user-daily-limit') && typeof state.userId === 'string') return state; if (state.mode === 'market-exposure' && (state.market === 'bitcoin' || state.market === 'gold' || state.market === 'oil')) return state; if (state.mode === 'user-block-note' && typeof state.userId === 'string') return state; return null; } catch { return null; } }
+async function readPredictOpsState(env: Env, userId: number): Promise<PredictOpsInputState | null> { const raw = await env.BOT_CACHE.get(predictOpsStateKey(userId)).catch(() => null); if (!raw) return null; try { const state = JSON.parse(raw) as PredictOpsInputState; if (!state || typeof state !== 'object' || typeof state.mode !== 'string') return null; if (state.mode === 'maintenance' || state.mode === 'user-access') return state; if (state.mode === 'polymarket-withdraw-amount' && (state.destination === 'polygon-usdc' || state.destination === 'bsc-usdt')) return state; if ((state.mode === 'user-note' || state.mode === 'user-max-limit' || state.mode === 'user-daily-limit') && typeof state.userId === 'string') return state; if (state.mode === 'market-exposure' && (state.market === 'bitcoin' || state.market === 'gold' || state.market === 'oil')) return state; if (state.mode === 'user-block-note' && typeof state.userId === 'string') return state; return null; } catch { return null; } }
 function clearPredictOpsState(env: Env, userId: number): Promise<void> { return env.BOT_CACHE.delete(predictOpsStateKey(userId)).catch(() => undefined); }
 function predictOpsStateKey(userId: number): string { return PREDICT_OPS_STATE_PREFIX + String(userId); }
 function isAdmin(env: Env, userId: unknown): boolean { return String(env.BOT_ADMIN || '').split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean).includes(String(userId || '')); }

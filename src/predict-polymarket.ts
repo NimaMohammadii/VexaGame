@@ -347,10 +347,11 @@ export async function getPolymarketBridgeAsset(destination: PolymarketBridgeDest
   return requireBridgeAsset(destination);
 }
 
-export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput: unknown, destination: PolymarketBridgeDestination = 'polygon-usdc'): Promise<PolymarketWithdrawalPreview> {
+export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput: unknown, destination: PolymarketBridgeDestination = 'polygon-usdc', recipientInput?: unknown): Promise<PolymarketWithdrawalPreview> {
   await ensurePredictProviderTables(env);
   const client = await getTradingClient(env);
   const amountBaseUnits = parsePusdBaseUnits(amountInput);
+  const recipientAddress = normalizeEvmAddress(recipientInput ?? client.account.signer);
   const balanceBaseUnits = await readCollateralBalanceBaseUnits(client);
   if (amountBaseUnits > balanceBaseUnits) throw new Error('مبلغ برداشت از موجودی pUSD بیشتر است.');
   const supported = await requireBridgeAsset(destination);
@@ -362,7 +363,7 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
   const quote = await getBridgeQuote({
     amountBaseUnits,
     fromTokenAddress: PUSD_TOKEN_ADDRESS,
-    recipientAddress: client.account.signer,
+    recipientAddress,
     toChainId: supported.chainId,
     toTokenAddress: supported.tokenAddress,
   });
@@ -374,7 +375,7 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
     .bind(
       requestId,
       amountBaseUnits.toString(),
-      client.account.signer,
+      recipientAddress,
       supported.chainId,
       supported.tokenAddress,
       quote.estimatedOutputUsd,
@@ -385,7 +386,7 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
   return {
     requestId,
     amountUsd,
-    recipientAddress: client.account.signer,
+    recipientAddress,
     destinationChain: supported.chainName,
     destinationToken: supported.tokenSymbol,
     estimatedOutputUsd: quote.estimatedOutputUsd,
@@ -402,7 +403,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
   if (row.status !== 'prepared') throw new Error(row.status === 'review' ? 'این برداشت نیاز به بررسی تراکنش قبلی دارد و خودکار تکرار نمی‌شود.' : 'این برداشت در حال اجراست یا دیگر قابل اجرا نیست.');
 
   const client = await getTradingClient(env);
-  if (String(client.account.signer).toLowerCase() !== row.recipient_address.toLowerCase()) throw new Error('Signer فعلی با مقصد برداشت آماده‌شده مطابقت ندارد.');
+  const recipientAddress = normalizeEvmAddress(row.recipient_address);
   const destination = await requireStoredBridgeAsset(row.to_chain_id, row.to_token_address);
   const amountBaseUnits = BigInt(row.amount_base_units);
   if (amountBaseUnits <= 0n) throw new Error('مبلغ برداشت ذخیره‌شده نامعتبر است.');
@@ -412,7 +413,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
   const freshQuote = await getBridgeQuote({
     amountBaseUnits,
     fromTokenAddress: PUSD_TOKEN_ADDRESS,
-    recipientAddress: client.account.signer,
+    recipientAddress,
     toChainId: destination.chainId,
     toTokenAddress: destination.tokenAddress,
   });
@@ -432,7 +433,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
 
   let bridgeAddress: string;
   try {
-    bridgeAddress = await createBridgeWithdrawalAddress(client.account.wallet, client.account.signer, destination.chainId, destination.tokenAddress);
+    bridgeAddress = await createBridgeWithdrawalAddress(client.account.wallet, recipientAddress, destination.chainId, destination.tokenAddress);
   } catch (error) {
     await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET status = 'prepared', error = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
       .bind(messageOf(error), requestId).run().catch(() => undefined);
@@ -1059,6 +1060,12 @@ function baseUnitsToUsd(value: bigint): number {
 function finiteNullable(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function normalizeEvmAddress(value: unknown): string {
+  const address = String(value ?? '').trim();
+  if (!/^0x[0-9a-f]{40}$/i.test(address)) throw new Error('آدرس مقصد نامعتبر است. یک آدرس EVM معتبر با 0x وارد کن.');
+  return address;
 }
 
 function normalizeWithdrawalRequestId(value: unknown): string {

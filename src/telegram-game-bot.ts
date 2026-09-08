@@ -319,7 +319,7 @@ async function handleEmojiSend(env: Env, token: string, message: NonNullable<Tel
 
 
 function isMenuCommand(text: string | undefined): boolean {
-  return isAdminCommand(text) || /^\\/[a-z][a-z0-9_]*(?:@[-_a-z0-9]+)?(?:\\s+.*)?$/i.test(String(text || '').trim());
+  return isAdminCommand(text) || /^\/[a-z][a-z0-9_]*(?:@[-_a-z0-9]+)?(?:\s+.*)?$/i.test(String(text || '').trim());
 }
 
 async function deleteCurrentMenuMessage(env: Env, token: string, chatId: number): Promise<void> {

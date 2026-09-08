@@ -7,7 +7,7 @@ const DEFAULT_PAYMENT_METHOD_IMAGES = {
   nft: '/app/api/deposit-method-icon/nft.png',
 } as const;
 
-type PaymentMethodImageUrls = Partial<Record<keyof typeof DEFAULT_PAYMENT_METHOD_IMAGES, string>>;
+type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
 
 function safeSingleQuotedJs(value: string): string {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -16,6 +16,7 @@ function safeSingleQuotedJs(value: string): string {
 export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
   const starsUrl = paymentMethodImageUrls.stars || DEFAULT_PAYMENT_METHOD_IMAGES.stars;
   const gramUrl = paymentMethodImageUrls.gram || DEFAULT_PAYMENT_METHOD_IMAGES.gram;
+  const usdtUrl = paymentMethodImageUrls.usdt || '';
   const nftUrl = paymentMethodImageUrls.nft || DEFAULT_PAYMENT_METHOD_IMAGES.nft;
   const walletSource = "var src=type==='ton'?'/app/api/credit-icon.png':('/app/api/deposit-method-icon/'+(type==='nft'?'nft':'stars')+'.png');";
   const walletResolvedSource = `var src=type==='ton'?'${safeSingleQuotedJs(gramUrl)}':(type==='nft'?'${safeSingleQuotedJs(nftUrl)}':'${safeSingleQuotedJs(starsUrl)}');`;
@@ -30,8 +31,15 @@ export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMet
     )
     .replace(walletSource, walletResolvedSource);
 
+  if (usdtUrl) {
+    shell = shell.replace(
+      /<svg class="usdt-method-icon" viewBox="0 0 48 48"[\s\S]*?<\/svg>/,
+      `<img src="${usdtUrl}" alt="" decoding="async" loading="eager">`,
+    );
+  }
+
   const headExtras: string[] = [];
-  const paymentPreloads = Array.from(new Set([starsUrl, gramUrl, nftUrl]));
+  const paymentPreloads = Array.from(new Set([starsUrl, gramUrl, usdtUrl, nftUrl].filter(Boolean)));
   paymentPreloads.forEach((url) => {
     if (url) headExtras.push(`<link rel="preload" as="image" href="${url}">`);
   });

@@ -136,7 +136,7 @@ export const GAME_LIVE_COUNT_SCRIPT = `
   function apply(payload){if(!payload||!payload.config)return;ranges=payload.config.ranges||{};adjustments=payload.config.adjustments||{};realCounts=payload.counts||{};ready=true;refresh()}
   window.VexaLiveGameCounts={get:count,setCount:setCount,sync:function(){refresh();return Promise.resolve(true)},refresh:refresh,renderBadge:renderBadge};
   window.addEventListener('vexa:game-online',function(event){apply(event&&event.detail)});
-  window.addEventListener('vexa:view-changed',renderBadge);
+  window.addEventListener('vexa:view-changed',refresh);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
   Object.keys(games).forEach(function(id){cardNodes(id).forEach(function(el){el.textContent=''})});
 })();

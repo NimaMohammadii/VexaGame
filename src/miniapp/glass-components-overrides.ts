@@ -32,20 +32,6 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
   -webkit-backdrop-filter:blur(10px) saturate(1.18)!important;
 }
 #predictzone .predict-zone-result-strip{
-  margin:4px 0 14px!important;
-  padding:0 14px!important;
-}
-#predictzone .predict-zone-history-track{
-  gap:5px!important;
-  padding:0 0 1px!important;
-}
-#predictzone .predict-zone-history-card{
-  height:30px!important;
-  min-width:74px!important;
-  padding:0 10px!important;
-  border-radius:18px!important;
-  gap:4px!important;
-  font-size:10.5px!important;
-  box-shadow:0 7px 18px rgba(31,1,10,.22),inset 0 0 0 1px rgba(255,255,255,.045)!important;
+  margin:-8px 0 12px!important;
 }
 `;

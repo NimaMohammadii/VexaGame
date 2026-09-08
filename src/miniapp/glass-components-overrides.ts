@@ -42,7 +42,7 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
 #predictzone .predict-zone-actions .predict-zone-choice{height:38px!important;padding:0 12px!important;gap:7px!important;background:#000!important;font-size:12px!important}
 #predictzone .predict-zone-actions .predict-zone-choice-symbol{width:17px!important;height:17px!important;font-size:16px!important}
 #predictzone .predict-zone-result-strip{
-  margin:-14px 0 12px!important;
+  margin:-22px 0 12px!important;
 }
 #predictzone .predict-zone-history-card{height:28px!important}
 #predictzone .predict-zone-bet-presets button,
@@ -53,7 +53,7 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
   font-size:13px!important;
 }
 #predictzone .predict-zone-glass-card.bet-mode .predict-zone-bet-stage{
-  transform:translate3d(0,-12px,0)!important;
+  transform:translate3d(0,-20px,0)!important;
 }
 @media(max-width:380px){
   #predictzone .predict-zone-countdown{font-size:18px!important}

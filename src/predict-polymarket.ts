@@ -821,7 +821,7 @@ async function assertPolymarketTradingAllowed(): Promise<GeoBlockState> {
   return geo;
 }
 
-async function fetchPolymarketBitcoinStartPrice(startMs: number): Promise<number> {
+export async function fetchPolymarketBitcoinStartPrice(startMs: number): Promise<number> {
   const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
   const inFlight = startPriceRequests.get(normalizedStart);

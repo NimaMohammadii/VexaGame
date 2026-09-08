@@ -3,7 +3,6 @@ import {
   OrderType,
   buildHmacSignature,
   createSecureClient,
-  production,
   type ApiKeyAuthorization,
   type SignedOrder,
 } from '@polymarket/client';
@@ -25,6 +24,7 @@ const GEOBLOCK_URL = `${POLYMARKET_WEB_BASE}/api/geoblock`;
 const POLYMARKET_ROUND_MS = 5 * 60 * 1000;
 const PUSD_SCALE = 1_000_000;
 const PUSD_SCALE_BIGINT = 1_000_000n;
+const PUSD_TOKEN_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
 const POLYGON_CHAIN_ID = '137';
 const POLYGON_NATIVE_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 const RTDS_URL = 'wss://ws-live-data.polymarket.com';
@@ -344,7 +344,7 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
   }
   const quote = await getBridgeQuote({
     amountBaseUnits,
-    fromTokenAddress: production.contracts.collateralToken,
+    fromTokenAddress: PUSD_TOKEN_ADDRESS,
     recipientAddress: client.account.signer,
   });
   const requestId = `pw_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
@@ -393,7 +393,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
 
   const freshQuote = await getBridgeQuote({
     amountBaseUnits,
-    fromTokenAddress: production.contracts.collateralToken,
+    fromTokenAddress: PUSD_TOKEN_ADDRESS,
     recipientAddress: client.account.signer,
   });
   if (row.min_received != null && freshQuote.minReceived != null && freshQuote.minReceived + 0.000001 < Number(row.min_received)) {
@@ -426,7 +426,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
     const handle = await client.transferErc20({
       amount: amountBaseUnits,
       recipientAddress: bridgeAddress as typeof client.account.signer,
-      tokenAddress: production.contracts.collateralToken,
+      tokenAddress: PUSD_TOKEN_ADDRESS as typeof client.account.signer,
     });
     const submittedHash = handle.transactionHash ? String(handle.transactionHash) : null;
     if (submittedHash) {
@@ -466,12 +466,6 @@ async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice: numbe
     downPrice: downBook.bestAsk ?? parsed.downPrice,
     upLiquidityUsd: upBook.askLiquidityUsd,
     downLiquidityUsd: downBook.askLiquidityUsd,
-    startPrice: Number(startPrice),
-    finalPrice: metadataFinalPrice(event, market),
-    resolutionSource: findResolutionSource(market, event),
-    rtdsTopic: parsed.rtdsTopic,
-    rtdsSymbol: 'btc/usd',
-    rtdsUrl: RTDS_URL,
   };
 }
 
@@ -659,7 +653,7 @@ async function getTradingClient(env: Env): Promise<TradingClient> {
       const apiKey: ApiKeyAuthorization = {
         get isBuilderKey() { return true; },
         get supportGasless() { return true; },
-        async authorize(request) {
+        async authorize(request: Parameters<ApiKeyAuthorization['authorize']>[0]) {
           const timestamp = Math.floor(Date.now() / 1000);
           return {
             POLY_BUILDER_API_KEY: key,

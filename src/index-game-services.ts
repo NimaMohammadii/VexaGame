@@ -5,6 +5,7 @@ import { getCrashVirtualUsers, resetCrashVirtualUsers, saveCrashVirtualUsers } f
 import { getSlotVirtualUsers, resetSlotVirtualUsers, saveSlotVirtualUsers } from './slot-virtual-users';
 import { createStarsDeposit, getStarsGramRate, listUserStarsDeposits } from './stars-deposits';
 import { createTonDeposit, getTonDeposit, listUserTonDeposits, verifyTonDeposit } from './ton-deposits';
+import { createUsdtDeposit, verifyUsdtDeposit } from './usdt-deposits';
 import { listUserTonTransactions, listUserTonWalletTransactions } from './ton-transactions';
 import { createTonWithdrawal, listUserTonWithdrawals } from './ton-withdrawals';
 import { setTelegramWebhook } from './telegram-game-bot';
@@ -264,6 +265,27 @@ app.post('/app/api/ton/deposits/:id/verify', async (c) => {
     return c.json(await verifyTonDeposit(c.env, userId, c.req.param('id')), 200, { 'cache-control': 'no-store' });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Could not verify Gram deposit' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/usdt/deposits', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as { initData?: unknown; network?: unknown; amountUsdt?: unknown };
+    const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
+    return c.json(await createUsdtDeposit(c.env, userId, body.network, body.amountUsdt), 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not create USDT deposit' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/usdt/deposits/:id/verify', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as { initData?: unknown };
+    const initData = body.initData || c.req.header('x-telegram-init-data') || '';
+    const userId = await validateTelegramInitData(initData, gameBotToken(c.env));
+    return c.json(await verifyUsdtDeposit(c.env, userId, c.req.param('id')), 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not verify USDT deposit' }, 400, { 'cache-control': 'no-store' });
   }
 });
 

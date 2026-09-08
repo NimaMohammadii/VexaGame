@@ -13,6 +13,10 @@ export type Env = {
   GAME_BOT_TOKEN: string;
   MINI_APP_SHORT_NAME?: string;
   TONCENTER_API_KEY?: string;
+  GETBLOCK_BSC_RPC_URL?: string;
+  GETBLOCK_TRON_RPC_URL?: string;
+  USDT_BSC_TREASURY_ADDRESS?: string;
+  USDT_TRON_TREASURY_ADDRESS?: string;
   TON_WITHDRAW_MNEMONIC?: string;
   TON_WITHDRAW_PAYOUT_TOKEN?: string;
   TON_WITHDRAW_WALLET_ADDRESS?: string;

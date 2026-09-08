@@ -3,6 +3,7 @@ import {
   OrderType,
   buildHmacSignature,
   createSecureClient,
+  production,
   type ApiKeyAuthorization,
   type SignedOrder,
 } from '@polymarket/client';
@@ -343,7 +344,7 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
   }
   const quote = await getBridgeQuote({
     amountBaseUnits,
-    fromTokenAddress: client.environment.contracts.collateralToken,
+    fromTokenAddress: production.contracts.collateralToken,
     recipientAddress: client.account.signer,
   });
   const requestId = `pw_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
@@ -392,7 +393,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
 
   const freshQuote = await getBridgeQuote({
     amountBaseUnits,
-    fromTokenAddress: client.environment.contracts.collateralToken,
+    fromTokenAddress: production.contracts.collateralToken,
     recipientAddress: client.account.signer,
   });
   if (row.min_received != null && freshQuote.minReceived != null && freshQuote.minReceived + 0.000001 < Number(row.min_received)) {
@@ -425,7 +426,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
     const handle = await client.transferErc20({
       amount: amountBaseUnits,
       recipientAddress: bridgeAddress as typeof client.account.signer,
-      tokenAddress: client.environment.contracts.collateralToken,
+      tokenAddress: production.contracts.collateralToken,
     });
     const submittedHash = handle.transactionHash ? String(handle.transactionHash) : null;
     if (submittedHash) {
@@ -465,6 +466,12 @@ async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice: numbe
     downPrice: downBook.bestAsk ?? parsed.downPrice,
     upLiquidityUsd: upBook.askLiquidityUsd,
     downLiquidityUsd: downBook.askLiquidityUsd,
+    startPrice: Number(startPrice),
+    finalPrice: metadataFinalPrice(event, market),
+    resolutionSource: findResolutionSource(market, event),
+    rtdsTopic: parsed.rtdsTopic,
+    rtdsSymbol: 'btc/usd',
+    rtdsUrl: RTDS_URL,
   };
 }
 

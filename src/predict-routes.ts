@@ -5,7 +5,7 @@ import { publishPredictOpsState, publishPredictRoundState, type PredictOpsRealti
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, publicUserControls, setUserSectionBlocked, type UserSectionBlock } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
 import { getSectionAccess, isMiniAppAdmin } from './section-access';
-import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
+import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -274,12 +274,14 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
   const lockAt = betLockAtMs(round);
   const provider = String(round.market || '') === 'bitcoin' ? await getPredictRoundProvider(env, roundId) : 'vexa';
   const polymarketRow = provider === 'polymarket'
-    ? await env.DB.prepare('SELECT condition_id, up_token_id, down_token_id FROM predict_polymarket_rounds WHERE round_id = ?').bind(roundId).first<{ condition_id: string; up_token_id: string; down_token_id: string }>()
+    ? await env.DB.prepare('SELECT condition_id, up_token_id, down_token_id, rtds_topic FROM predict_polymarket_rounds WHERE round_id = ?').bind(roundId).first<{ condition_id: string; up_token_id: string; down_token_id: string; rtds_topic: string }>()
     : null;
   const polymarket = polymarketRow ? {
     conditionId: String(polymarketRow.condition_id || ''),
     upTokenId: String(polymarketRow.up_token_id || ''),
     downTokenId: String(polymarketRow.down_token_id || ''),
+    rtdsTopic: String(polymarketRow.rtds_topic || ''),
+    rtdsUrl: POLYMARKET_RTDS_URL,
     clobWsUrl: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
     takerFeeRate: 0.07,
     platformFeeRate: POLYMARKET_PLATFORM_FEE_BPS / 10_000,
@@ -330,8 +332,31 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
     let existing = await env.DB.prepare(`SELECT * FROM predict_rounds WHERE market = ? AND datetime(starts_at) <= datetime('now') AND datetime(ends_at) > datetime('now') ORDER BY datetime(starts_at) DESC LIMIT 1`).bind(market).first<RoundRow>();
     if (existing) {
       if (Number(existing.start_price) > 0) return existing;
-      const repairedPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
-      await env.DB.prepare('UPDATE predict_rounds SET start_price = ? WHERE id = ?').bind(repairedPrice, existing.id).run();
+      const provider = await getPredictRoundProvider(env, existing.id);
+      if (provider === 'polymarket') {
+        const startMs = Date.parse(existing.starts_at);
+        if (!Number.isFinite(startMs) || startMs <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
+        const bootstrap = await claimPredictRoundBootstrap(env, existing.id, market);
+        if (!bootstrap.claimed) throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, bootstrap.retryAfterMs);
+        let polymarketRound: Awaited<ReturnType<typeof loadPolymarketBitcoinMarket>>;
+        try {
+          polymarketRound = await loadPolymarketBitcoinMarket(startMs);
+        } catch (error) {
+          const retryMs = await deferPredictRoundBootstrap(env, existing.id, error).catch(() => ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
+          throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, retryMs);
+        }
+        const repairedPrice = Number(polymarketRound.startPrice);
+        if (!(repairedPrice > 0)) {
+          const retryMs = await deferPredictRoundBootstrap(env, existing.id, new Error('Polymarket Bitcoin start price is unavailable for this round')).catch(() => ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
+          throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, retryMs);
+        }
+        await env.DB.prepare('UPDATE predict_rounds SET start_price = ? WHERE id = ?').bind(repairedPrice, existing.id).run();
+        await persistPolymarketRound(env, existing.id, polymarketRound);
+        await clearPredictRoundBootstrap(env, existing.id).catch(() => undefined);
+      } else {
+        const repairedPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
+        await env.DB.prepare('UPDATE predict_rounds SET start_price = ? WHERE id = ?').bind(repairedPrice, existing.id).run();
+      }
       const repaired = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id = ?').bind(existing.id).first<RoundRow>();
       if (!repaired) throw new Error('Could not repair prediction round');
       return repaired;
@@ -421,7 +446,7 @@ async function settleRound(env: Env, round: RoundRow, settlementPrice = 0): Prom
     if (market !== 'bitcoin') throw new Error('Polymarket provider is only available for Bitcoin');
     const resolved = await resolvePolymarketBitcoinRound(env, freshId);
     if (!resolved) return;
-    const finalPrice = Number(resolved.finalPrice) > 0 ? Number(resolved.finalPrice) : Number(fresh.start_price);
+    const finalPrice = Number(resolved.finalPrice) > 0 ? Number(resolved.finalPrice) : null;
     const locked = await env.DB.prepare(`UPDATE predict_rounds SET status = 'settling', end_price = ?, result = ? WHERE id = ? AND status = 'open'`).bind(finalPrice, resolved.result, freshId).run();
     if ((locked.meta?.changes || 0) <= 0 && fresh.status !== 'settling' && fresh.status !== 'settled') return;
     const bets = (await env.DB.prepare("SELECT * FROM predict_bets WHERE round_id = ? AND status IN ('active','settling_payment')").bind(freshId).all<BetRow>()).results || [];

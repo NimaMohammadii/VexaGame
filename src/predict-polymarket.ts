@@ -14,6 +14,7 @@ import type { Env } from './types';
 export type PredictProvider = 'vexa' | 'polymarket';
 export type PolymarketSide = 'up' | 'down';
 export type PolymarketBetStatus = 'reserved' | 'prepared' | 'matched' | 'failed';
+export type PolymarketBridgeDestination = 'polygon-usdc' | 'bsc-usdt';
 
 const PROVIDER_KEY = 'admin:predict-provider:v1';
 const POLYMARKET_WEB_BASE = 'https://polymarket.com';
@@ -27,6 +28,7 @@ const PUSD_SCALE_BIGINT = 1_000_000n;
 const PUSD_TOKEN_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
 const POLYGON_CHAIN_ID = '137';
 const POLYGON_NATIVE_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+const BSC_CHAIN_ID = '56';
 const RTDS_URL = 'wss://ws-live-data.polymarket.com';
 const START_PRICE_CACHE_SECONDS = 15 * 60;
 
@@ -147,12 +149,21 @@ export type PolymarketAccountHealth = {
   region: string | null;
 };
 
+export type PolymarketBridgeAssetView = {
+  destination: PolymarketBridgeDestination;
+  chainId: string;
+  chainName: 'Polygon' | 'BNB Smart Chain';
+  tokenSymbol: 'USDC' | 'USDT';
+  tokenAddress: string;
+  minCheckoutUsd: number | null;
+};
+
 export type PolymarketWithdrawalPreview = {
   requestId: string;
   amountUsd: number;
   recipientAddress: string;
-  destinationChain: 'Polygon';
-  destinationToken: 'USDC';
+  destinationChain: 'Polygon' | 'BNB Smart Chain';
+  destinationToken: 'USDC' | 'USDT';
   estimatedOutputUsd: number | null;
   minReceived: number | null;
 };
@@ -161,6 +172,8 @@ export type PolymarketWithdrawalResult = {
   requestId: string;
   amountUsd: number;
   recipientAddress: string;
+  destinationChain: 'Polygon' | 'BNB Smart Chain';
+  destinationToken: 'USDC' | 'USDT';
   txHash: string | null;
   status: 'completed';
 };
@@ -330,22 +343,28 @@ export async function getPolymarketAccountHealth(env: Env): Promise<PolymarketAc
   };
 }
 
-export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput: unknown): Promise<PolymarketWithdrawalPreview> {
+export async function getPolymarketBridgeAsset(destination: PolymarketBridgeDestination): Promise<PolymarketBridgeAssetView> {
+  return requireBridgeAsset(destination);
+}
+
+export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput: unknown, destination: PolymarketBridgeDestination = 'polygon-usdc'): Promise<PolymarketWithdrawalPreview> {
   await ensurePredictProviderTables(env);
   const client = await getTradingClient(env);
   const amountBaseUnits = parsePusdBaseUnits(amountInput);
   const balanceBaseUnits = await readCollateralBalanceBaseUnits(client);
   if (amountBaseUnits > balanceBaseUnits) throw new Error('مبلغ برداشت از موجودی pUSD بیشتر است.');
-  const supported = await requirePolygonNativeUsdc();
+  const supported = await requireBridgeAsset(destination);
   const amountUsd = baseUnitsToUsd(amountBaseUnits);
   const minimumUsd = Number(supported.minCheckoutUsd);
   if (Number.isFinite(minimumUsd) && minimumUsd > 0 && amountUsd < minimumUsd) {
-    throw new Error(`حداقل برداشت فعلی به USDC روی Polygon برابر $${minimumUsd} است.`);
+    throw new Error(`حداقل برداشت فعلی برای ${supported.tokenSymbol} روی ${supported.chainName} برابر $${minimumUsd} است.`);
   }
   const quote = await getBridgeQuote({
     amountBaseUnits,
     fromTokenAddress: PUSD_TOKEN_ADDRESS,
     recipientAddress: client.account.signer,
+    toChainId: supported.chainId,
+    toTokenAddress: supported.tokenAddress,
   });
   const requestId = `pw_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
   await env.DB.prepare(`INSERT INTO predict_polymarket_withdrawals (
@@ -356,8 +375,8 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
       requestId,
       amountBaseUnits.toString(),
       client.account.signer,
-      POLYGON_CHAIN_ID,
-      POLYGON_NATIVE_USDC,
+      supported.chainId,
+      supported.tokenAddress,
       quote.estimatedOutputUsd,
       quote.minReceived,
       quote.quoteId,
@@ -367,8 +386,8 @@ export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput:
     requestId,
     amountUsd,
     recipientAddress: client.account.signer,
-    destinationChain: 'Polygon',
-    destinationToken: 'USDC',
+    destinationChain: supported.chainName,
+    destinationToken: supported.tokenSymbol,
     estimatedOutputUsd: quote.estimatedOutputUsd,
     minReceived: quote.minReceived,
   };
@@ -384,17 +403,18 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
 
   const client = await getTradingClient(env);
   if (String(client.account.signer).toLowerCase() !== row.recipient_address.toLowerCase()) throw new Error('Signer فعلی با مقصد برداشت آماده‌شده مطابقت ندارد.');
-  if (row.to_chain_id !== POLYGON_CHAIN_ID || row.to_token_address.toLowerCase() !== POLYGON_NATIVE_USDC.toLowerCase()) throw new Error('مقصد برداشت ذخیره‌شده معتبر نیست.');
+  const destination = await requireStoredBridgeAsset(row.to_chain_id, row.to_token_address);
   const amountBaseUnits = BigInt(row.amount_base_units);
   if (amountBaseUnits <= 0n) throw new Error('مبلغ برداشت ذخیره‌شده نامعتبر است.');
   const balanceBaseUnits = await readCollateralBalanceBaseUnits(client);
   if (amountBaseUnits > balanceBaseUnits) throw new Error('موجودی pUSD برای این برداشت کافی نیست.');
-  await requirePolygonNativeUsdc();
 
   const freshQuote = await getBridgeQuote({
     amountBaseUnits,
     fromTokenAddress: PUSD_TOKEN_ADDRESS,
     recipientAddress: client.account.signer,
+    toChainId: destination.chainId,
+    toTokenAddress: destination.tokenAddress,
   });
   if (row.min_received != null && freshQuote.minReceived != null && freshQuote.minReceived + 0.000001 < Number(row.min_received)) {
     await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET estimated_output_usd = ?, min_received = ?, quote_id = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'prepared'`)
@@ -412,7 +432,7 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
 
   let bridgeAddress: string;
   try {
-    bridgeAddress = await createBridgeWithdrawalAddress(client.account.wallet, client.account.signer);
+    bridgeAddress = await createBridgeWithdrawalAddress(client.account.wallet, client.account.signer, destination.chainId, destination.tokenAddress);
   } catch (error) {
     await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET status = 'prepared', error = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
       .bind(messageOf(error), requestId).run().catch(() => undefined);
@@ -701,20 +721,53 @@ async function getBridgeEvmAddress(walletAddress: string): Promise<string | null
   return /^0x[0-9a-f]{40}$/i.test(evm) ? evm : null;
 }
 
-async function requirePolygonNativeUsdc(): Promise<BridgeSupportedAsset> {
+async function fetchBridgeSupportedAssets(): Promise<BridgeSupportedAsset[]> {
   const response = await fetch(`${BRIDGE_BASE}/supported-assets`, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`Polymarket bridge supported-assets request failed: HTTP ${response.status}`);
   const data = await response.json() as { supportedAssets?: BridgeSupportedAsset[] };
-  const asset = (Array.isArray(data.supportedAssets) ? data.supportedAssets : []).find((item) =>
-    String(item.chainId || '') === POLYGON_CHAIN_ID &&
-    String(item.token?.symbol || '').trim().toUpperCase() === 'USDC' &&
-    String(item.token?.address || '').trim().toLowerCase() === POLYGON_NATIVE_USDC.toLowerCase(),
+  return Array.isArray(data.supportedAssets) ? data.supportedAssets : [];
+}
+
+function bridgeTarget(destination: PolymarketBridgeDestination): { chainId: string; chainName: 'Polygon' | 'BNB Smart Chain'; tokenSymbol: 'USDC' | 'USDT' } {
+  if (destination === 'bsc-usdt') return { chainId: BSC_CHAIN_ID, chainName: 'BNB Smart Chain', tokenSymbol: 'USDT' };
+  return { chainId: POLYGON_CHAIN_ID, chainName: 'Polygon', tokenSymbol: 'USDC' };
+}
+
+async function requireBridgeAsset(destination: PolymarketBridgeDestination): Promise<PolymarketBridgeAssetView> {
+  const target = bridgeTarget(destination);
+  const assets = await fetchBridgeSupportedAssets();
+  const matches = assets.filter((item) =>
+    String(item.chainId || '') === target.chainId &&
+    String(item.token?.symbol || '').trim().toUpperCase() === target.tokenSymbol,
   );
-  if (!asset) throw new Error('USDC native روی Polygon در لیست فعلی Bridge پولی‌مارکت پیدا نشد.');
+  const selected = destination === 'polygon-usdc'
+    ? matches.find((item) => String(item.token?.address || '').trim().toLowerCase() === POLYGON_NATIVE_USDC.toLowerCase())
+    : matches.length === 1 ? matches[0] : undefined;
+  const tokenAddress = String(selected?.token?.address || '').trim();
+  if (!selected || !/^0x[0-9a-f]{40}$/i.test(tokenAddress)) {
+    throw new Error(`${target.tokenSymbol} روی ${target.chainName} در لیست فعلی Bridge پولی‌مارکت پیدا نشد.`);
+  }
+  return {
+    destination,
+    chainId: target.chainId,
+    chainName: target.chainName,
+    tokenSymbol: target.tokenSymbol,
+    tokenAddress,
+    minCheckoutUsd: finiteNullable(selected.minCheckoutUsd),
+  };
+}
+
+async function requireStoredBridgeAsset(chainIdInput: string, tokenAddressInput: string): Promise<PolymarketBridgeAssetView> {
+  const chainId = String(chainIdInput || '').trim();
+  const tokenAddress = String(tokenAddressInput || '').trim().toLowerCase();
+  const candidates: PolymarketBridgeDestination[] = chainId === BSC_CHAIN_ID ? ['bsc-usdt'] : chainId === POLYGON_CHAIN_ID ? ['polygon-usdc'] : [];
+  if (!candidates.length) throw new Error('شبکه مقصد برداشت معتبر نیست.');
+  const asset = await requireBridgeAsset(candidates[0]);
+  if (asset.tokenAddress.toLowerCase() !== tokenAddress) throw new Error('توکن مقصد برداشت دیگر با تنظیمات Bridge مطابقت ندارد.');
   return asset;
 }
 
-async function getBridgeQuote(input: { amountBaseUnits: bigint; fromTokenAddress: string; recipientAddress: string }): Promise<{ estimatedOutputUsd: number | null; minReceived: number | null; quoteId: string | null }> {
+async function getBridgeQuote(input: { amountBaseUnits: bigint; fromTokenAddress: string; recipientAddress: string; toChainId: string; toTokenAddress: string }): Promise<{ estimatedOutputUsd: number | null; minReceived: number | null; quoteId: string | null }> {
   const response = await fetch(`${BRIDGE_BASE}/quote`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -723,8 +776,8 @@ async function getBridgeQuote(input: { amountBaseUnits: bigint; fromTokenAddress
       fromChainId: POLYGON_CHAIN_ID,
       fromTokenAddress: input.fromTokenAddress,
       recipientAddress: input.recipientAddress,
-      toChainId: POLYGON_CHAIN_ID,
-      toTokenAddress: POLYGON_NATIVE_USDC,
+      toChainId: input.toChainId,
+      toTokenAddress: input.toTokenAddress,
     }),
   });
   if (!response.ok) throw new Error(`Polymarket bridge quote failed: HTTP ${response.status}`);
@@ -736,14 +789,14 @@ async function getBridgeQuote(input: { amountBaseUnits: bigint; fromTokenAddress
   };
 }
 
-async function createBridgeWithdrawalAddress(walletAddress: string, recipientAddress: string): Promise<string> {
+async function createBridgeWithdrawalAddress(walletAddress: string, recipientAddress: string, toChainId: string, toTokenAddress: string): Promise<string> {
   const response = await fetch(`${BRIDGE_BASE}/withdraw`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({
       address: walletAddress,
-      toChainId: POLYGON_CHAIN_ID,
-      toTokenAddress: POLYGON_NATIVE_USDC,
+      toChainId,
+      toTokenAddress,
       recipientAddr: recipientAddress,
     }),
   });
@@ -1015,10 +1068,13 @@ function normalizeWithdrawalRequestId(value: unknown): string {
 }
 
 function withdrawalResultFromRow(row: PolymarketWithdrawalRow): PolymarketWithdrawalResult {
+  const isBscUsdt = row.to_chain_id === BSC_CHAIN_ID;
   return {
     requestId: row.request_id,
     amountUsd: baseUnitsToUsd(BigInt(row.amount_base_units)),
     recipientAddress: row.recipient_address,
+    destinationChain: isBscUsdt ? 'BNB Smart Chain' : 'Polygon',
+    destinationToken: isBscUsdt ? 'USDT' : 'USDC',
     txHash: row.tx_hash || null,
     status: 'completed',
   };

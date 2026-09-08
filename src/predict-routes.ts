@@ -4,6 +4,7 @@ import type { Env } from './types';
 import { publishPredictOpsState, publishPredictRoundState, type PredictOpsRealtimeState } from './section-lock-events';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, publicUserControls, setUserSectionBlocked, type UserSectionBlock } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
+import { getSectionAccess, isMiniAppAdmin } from './section-access';
 import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
@@ -139,6 +140,9 @@ app.post('/app/api/predict-bet', async (c) => {
     market = normalizeTradeMarket(String(body.market || 'bitcoin'));
     const side = normalizeSide(body.side);
     userId = await authenticateUser(c.env, body.userId, body.initData);
+    if (!isMiniAppAdmin(c.env, userId) && (await getSectionAccess(c.env)).some((lock) => lock.sectionId === `predict-${market}`)) {
+      throw new Error('This prediction market is temporarily locked.');
+    }
     stakeNano = tonToNano(body.stakeTon);
     const tonUsd = cleanOptionalPrice(body.tonUsdSnapshot);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');

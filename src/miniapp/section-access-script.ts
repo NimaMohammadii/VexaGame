@@ -5,6 +5,8 @@ export const SECTION_ACCESS_SCRIPT = `
   var expiryTimer=0;
   var last='';
   var cache={locks:{}};
+  var sectionAccessReady=false;
+  var predictMarketExpiryTimer=0;
   var liveSocket=null;
   var liveReconnectTimer=0;
   var reconnectAttempt=0;
@@ -48,10 +50,17 @@ export const SECTION_ACCESS_SCRIPT = `
     if(remaining<=0){expireLocks();return}
     expiryTimer=setTimeout(function(){expiryTimer=0;expireLocks()},Math.ceil(remaining*1000)+50);
   }
-  function expireLocks(){var now=Date.now()/1000,source=cache&&cache.locks||{},next={},changed=false;Object.keys(source).forEach(function(id){var lock=source[id];if(lock&&Number(lock.lockedUntil)>now)next[id]=lock;else changed=true});if(changed){cache={locks:next};last='__expired__'}apply(cache)}
+  function expireLocks(){var now=Date.now()/1000,source=cache&&cache.locks||{},next={},changed=false;Object.keys(source).forEach(function(id){var lock=source[id];if(lock&&Number(lock.lockedUntil)>now)next[id]=lock;else changed=true});if(changed){cache={locks:next};last='__expired__';applyPredictMarketLocks()}apply(cache)}
   function applyLivePayload(payload){
     if(!payload||!payload.locks)return;
-    cache={locks:payload.locks};apply(cache);
+    sectionAccessReady=true;cache={locks:payload.locks};applyPredictMarketLocks();apply(cache);
+  }
+  function applyPredictMarketLocks(){
+    var root=document.getElementById('predictzone');if(!root)return;
+    if(predictMarketExpiryTimer){clearTimeout(predictMarketExpiryTimer);predictMarketExpiryTimer=0}var nextExpiry=0,now=Date.now()/1000;
+    ['bitcoin','oil','gold'].forEach(function(market){var button=root.querySelector('[data-vexa-predict-admin-lock][data-vexa-predict-market="'+market+'"]');if(!button)return;var locked=!sectionAccessReady||!!(cache.locks&&cache.locks['predict-'+market]);button.setAttribute('data-vexa-predict-admin-lock',locked?'1':'0');if(locked){button.setAttribute('data-vexa-predict-locked','1');button.setAttribute('aria-disabled','true')}else{button.removeAttribute('data-vexa-predict-locked');button.removeAttribute('aria-disabled')}});
+    Object.keys(cache.locks||{}).forEach(function(id){if(id.indexOf('predict-')!==0)return;var until=Number(cache.locks[id]&&cache.locks[id].lockedUntil)||0;if(until>now&&(!nextExpiry||until<nextExpiry))nextExpiry=until});if(nextExpiry)predictMarketExpiryTimer=setTimeout(expireLocks,Math.max(50,Math.ceil((nextExpiry-now)*1000)+50));
+    try{window.dispatchEvent(new CustomEvent('vexa:predict-market-access'))}catch(e){}
   }
   function activePredictMarket(){
     var root=document.getElementById('predictzone');if(!root)return'';
@@ -158,7 +167,7 @@ export const SECTION_ACCESS_SCRIPT = `
     if(signature===last)return;
     last=signature;if(lock)render(lock);else remove();
   }
-  function reapply(){expireLocks();renderPredictOps();syncPredictPresence();sendGamePresence();flushPredictRoundSync();return Promise.resolve(cache)}
+  function reapply(){expireLocks();applyPredictMarketLocks();renderPredictOps();syncPredictPresence();sendGamePresence();flushPredictRoundSync();return Promise.resolve(cache)}
   document.addEventListener('click',function(event){
     var target=event.target&&event.target.closest&&event.target.closest('#predictzone [data-predict-choice],#predictzone [data-predict-bet-submit],#predictzone [data-predict-bet-preset]');
     if(!target)return;

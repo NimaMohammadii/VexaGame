@@ -13,6 +13,7 @@ const CACHE_PREDICT_IMAGE_MANIFEST = 'public, max-age=300, stale-while-revalidat
 const PREDICT_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const TRADE_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const ASTER_FUTURES_REST_BASE = 'https://fapi.asterdex.com';
+const BINANCE_SPOT_REST_BASE = 'https://api.binance.com';
 const ROUND_MS = 5 * 60 * 1000;
 const MONTH_BET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_MS = 0;
@@ -144,9 +145,9 @@ app.post('/app/api/predict-bet', async (c) => {
       throw new Error('This prediction market is temporarily locked.');
     }
     stakeNano = tonToNano(body.stakeTon);
-    const tonUsd = cleanOptionalPrice(body.tonUsdSnapshot);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
     const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+    const tonUsd = providerState === 'polymarket' ? await fetchGramUsdPrice() : cleanOptionalPrice(body.tonUsdSnapshot);
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     await settleDueRounds(c.env, market, false, snapshot.price);
@@ -331,9 +332,10 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
   if (market === 'bitcoin') {
     let existing = await env.DB.prepare(`SELECT * FROM predict_rounds WHERE market = ? AND datetime(starts_at) <= datetime('now') AND datetime(ends_at) > datetime('now') ORDER BY datetime(starts_at) DESC LIMIT 1`).bind(market).first<RoundRow>();
     if (existing) {
-      if (Number(existing.start_price) > 0) return existing;
       const provider = await getPredictRoundProvider(env, existing.id);
       if (provider === 'polymarket') {
+        const metadata = await env.DB.prepare('SELECT round_id FROM predict_polymarket_rounds WHERE round_id = ? LIMIT 1').bind(existing.id).first<{ round_id: string }>();
+        if (Number(existing.start_price) > 0 && metadata) return existing;
         const startMs = Date.parse(existing.starts_at);
         if (!Number.isFinite(startMs) || startMs <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
         const bootstrap = await claimPredictRoundBootstrap(env, existing.id, market);
@@ -354,6 +356,7 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
         await persistPolymarketRound(env, existing.id, polymarketRound);
         await clearPredictRoundBootstrap(env, existing.id).catch(() => undefined);
       } else {
+        if (Number(existing.start_price) > 0) return existing;
         const repairedPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
         await env.DB.prepare('UPDATE predict_rounds SET start_price = ? WHERE id = ?').bind(repairedPrice, existing.id).run();
       }
@@ -366,9 +369,10 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
     const endsAt = new Date(startMs + ROUND_MS).toISOString();
     const id = `pr_${market}_${startMs}`;
     const requestedProvider: PredictProvider = await getRequestedPredictProvider(env);
+    const provider = await rememberPredictRoundProvider(env, id, requestedProvider);
     let startPrice = 0;
     let polymarketRound: Awaited<ReturnType<typeof loadPolymarketBitcoinMarket>> | null = null;
-    if (requestedProvider === 'polymarket') {
+    if (provider === 'polymarket') {
       const bootstrap = await claimPredictRoundBootstrap(env, id, market);
       if (!bootstrap.claimed) throw new PredictRoundStartingError(id, startsAt, endsAt, bootstrap.retryAfterMs);
       try {
@@ -382,15 +386,12 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
         throw new PredictRoundStartingError(id, startsAt, endsAt, retryMs);
       }
       startPrice = Number(polymarketRound.startPrice);
+      await persistPolymarketRound(env, id, polymarketRound);
     } else startPrice = Number(latestPrice) > 0 ? Number(latestPrice) : await fetchPrice(market);
-    const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO predict_rounds (id, market, starts_at, ends_at, start_price, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)`).bind(id, market, startsAt, endsAt, startPrice).run();
+    await env.DB.prepare(`INSERT OR IGNORE INTO predict_rounds (id, market, starts_at, ends_at, start_price, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)`).bind(id, market, startsAt, endsAt, startPrice).run();
     const row = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id = ?').bind(id).first<RoundRow>();
     if (!row) throw new Error('Could not create prediction round');
-    if ((inserted.meta?.changes || 0) > 0) {
-      const provider = await rememberPredictRoundProvider(env, id, requestedProvider);
-      if (provider === 'polymarket' && polymarketRound) await persistPolymarketRound(env, id, polymarketRound);
-    }
-    if (requestedProvider === 'polymarket') await clearPredictRoundBootstrap(env, id).catch(() => undefined);
+    if (provider === 'polymarket') await clearPredictRoundBootstrap(env, id).catch(() => undefined);
     return row;
   }
 
@@ -540,6 +541,14 @@ async function fetchPrice(market: TradeMarket): Promise<number> {
   if (!res.ok) throw new Error(`Aster mark price request failed: HTTP ${res.status}`);
   const data = await res.json() as { markPrice?: string };
   return cleanPrice(data.markPrice);
+}
+async function fetchGramUsdPrice(): Promise<number> {
+  const res = await fetch(`${BINANCE_SPOT_REST_BASE}/api/v3/ticker/price?symbol=GRAMUSDT`, { cf: { cacheTtl: 1, cacheEverything: false } } as RequestInit);
+  if (!res.ok) throw new Error(`Binance GRAM/USD price request failed: HTTP ${res.status}`);
+  const data = await res.json() as { price?: unknown };
+  const price = Number(data.price);
+  if (!Number.isFinite(price) || price <= 0) throw new Error('Binance returned an invalid GRAM/USD price');
+  return price;
 }
 async function fetchMonthlyBoundaryPrice(market: TradeMarket, boundaryMs: number, boundary: 'start' | 'end'): Promise<number> {
   const symbol = marketSymbol(market);
@@ -885,14 +894,18 @@ export async function listPredictAuditLog(env: Env, limitInput = 20, userIdInput
 }
 
 async function getPredictOpsMarketStatus(env: Env, market: TradeMarket, control: PredictOpsControl): Promise<PredictOpsMarketStatus> {
-  const feed = await readPredictOpsFeed(env, market);
+  const [feed, provider] = await Promise.all([
+    readPredictOpsFeed(env, market),
+    market === 'bitcoin' ? getPredictProviderStateForRound(env).catch(() => 'vexa' as PredictProvider) : Promise.resolve('vexa' as PredictProvider),
+  ]);
   const latestRow = await env.DB.prepare('SELECT * FROM predict_rounds WHERE market = ? ORDER BY datetime(starts_at) DESC LIMIT 1').bind(market).first<RoundRow>().catch(() => null);
   const latestRound = latestRow ? await predictOpsRoundView(env, latestRow) : null;
   const lastSettled = await env.DB.prepare("SELECT settled_at FROM predict_rounds WHERE market = ? AND status = 'settled' AND settled_at IS NOT NULL ORDER BY datetime(settled_at) DESC LIMIT 1").bind(market).first<{ settled_at: string }>().catch(() => null);
   const due = await env.DB.prepare(`SELECT COUNT(*) AS count FROM predict_rounds WHERE market = ? AND datetime(ends_at) <= datetime('now') AND status NOT IN ('refunding','refunded') AND (status != 'settled' OR id IN (SELECT round_id FROM predict_bets WHERE status IN ('active', 'settling_payment')))`).bind(market).first<{ count: number }>().catch(() => null);
   const activeExposureNano = await getPredictMarketExposure(env, market);
   const exposureLimitNano = control.exposureLimitsNano[market];
-  return { market, manualPaused: control.pausedMarkets[market], circuitOpen: feed.circuitOpen, circuitReason: feed.circuitReason, lastPrice: feed.lastPrice, lastSuccessAt: feed.lastSuccessAt, lastError: feed.lastError, lastErrorAt: feed.lastErrorAt, latestRound, lastSettledAt: lastSettled?.settled_at || null, dueSettlementCount: Number(due?.count || 0), activeExposureNano, exposureLimitNano, capacityReached: exposureLimitNano > 0 && activeExposureNano >= exposureLimitNano };
+  const circuitOpen = feed.circuitOpen && provider !== 'polymarket';
+  return { market, manualPaused: control.pausedMarkets[market], circuitOpen, circuitReason: circuitOpen ? feed.circuitReason : null, lastPrice: feed.lastPrice, lastSuccessAt: feed.lastSuccessAt, lastError: feed.lastError, lastErrorAt: feed.lastErrorAt, latestRound, lastSettledAt: lastSettled?.settled_at || null, dueSettlementCount: Number(due?.count || 0), activeExposureNano, exposureLimitNano, capacityReached: exposureLimitNano > 0 && activeExposureNano >= exposureLimitNano };
 }
 
 async function predictOpsRoundView(env: Env, row: RoundRow): Promise<PredictOpsRoundView> {
@@ -907,11 +920,17 @@ async function predictOpsRoundView(env: Env, row: RoundRow): Promise<PredictOpsR
 }
 
 async function assertPredictBettingAvailable(env: Env, market: TradeMarket, userId: string, stakeNano: number, alreadyReserved: boolean): Promise<PredictBetGuard> {
-  const [control, feed, userControls, userLimits] = await Promise.all([readPredictOpsControl(env), readPredictOpsFeed(env, market), getUserControls(env, userId), getPredictUserLimits(env, userId)]);
+  const [control, feed, userControls, userLimits, provider] = await Promise.all([
+    readPredictOpsControl(env),
+    readPredictOpsFeed(env, market),
+    getUserControls(env, userId),
+    getPredictUserLimits(env, userId),
+    market === 'bitcoin' ? getPredictProviderStateForRound(env) : Promise.resolve('vexa' as PredictProvider),
+  ]);
   if (userControls.blockedSections.includes(`predict-${market}`)) throw new Error(USER_MARKET_BLOCK_MESSAGE);
   if (control.emergencyPaused) throw new Error(control.maintenanceMessage || DEFAULT_PREDICT_MAINTENANCE);
   if (control.pausedMarkets[market]) throw new Error(control.maintenanceMessage || `${marketLabel(market)} predictions are temporarily paused.`);
-  if (feed.circuitOpen) throw new Error(control.maintenanceMessage || `${marketLabel(market)} live price feed is unavailable. New predictions are paused automatically.`);
+  if (feed.circuitOpen && provider !== 'polymarket') throw new Error(control.maintenanceMessage || `${marketLabel(market)} live price feed is unavailable. New predictions are paused automatically.`);
   if (!alreadyReserved) {
     const [dailyStakeNano, activeExposureNano] = await Promise.all([getPredictUserDailyStake(env, userId), getPredictMarketExposure(env, market)]);
     if (userLimits.maxBetNano > 0 && stakeNano > userLimits.maxBetNano) throw new Error(`Your maximum prediction is ${nanoToTon(userLimits.maxBetNano)} GRAM per bet.`);

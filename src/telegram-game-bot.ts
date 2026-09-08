@@ -267,6 +267,7 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
   }
 
   if (message) {
+    if (isMenuCommand(message.text)) await deleteCurrentMenuMessage(env, token, message.chat.id);
     if (await handleEmojiSend(env, token, message)) return;
     const adminCommand = isAdminCommand(message.text);
     const adminHandled = await handleBotAdminMessage(env, token, message, telegram as TelegramApi);
@@ -314,6 +315,16 @@ async function handleEmojiSend(env: Env, token: string, message: NonNullable<Tel
     parse_mode: 'HTML',
   }).catch(() => undefined);
   return true;
+}
+
+
+function isMenuCommand(text: string | undefined): boolean {
+  return isAdminCommand(text) || /^\\/[a-z][a-z0-9_]*(?:@[-_a-z0-9]+)?(?:\\s+.*)?$/i.test(String(text || '').trim());
+}
+
+async function deleteCurrentMenuMessage(env: Env, token: string, chatId: number): Promise<void> {
+  const messageId = await getTelegramMenuMessageId(env, chatId);
+  if (messageId) await deleteIncomingMessage(token, chatId, messageId);
 }
 
 function isRegionCommand(text: string | undefined): boolean {

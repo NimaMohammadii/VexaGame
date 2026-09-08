@@ -267,7 +267,7 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
   }
 
   if (message) {
-    if (await handlePrimaryAdminCustomEmoji(env, token, message)) return;
+    if (await handleEmojiSend(env, token, message)) return;
     const adminCommand = isAdminCommand(message.text);
     const adminHandled = await handleBotAdminMessage(env, token, message, telegram as TelegramApi);
     if (adminHandled) return;
@@ -294,9 +294,20 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 }
 
 
-async function handlePrimaryAdminCustomEmoji(env: Env, token: string, message: TelegramUpdate['message'] & {}): Promise<boolean> {
-  const customEmojiId = message?.entities?.find((entity) => entity.type === 'custom_emoji' && entity.custom_emoji_id)?.custom_emoji_id;
-  if (!customEmojiId || !isPrimaryBotAdmin(env, message.from?.id)) return false;
+async function handleEmojiSend(env: Env, token: string, message: TelegramUpdate['message'] & {}): Promise<boolean> {
+  const userId = message?.from?.id;
+  if (!userId) return false;
+  const stateKey = `emoji-send:${message.chat.id}:${userId}`;
+  if (/^\/emojisend(?:@[-_a-z0-9]+)?$/i.test(String(message.text || '').trim())) {
+    await env.BOT_CACHE.put(stateKey, '1', { expirationTtl: 300 }).catch(() => undefined);
+    await deleteIncomingMessage(token, message.chat.id, message.message_id);
+    await telegram(token, 'sendMessage', { chat_id: message.chat.id, text: 'حالا ایموجی متحرک را بفرست.' }).catch(() => undefined);
+    return true;
+  }
+  const waiting = await env.BOT_CACHE.get(stateKey).catch(() => null);
+  const customEmojiId = message.entities?.find((entity) => entity.type === 'custom_emoji' && entity.custom_emoji_id)?.custom_emoji_id;
+  if (!waiting || !customEmojiId) return false;
+  await env.BOT_CACHE.delete(stateKey).catch(() => undefined);
   await deleteIncomingMessage(token, message.chat.id, message.message_id);
   await telegram(token, 'sendMessage', {
     chat_id: message.chat.id,
@@ -304,11 +315,6 @@ async function handlePrimaryAdminCustomEmoji(env: Env, token: string, message: T
     parse_mode: 'HTML',
   }).catch(() => undefined);
   return true;
-}
-
-function isPrimaryBotAdmin(env: Env, userId: unknown): boolean {
-  const primaryAdminId = String(env.BOT_ADMIN ?? '').split(/[\s,;]+/).map((value) => value.trim()).find((value) => /^\d+$/.test(value));
-  return Boolean(primaryAdminId) && primaryAdminId === String(userId ?? '');
 }
 
 function isRegionCommand(text: string | undefined): boolean {

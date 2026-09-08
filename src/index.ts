@@ -5,6 +5,7 @@ import { registerWheelRoutes } from './wheel-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
 import { handleGameBotWebhook } from './telegram-game-bot';
 import { addUserXpBatch, getUserLevel } from './levels';
+import { createUsdtDeposit, getUsdtDeposit, verifyUsdtDeposit } from './usdt-deposits';
 import type { Env, TelegramUpdate } from './types';
 import { gameBotToken, PUBLIC_BASE_URL, validateTelegramInitData } from './utils';
 
@@ -100,6 +101,40 @@ app.post('/app/api/level/xp', async (c) => {
     return c.json({ ok: true, processed: result.processed, accepted: result.accepted, profile: result.profile, leveledUp: result.leveledUp, previousLevel: result.previousLevel }, 200, { 'cache-control': 'no-store' });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Could not sync XP' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/usdt/deposits', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as { initData?: unknown; network?: unknown; amountUsdt?: unknown };
+    const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
+    return c.json(await createUsdtDeposit(c.env, userId, body.network, body.amountUsdt), 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not create USDT deposit' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.get('/app/api/usdt/deposits/:id', async (c) => {
+  try {
+    const initData = c.req.header('x-telegram-init-data') || c.req.query('initData') || '';
+    const userId = await validateTelegramInitData(initData, gameBotToken(c.env));
+    const deposit = await getUsdtDeposit(c.env, userId, c.req.param('id'));
+    return deposit
+      ? c.json(deposit, 200, { 'cache-control': 'no-store' })
+      : c.json({ error: 'USDT deposit not found' }, 404, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not load USDT deposit' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/usdt/deposits/:id/verify', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as { initData?: unknown };
+    const initData = body.initData || c.req.header('x-telegram-init-data') || '';
+    const userId = await validateTelegramInitData(initData, gameBotToken(c.env));
+    return c.json(await verifyUsdtDeposit(c.env, userId, c.req.param('id')), 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not verify USDT deposit' }, 400, { 'cache-control': 'no-store' });
   }
 });
 

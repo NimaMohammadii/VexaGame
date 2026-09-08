@@ -301,7 +301,7 @@ async function handleEmojiSend(env: Env, token: string, message: NonNullable<Tel
   if (/^\/emojisend(?:@[-_a-z0-9]+)?$/i.test(String(message.text || '').trim())) {
     await env.BOT_CACHE.put(stateKey, '1', { expirationTtl: 300 }).catch(() => undefined);
     await deleteIncomingMessage(token, message.chat.id, message.message_id);
-    await telegram(token, 'sendMessage', { chat_id: message.chat.id, text: 'حالا ایموجی متحرک را بفرست.' }).catch(() => undefined);
+    await replaceMenuMessage(env, token, message.chat.id, { text: 'حالا ایموجی متحرک را بفرست.' }).catch(() => undefined);
     return true;
   }
   const waiting = await env.BOT_CACHE.get(stateKey).catch(() => null);
@@ -309,8 +309,7 @@ async function handleEmojiSend(env: Env, token: string, message: NonNullable<Tel
   if (!waiting || !customEmojiId) return false;
   await env.BOT_CACHE.delete(stateKey).catch(() => undefined);
   await deleteIncomingMessage(token, message.chat.id, message.message_id);
-  await telegram(token, 'sendMessage', {
-    chat_id: message.chat.id,
+  await replaceMenuMessage(env, token, message.chat.id, {
     text: `Custom emoji ID:\n<code>${customEmojiId}</code>`,
     parse_mode: 'HTML',
   }).catch(() => undefined);

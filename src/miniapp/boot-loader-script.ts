@@ -313,7 +313,7 @@ export const BOOT_LOADER_SCRIPT = `
     ]);
     var timedUiReady=settle(ready,READY_TIMEOUT_MS,false);
     var gameImagesGate=progressGate(gameImagesReady(),32);
-    window.__vexaInitialUiReady=Promise.all([timedUiReady,gameImagesGate]).then(function(){return new Promise(function(resolve){requestAnimationFrame(function(){setBootProgress(100);requestAnimationFrame(function(){hide();resolve(true)})})})})
+    window.__vexaInitialUiReady=Promise.all([timedUiReady,gameImagesGate]).then(function(){return new Promise(function(resolve){requestAnimationFrame(function(){setBootProgress(100);requestAnimationFrame(function(){hide();try{window.dispatchEvent(new CustomEvent('vexa:home-ready'))}catch(e){}resolve(true)})})})})
   }
   setBootProgress(0);
   window.addEventListener('pagehide',stopBootAudio,{once:true});

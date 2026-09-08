@@ -23,6 +23,9 @@ const BRIDGE_BASE = 'https://bridge.polymarket.com';
 const GEOBLOCK_URL = `${POLYMARKET_WEB_BASE}/api/geoblock`;
 const POLYMARKET_ROUND_MS = 5 * 60 * 1000;
 const PUSD_SCALE = 1_000_000;
+const PUSD_SCALE_BIGINT = 1_000_000n;
+const POLYGON_CHAIN_ID = '137';
+const POLYGON_NATIVE_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 const RTDS_URL = 'wss://ws-live-data.polymarket.com';
 const START_PRICE_CACHE_SECONDS = 15 * 60;
 
@@ -61,6 +64,33 @@ type PolymarketBetRow = {
   signed_order_json: string | null;
   order_id: string | null;
   response_json: string | null;
+};
+type PolymarketWithdrawalRow = {
+  request_id: string;
+  amount_base_units: string;
+  recipient_address: string;
+  to_chain_id: string;
+  to_token_address: string;
+  estimated_output_usd: number | null;
+  min_received: number | null;
+  quote_id: string | null;
+  status: string;
+  bridge_address: string | null;
+  tx_hash: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type BridgeSupportedAsset = {
+  chainId?: unknown;
+  chainName?: unknown;
+  token?: { name?: unknown; symbol?: unknown; address?: unknown; decimals?: unknown };
+  minCheckoutUsd?: unknown;
+};
+type BridgeQuote = {
+  estOutputUsd?: unknown;
+  quoteId?: unknown;
+  estFeeBreakdown?: { minReceived?: unknown };
 };
 type GeoBlockState = { blocked: boolean; country: string; region: string };
 type PolymarketStartPriceCachePayload = { openPrice?: unknown; retryAt?: unknown };
@@ -116,6 +146,24 @@ export type PolymarketAccountHealth = {
   region: string | null;
 };
 
+export type PolymarketWithdrawalPreview = {
+  requestId: string;
+  amountUsd: number;
+  recipientAddress: string;
+  destinationChain: 'Polygon';
+  destinationToken: 'USDC';
+  estimatedOutputUsd: number | null;
+  minReceived: number | null;
+};
+
+export type PolymarketWithdrawalResult = {
+  requestId: string;
+  amountUsd: number;
+  recipientAddress: string;
+  txHash: string | null;
+  status: 'completed';
+};
+
 export type PredictProviderState = {
   requested: PredictProvider;
   active: PredictProvider | null;
@@ -161,6 +209,22 @@ export async function ensurePredictProviderTables(env: Env): Promise<void> {
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`).run();
       await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_predict_poly_bets_round ON predict_polymarket_bets(round_id)').run();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_polymarket_withdrawals (
+        request_id TEXT PRIMARY KEY,
+        amount_base_units TEXT NOT NULL,
+        recipient_address TEXT NOT NULL,
+        to_chain_id TEXT NOT NULL,
+        to_token_address TEXT NOT NULL,
+        estimated_output_usd REAL,
+        min_received REAL,
+        quote_id TEXT,
+        status TEXT NOT NULL,
+        bridge_address TEXT,
+        tx_hash TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`).run();
     })().catch((error) => {
       providerTablesReady = null;
       throw error;
@@ -263,6 +327,123 @@ export async function getPolymarketAccountHealth(env: Env): Promise<PolymarketAc
     country: geo?.country || null,
     region: geo?.region || null,
   };
+}
+
+export async function preparePolymarketWithdrawalToSigner(env: Env, amountInput: unknown): Promise<PolymarketWithdrawalPreview> {
+  await ensurePredictProviderTables(env);
+  const client = await getTradingClient(env);
+  const amountBaseUnits = parsePusdBaseUnits(amountInput);
+  const balanceBaseUnits = await readCollateralBalanceBaseUnits(client);
+  if (amountBaseUnits > balanceBaseUnits) throw new Error('مبلغ برداشت از موجودی pUSD بیشتر است.');
+  const supported = await requirePolygonNativeUsdc();
+  const amountUsd = baseUnitsToUsd(amountBaseUnits);
+  const minimumUsd = Number(supported.minCheckoutUsd);
+  if (Number.isFinite(minimumUsd) && minimumUsd > 0 && amountUsd < minimumUsd) {
+    throw new Error(`حداقل برداشت فعلی به USDC روی Polygon برابر $${minimumUsd} است.`);
+  }
+  const quote = await getBridgeQuote({
+    amountBaseUnits,
+    fromTokenAddress: client.environment.contracts.collateralToken,
+    recipientAddress: client.account.signer,
+  });
+  const requestId = `pw_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+  await env.DB.prepare(`INSERT INTO predict_polymarket_withdrawals (
+    request_id, amount_base_units, recipient_address, to_chain_id, to_token_address,
+    estimated_output_usd, min_received, quote_id, status, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+    .bind(
+      requestId,
+      amountBaseUnits.toString(),
+      client.account.signer,
+      POLYGON_CHAIN_ID,
+      POLYGON_NATIVE_USDC,
+      quote.estimatedOutputUsd,
+      quote.minReceived,
+      quote.quoteId,
+    )
+    .run();
+  return {
+    requestId,
+    amountUsd,
+    recipientAddress: client.account.signer,
+    destinationChain: 'Polygon',
+    destinationToken: 'USDC',
+    estimatedOutputUsd: quote.estimatedOutputUsd,
+    minReceived: quote.minReceived,
+  };
+}
+
+export async function executePolymarketWithdrawal(env: Env, requestIdInput: unknown): Promise<PolymarketWithdrawalResult> {
+  await ensurePredictProviderTables(env);
+  const requestId = normalizeWithdrawalRequestId(requestIdInput);
+  let row = await env.DB.prepare('SELECT * FROM predict_polymarket_withdrawals WHERE request_id = ?').bind(requestId).first<PolymarketWithdrawalRow>();
+  if (!row) throw new Error('درخواست برداشت پیدا نشد.');
+  if (row.status === 'completed') return withdrawalResultFromRow(row);
+  if (row.status !== 'prepared') throw new Error(row.status === 'review' ? 'این برداشت نیاز به بررسی تراکنش قبلی دارد و خودکار تکرار نمی‌شود.' : 'این برداشت در حال اجراست یا دیگر قابل اجرا نیست.');
+
+  const client = await getTradingClient(env);
+  if (String(client.account.signer).toLowerCase() !== row.recipient_address.toLowerCase()) throw new Error('Signer فعلی با مقصد برداشت آماده‌شده مطابقت ندارد.');
+  if (row.to_chain_id !== POLYGON_CHAIN_ID || row.to_token_address.toLowerCase() !== POLYGON_NATIVE_USDC.toLowerCase()) throw new Error('مقصد برداشت ذخیره‌شده معتبر نیست.');
+  const amountBaseUnits = BigInt(row.amount_base_units);
+  if (amountBaseUnits <= 0n) throw new Error('مبلغ برداشت ذخیره‌شده نامعتبر است.');
+  const balanceBaseUnits = await readCollateralBalanceBaseUnits(client);
+  if (amountBaseUnits > balanceBaseUnits) throw new Error('موجودی pUSD برای این برداشت کافی نیست.');
+  await requirePolygonNativeUsdc();
+
+  const freshQuote = await getBridgeQuote({
+    amountBaseUnits,
+    fromTokenAddress: client.environment.contracts.collateralToken,
+    recipientAddress: client.account.signer,
+  });
+  if (row.min_received != null && freshQuote.minReceived != null && freshQuote.minReceived + 0.000001 < Number(row.min_received)) {
+    await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET estimated_output_usd = ?, min_received = ?, quote_id = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'prepared'`)
+      .bind(freshQuote.estimatedOutputUsd, freshQuote.minReceived, freshQuote.quoteId, requestId).run();
+    throw new Error('Quote برداشت تغییر کرده است. دوباره Withdraw را باز کن تا مقدار جدید را تأیید کنی.');
+  }
+
+  const locked = await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET status = 'executing', error = NULL, estimated_output_usd = ?, min_received = ?, quote_id = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'prepared'`)
+    .bind(freshQuote.estimatedOutputUsd, freshQuote.minReceived, freshQuote.quoteId, requestId).run();
+  if ((locked.meta?.changes || 0) <= 0) {
+    row = await env.DB.prepare('SELECT * FROM predict_polymarket_withdrawals WHERE request_id = ?').bind(requestId).first<PolymarketWithdrawalRow>();
+    if (row?.status === 'completed') return withdrawalResultFromRow(row);
+    throw new Error('این برداشت قبلاً شروع شده است و دوباره اجرا نمی‌شود.');
+  }
+
+  let bridgeAddress: string;
+  try {
+    bridgeAddress = await createBridgeWithdrawalAddress(client.account.wallet, client.account.signer);
+  } catch (error) {
+    await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET status = 'prepared', error = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
+      .bind(messageOf(error), requestId).run().catch(() => undefined);
+    throw error;
+  }
+
+  await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET bridge_address = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
+    .bind(bridgeAddress, requestId).run();
+
+  try {
+    const handle = await client.transferErc20({
+      amount: amountBaseUnits,
+      recipientAddress: bridgeAddress as typeof client.account.signer,
+      tokenAddress: client.environment.contracts.collateralToken,
+    });
+    const submittedHash = handle.transactionHash ? String(handle.transactionHash) : null;
+    if (submittedHash) {
+      await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET tx_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
+        .bind(submittedHash, requestId).run();
+    }
+    const outcome = await handle.wait();
+    const txHash = String(outcome.transactionHash || handle.transactionHash || '').trim() || null;
+    await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET status = 'completed', tx_hash = ?, error = NULL, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
+      .bind(txHash, requestId).run();
+    const completed = await env.DB.prepare('SELECT * FROM predict_polymarket_withdrawals WHERE request_id = ?').bind(requestId).first<PolymarketWithdrawalRow>();
+    if (!completed || completed.status !== 'completed') throw new Error('برداشت انجام شد اما ثبت نتیجه کامل نشد.');
+    return withdrawalResultFromRow(completed);
+  } catch (error) {
+    await env.DB.prepare(`UPDATE predict_polymarket_withdrawals SET status = 'review', error = ?, updated_at = CURRENT_TIMESTAMP WHERE request_id = ? AND status = 'executing'`)
+      .bind(messageOf(error), requestId).run().catch(() => undefined);
+    throw new Error(`وضعیت انتقال قطعی نیست و برای جلوگیری از برداشت دوباره، Retry خودکار متوقف شد. ${messageOf(error)}`);
+  }
 }
 
 export async function loadPolymarketBitcoinMarket(startMs: number): Promise<PolymarketMarketView> {
@@ -496,9 +677,15 @@ async function ensureTradingApprovals(client: TradingClient): Promise<void> {
   await approvalsReadyPromise;
 }
 
-async function readCollateralBalanceUsd(client: TradingClient): Promise<number> {
+async function readCollateralBalanceBaseUnits(client: TradingClient): Promise<bigint> {
   const state = await fetchBalanceAllowance(client, { assetType: AssetType.COLLATERAL });
-  return Number(state.balance) / PUSD_SCALE;
+  const value = String(state.balance ?? '').trim();
+  if (!/^\d+$/.test(value)) throw new Error('Polymarket returned an invalid pUSD balance');
+  return BigInt(value);
+}
+
+async function readCollateralBalanceUsd(client: TradingClient): Promise<number> {
+  return Number(await readCollateralBalanceBaseUnits(client)) / PUSD_SCALE;
 }
 
 async function getBridgeEvmAddress(walletAddress: string): Promise<string | null> {
@@ -511,6 +698,59 @@ async function getBridgeEvmAddress(walletAddress: string): Promise<string | null
   const data = await response.json() as { address?: { evm?: unknown } };
   const evm = String(data?.address?.evm || '').trim();
   return /^0x[0-9a-f]{40}$/i.test(evm) ? evm : null;
+}
+
+async function requirePolygonNativeUsdc(): Promise<BridgeSupportedAsset> {
+  const response = await fetch(`${BRIDGE_BASE}/supported-assets`, { headers: { accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Polymarket bridge supported-assets request failed: HTTP ${response.status}`);
+  const data = await response.json() as { supportedAssets?: BridgeSupportedAsset[] };
+  const asset = (Array.isArray(data.supportedAssets) ? data.supportedAssets : []).find((item) =>
+    String(item.chainId || '') === POLYGON_CHAIN_ID &&
+    String(item.token?.symbol || '').trim().toUpperCase() === 'USDC' &&
+    String(item.token?.address || '').trim().toLowerCase() === POLYGON_NATIVE_USDC.toLowerCase(),
+  );
+  if (!asset) throw new Error('USDC native روی Polygon در لیست فعلی Bridge پولی‌مارکت پیدا نشد.');
+  return asset;
+}
+
+async function getBridgeQuote(input: { amountBaseUnits: bigint; fromTokenAddress: string; recipientAddress: string }): Promise<{ estimatedOutputUsd: number | null; minReceived: number | null; quoteId: string | null }> {
+  const response = await fetch(`${BRIDGE_BASE}/quote`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      fromAmountBaseUnit: input.amountBaseUnits.toString(),
+      fromChainId: POLYGON_CHAIN_ID,
+      fromTokenAddress: input.fromTokenAddress,
+      recipientAddress: input.recipientAddress,
+      toChainId: POLYGON_CHAIN_ID,
+      toTokenAddress: POLYGON_NATIVE_USDC,
+    }),
+  });
+  if (!response.ok) throw new Error(`Polymarket bridge quote failed: HTTP ${response.status}`);
+  const data = await response.json() as BridgeQuote;
+  return {
+    estimatedOutputUsd: finiteNullable(data.estOutputUsd),
+    minReceived: finiteNullable(data.estFeeBreakdown?.minReceived),
+    quoteId: String(data.quoteId || '').trim() || null,
+  };
+}
+
+async function createBridgeWithdrawalAddress(walletAddress: string, recipientAddress: string): Promise<string> {
+  const response = await fetch(`${BRIDGE_BASE}/withdraw`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      address: walletAddress,
+      toChainId: POLYGON_CHAIN_ID,
+      toTokenAddress: POLYGON_NATIVE_USDC,
+      recipientAddr: recipientAddress,
+    }),
+  });
+  if (!response.ok) throw new Error(`Polymarket bridge withdrawal request failed: HTTP ${response.status}`);
+  const data = await response.json() as { address?: { evm?: unknown } };
+  const evm = String(data?.address?.evm || '').trim();
+  if (!/^0x[0-9a-f]{40}$/i.test(evm)) throw new Error('Polymarket bridge returned an invalid withdrawal address');
+  return evm;
 }
 
 async function readPolymarketGeoblock(): Promise<GeoBlockState> {
@@ -747,6 +987,44 @@ function cleanAmount(value: unknown): number {
 function roundMoney(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n * 1_000_000) / 1_000_000 : 0;
+}
+
+function parsePusdBaseUnits(value: unknown): bigint {
+  const text = String(value ?? '').trim();
+  if (!/^\d+(?:\.\d{1,6})?$/.test(text)) throw new Error('مبلغ pUSD نامعتبر است. حداکثر ۶ رقم اعشار وارد کن.');
+  const [whole, fraction = ''] = text.split('.');
+  const units = BigInt(whole) * PUSD_SCALE_BIGINT + BigInt((fraction + '000000').slice(0, 6));
+  if (units <= 0n) throw new Error('مبلغ برداشت باید بیشتر از صفر باشد.');
+  return units;
+}
+
+function baseUnitsToUsd(value: bigint): number {
+  return Number(value) / PUSD_SCALE;
+}
+
+function finiteNullable(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function normalizeWithdrawalRequestId(value: unknown): string {
+  const requestId = String(value || '').trim();
+  if (!/^pw_[0-9a-f]{20}$/i.test(requestId)) throw new Error('شناسه برداشت نامعتبر است.');
+  return requestId;
+}
+
+function withdrawalResultFromRow(row: PolymarketWithdrawalRow): PolymarketWithdrawalResult {
+  return {
+    requestId: row.request_id,
+    amountUsd: baseUnitsToUsd(BigInt(row.amount_base_units)),
+    recipientAddress: row.recipient_address,
+    txHash: row.tx_hash || null,
+    status: 'completed',
+  };
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : 'Polymarket operation failed';
 }
 
 function slugStartMs(slug: string): number {

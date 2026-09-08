@@ -294,7 +294,7 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 }
 
 
-async function handleEmojiSend(env: Env, token: string, message: TelegramUpdate['message'] & {}): Promise<boolean> {
+async function handleEmojiSend(env: Env, token: string, message: NonNullable<TelegramUpdate['message']>): Promise<boolean> {
   const userId = message?.from?.id;
   if (!userId) return false;
   const stateKey = `emoji-send:${message.chat.id}:${userId}`;

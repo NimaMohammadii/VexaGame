@@ -3,6 +3,8 @@ import { CRASH_LIVE_D1_SCRIPT } from './scripts/live-bets';
 import { CRASH_BACK_BUTTON_SCRIPT } from './scripts/back-button';
 import { CRASH_BREAK_FX_SCRIPT } from './scripts/break-effect';
 
+export const CRASH_ROCKET_MODEL_URL = '/assets/Rocket3D.glb?v=2440b00e70f8e34a2366d642d3f99035d366618a';
+
 const CRASH_SPIN_BLUR_SCRIPT = `
 (async function(){
   self.ModelViewerElement=self.ModelViewerElement||{};
@@ -169,7 +171,7 @@ export const CRASH_SECTION = `<section id="crash" class="view crash-view">
             <span class="crash-flame-middle"></span>
             <span class="crash-flame-core"></span>
           </div>
-          <model-viewer id="crashRocket" class="crash-rocket-model" src="/assets/Rocket3D.glb?v=2440b00e70f8e34a2366d642d3f99035d366618a" alt="3D rocket" camera-orbit="0deg 78deg 108%" field-of-view="28deg" exposure="1.08" auto-rotate-delay="0" rotation-per-second="18deg" interaction-prompt="none" disable-zoom touch-action="none" loading="eager" reveal="auto"><effect-composer id="crashSpinComposer" render-mode="performance"></effect-composer></model-viewer>
+          <model-viewer id="crashRocket" class="crash-rocket-model" src="${CRASH_ROCKET_MODEL_URL}" alt="3D rocket" camera-orbit="0deg 78deg 108%" field-of-view="28deg" exposure="1.08" auto-rotate-delay="0" rotation-per-second="18deg" interaction-prompt="none" disable-zoom touch-action="none" loading="eager" reveal="auto"><effect-composer id="crashSpinComposer" render-mode="performance"></effect-composer></model-viewer>
         </div>
       </div>
       <div class="crash-multiplier-wrap">

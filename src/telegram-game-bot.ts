@@ -342,8 +342,8 @@ async function sendUserRegionMenu(env: Env, token: string, chatId: number, userI
   const currentCode = preference.countryCode || '';
   const currentLanguage = preference.languageCode ? (VEXA_LOCALE_LABELS as Record<string, string>)[preference.languageCode] : '';
   const title = preference.mode === 'automatic'
-    ? '<b>🌐 Region &amp; Language</b>\n\n<b>Automatic (System)</b>\nYour region and language will be selected automatically.'
-    : `<b>🌐 Region &amp; Language</b>\n\n<b>Current:</b> ${currentCode} · ${currentLanguage}\n\nChoose a region below.`;
+    ? '<b><tg-emoji emoji-id="5321275372333979355">🌐</tg-emoji> Region &amp; Language</b>\n\n<b>Automatic (System)</b>\nYour region and language will be selected automatically.'
+    : `<b><tg-emoji emoji-id="5321275372333979355">🌐</tg-emoji> Region &amp; Language</b>\n\n<b>Current:</b> ${currentCode} · ${currentLanguage}\n\nChoose a region below.`;
   const rows = chunk(USER_REGION_OPTIONS.map(([code, label]) => ({ text: `${currentCode === code ? '✓ ' : ''}${label}`, callback_data: `vexa:region:${code}` })), 2);
   rows.push([{ text: `${preference.mode === 'automatic' ? '✓ ' : ''}Automatic (System)`, callback_data: 'vexa:region:AUTO' }]);
   await replaceMenuMessage(env, token, chatId, { text: title, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } }, messageId);
@@ -402,13 +402,13 @@ function mainMenuText(locale: VexaLocale): string {
     '',
     line(copy.tagline),
     '',
-    `🧩 ${line(copy.quickGames)}`,
-    `💸 ${line(copy.predictions)}`,
+    `<tg-emoji emoji-id="5319247469165433798">🧩</tg-emoji> ${line(copy.quickGames)}`,
+    `<tg-emoji emoji-id="5231005931550030290">💸</tg-emoji> ${line(copy.predictions)}`,
     `🎟 ${line(copy.lotteries)}`,
     '',
-    `🎁 ${line(copy.dailyChance)}`,
+    `<tg-emoji emoji-id="5203996991054432397">🎁</tg-emoji> ${line(copy.dailyChance)}`,
     '',
-    `${line(copy.ready)} 👇`,
+    `${line(copy.ready)} <tg-emoji emoji-id="5231102735817918643">👇🏼</tg-emoji>`,
   ].join('\n');
 }
 

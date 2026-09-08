@@ -7,10 +7,32 @@ const DEFAULT_PAYMENT_METHOD_IMAGES = {
   nft: '/app/api/deposit-method-icon/nft.png',
 } as const;
 
+const BOOT_ASSET_READY_KEY = 'vexa:boot-assets-ready:v1';
+
 type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
 
 function safeSingleQuotedJs(value: string): string {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function applyBootAssetCachePolicy(shell: string): string {
+  return shell
+    .replace(
+      "jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));",
+      "try{var applyBackgrounds=window.VexaApplySectionBackgrounds;if(typeof applyBackgrounds==='function')Promise.resolve(applyBackgrounds()).catch(function(){})}catch(e){}",
+    )
+    .replace(
+      'var ready=Promise.all([',
+      `var assetsWarmed=false;try{assetsWarmed=localStorage.getItem('${BOOT_ASSET_READY_KEY}')==='1'}catch(e){}var ready=Promise.all([`,
+    )
+    .replace(
+      'progressGate(settle(playHubReady(),10000,false),18),',
+      'progressGate(assetsWarmed?Promise.resolve(true):settle(playHubReady(),10000,false),18),',
+    )
+    .replace(
+      'var gameImagesGate=progressGate(gameImagesReady(),32);',
+      `var gameImagesGate=assetsWarmed?Promise.resolve(true):progressGate(gameImagesReady().then(function(value){try{localStorage.setItem('${BOOT_ASSET_READY_KEY}','1')}catch(e){}return value}),32);`,
+    );
 }
 
 export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
@@ -37,6 +59,8 @@ export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMet
       `<img src="${usdtUrl}" alt="" decoding="async" loading="eager">`,
     );
   }
+
+  shell = applyBootAssetCachePolicy(shell);
 
   const headExtras: string[] = [];
   headExtras.push(`<script>(function(){if(!document.documentElement.classList.contains('vexa-web'))return;var w=Number(screen&&screen.width)||innerWidth||0;var h=Number(screen&&screen.height)||innerHeight||0;if(Math.min(w,h)>=600)document.documentElement.classList.add('vexa-web-large')})()</script>`);

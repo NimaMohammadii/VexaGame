@@ -2,13 +2,13 @@ import app from './index';
 import type { Env } from './types';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
+import { getSectionAccess, isMiniAppAdmin } from './section-access';
 
 const CACHE_NONE = 'no-store';
 const NANO = 1_000_000_000;
 const PLATFORM_FEE_BPS = 500;
 const DISCOVERY_LIMIT = 80;
 const DISCOVERY_SOURCE = 'https://gamma-api.polymarket.com';
-const PUBLIC_EVENT_PREDICTIONS_LOCKED = true;
 const PICKS = new Set(['yes', 'no']);
 const SPORT_PATTERN = /\b(sports?|soccer|football|nba|nfl|mlb|nhl|ufc|mma|tennis|golf|hockey|cricket|baseball|basketball|volleyball|formula\s*1|f1|esports?)\b/i;
 const CATEGORY_PATTERNS: Record<PredictionEventCategory, RegExp> = {
@@ -55,9 +55,10 @@ app.get('/app/api/prediction-events', async (c) => {
     await ensurePredictionEventTables(c.env);
     const claimedUserId = cleanUserIdOptional(c.req.query('userId'));
     const userId = claimedUserId ? await authenticateUser(c.env, claimedUserId, c.req.header('x-telegram-init-data') || c.req.query('initData')) : '';
-    if (PUBLIC_EVENT_PREDICTIONS_LOCKED) return c.json({ ok: true, events: [], userControls: userId ? await getUserControls(c.env, userId) : null }, 200, { 'cache-control': CACHE_NONE });
+    const lockedCategories = isMiniAppAdmin(c.env, userId) ? new Set<string>() : new Set((await getSectionAccess(c.env)).map((lock) => lock.sectionId.replace(/^predict-/, '')));
     const rows = await c.env.DB.prepare("SELECT * FROM prediction_events WHERE status != 'draft' ORDER BY featured DESC, datetime(closes_at) ASC, datetime(created_at) DESC LIMIT 50").all<EventRow>();
-    return c.json({ ok: true, events: await Promise.all((rows.results || []).map((row) => predictionEventJson(c.env, row, userId))), userControls: userId ? await getUserControls(c.env, userId) : null }, 200, { 'cache-control': CACHE_NONE });
+    const available = (rows.results || []).filter((row) => !lockedCategories.has(String(row.category || '').toLowerCase()));
+    return c.json({ ok: true, events: await Promise.all(available.map((row) => predictionEventJson(c.env, row, userId))), userControls: userId ? await getUserControls(c.env, userId) : null }, 200, { 'cache-control': CACHE_NONE });
   } catch (error) {
     return c.json({ ok: false, error: messageOf(error, 'Could not load predictions') }, 400, { 'cache-control': CACHE_NONE });
   }
@@ -70,13 +71,13 @@ app.post('/app/api/prediction-events/bet', async (c) => {
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
     const eventId = cleanDbText(body.eventId, 'Missing prediction id');
     const userId = await authenticateUser(c.env, body.userId, body.initData);
-    if (PUBLIC_EVENT_PREDICTIONS_LOCKED) throw new Error('This prediction category is temporarily locked');
     const pick = normalizePick(body.pick);
     const stakeNano = tonToNano(body.stakeTon);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
 
     const event = await c.env.DB.prepare('SELECT * FROM prediction_events WHERE id = ?').bind(eventId).first<EventRow>();
     if (!event) throw new Error('Prediction not found');
+    if (!isMiniAppAdmin(c.env, userId) && (await getSectionAccess(c.env)).some((lock) => lock.sectionId === `predict-${event.category}`)) throw new Error('This prediction category is temporarily locked');
     if (!isEventOpen(event)) throw new Error('This prediction is closed');
 
     let existing = await c.env.DB.prepare("SELECT * FROM prediction_event_bets WHERE event_id = ? AND user_id = ? AND status != 'failed' ORDER BY datetime(created_at) DESC LIMIT 1").bind(eventId, userId).first<EventBetRow>();

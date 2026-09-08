@@ -35,8 +35,7 @@ const USER_REGION_OPTIONS = [
 
 // Change to true to enable /emojisend.
 const EMOJI_SEND_ENABLED = false;
-// Telegram currently rejects custom emoji for this bot. Change to true only after the bot has Telegram custom-emoji access.
-const MENU_CUSTOM_EMOJI_ENABLED = false;
+const MENU_CUSTOM_EMOJI_ENABLED = true;
 
 const MAIN_MENU_COPY: Readonly<Record<VexaLocale, MainMenuCopy>> = {
   en: {

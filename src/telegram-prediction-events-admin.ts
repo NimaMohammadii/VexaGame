@@ -42,7 +42,7 @@ import {
   type PredictUserMarketAccess,
 } from './predict-routes';
 import { ensurePredictVisitorTracking, getPredictOnlineUserIds } from './section-lock-events';
-import { getPredictProviderState, setRequestedPredictProvider } from './predict-polymarket';
+import { getPolymarketAccountHealth, getPredictProviderState, setRequestedPredictProvider } from './predict-polymarket';
 import { upsertTelegramTextMenu } from './telegram-menu-state';
 import { clearSectionLock, getSectionAccess, setSectionLock } from './section-access';
 
@@ -269,17 +269,52 @@ async function sendPredictOpsMenu(env: Env, chatId: number, messageId?: number, 
   const menuLocked = (market: PredictMenu) => sectionLocks.some((lock) => lock.sectionId === `predict-${market}`);
   const text = [notice, '🩺 Predict Operations', '', `Emergency: ${dashboard.emergencyPaused ? '🚨 PAUSED' : '✅ Normal'}`, `Maintenance: ${dashboard.maintenanceMessage ? '📝 Set' : '—'}`, '', `💰 Polymarket Fee Revenue • ${(feeStats.rate * 100).toFixed(0)}%`, `Total: ${formatFeeGram(feeStats.totalNano)} GRAM`, `Today: ${formatFeeGram(feeStats.todayNano)} GRAM`, `This week: ${formatFeeGram(feeStats.weekNano)} GRAM`, `This month: ${formatFeeGram(feeStats.monthNano)} GRAM`, '', 'یک بخش را انتخاب کنید.', 'قیمت و منبع Aster از این پنل تغییر نمی‌کند.'].filter(Boolean).join('\n');
   const lockButton = (market: PredictMenu, label: string): Button => ({ text: `${menuLocked(market) ? '🔓' : '🔒'} ${label} Menu`, callback_data: `botadmin:predictops:menulock:${market}:${menuLocked(market) ? 'off' : 'on'}` });
-  const rows: Button[][] = [[{ text: '₿ Bitcoin', callback_data: 'botadmin:predictops:market:bitcoin' }, { text: '🥇 Gold', callback_data: 'botadmin:predictops:market:gold' }, { text: '🛢 Oil', callback_data: 'botadmin:predictops:market:oil' }], [lockButton('bitcoin', 'Bitcoin'), lockButton('gold', 'Gold'), lockButton('oil', 'Oil')], [lockButton('world', 'World'), lockButton('tech', 'Tech / AI'), lockButton('culture', 'Culture')], [{ text: '🔗 Bitcoin Provider', callback_data: 'botadmin:predictops:provider' }], [{ text: dashboard.emergencyPaused ? '✅ Resume All Markets' : '🚨 Emergency Pause All', callback_data: `botadmin:predictops:emergency:${dashboard.emergencyPaused ? 'off' : 'on'}` }], [{ text: '👤 User Predict Controls', callback_data: 'botadmin:predictops:useraccess' }, { text: '⛔ Blocked Users', callback_data: 'botadmin:predictops:blocked' }], [{ text: '🟢 Online in Predict', callback_data: 'botadmin:predictops:online' }, { text: '👣 Predict Visitors', callback_data: 'botadmin:predictops:visitors' }], [{ text: '🧾 Settlement Queue', callback_data: 'botadmin:predictops:queue' }, { text: '📜 Incident Log', callback_data: 'botadmin:predictops:incidents' }], [{ text: '🔐 Audit Log', callback_data: 'botadmin:predictops:audit' }, { text: '📝 Maintenance', callback_data: 'botadmin:predictops:askmaintenance' }], ...(dashboard.maintenanceMessage ? [[{ text: '🗑 حذف Maintenance Message', callback_data: 'botadmin:predictops:clearmaintenance' }]] : []), [{ text: '🔄 Refresh', callback_data: 'botadmin:predictops:refresh' }, { text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' }]];
+  const rows: Button[][] = [[{ text: '₿ Bitcoin', callback_data: 'botadmin:predictops:market:bitcoin' }, { text: '🥇 Gold', callback_data: 'botadmin:predictops:market:gold' }, { text: '🛢 Oil', callback_data: 'botadmin:predictops:market:oil' }], [lockButton('bitcoin', 'Bitcoin'), lockButton('gold', 'Gold'), lockButton('oil', 'Oil')], [lockButton('world', 'World'), lockButton('tech', 'Tech / AI'), lockButton('culture', 'Culture')], [{ text: '💼 Polymarket / Provider', callback_data: 'botadmin:predictops:provider' }], [{ text: dashboard.emergencyPaused ? '✅ Resume All Markets' : '🚨 Emergency Pause All', callback_data: `botadmin:predictops:emergency:${dashboard.emergencyPaused ? 'off' : 'on'}` }], [{ text: '👤 User Predict Controls', callback_data: 'botadmin:predictops:useraccess' }, { text: '⛔ Blocked Users', callback_data: 'botadmin:predictops:blocked' }], [{ text: '🟢 Online in Predict', callback_data: 'botadmin:predictops:online' }, { text: '👣 Predict Visitors', callback_data: 'botadmin:predictops:visitors' }], [{ text: '🧾 Settlement Queue', callback_data: 'botadmin:predictops:queue' }, { text: '📜 Incident Log', callback_data: 'botadmin:predictops:incidents' }], [{ text: '🔐 Audit Log', callback_data: 'botadmin:predictops:audit' }, { text: '📝 Maintenance', callback_data: 'botadmin:predictops:askmaintenance' }], ...(dashboard.maintenanceMessage ? [[{ text: '🗑 حذف Maintenance Message', callback_data: 'botadmin:predictops:clearmaintenance' }]] : []), [{ text: '🔄 Refresh', callback_data: 'botadmin:predictops:refresh' }, { text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' }]];
   await upsert(env, chatId, messageId, text, rows);
 }
 
 async function sendPredictProviderMenu(env: Env, chatId: number, messageId?: number, notice = ''): Promise<void> {
   const state = await getPredictProviderState(env);
+  const health = state.polymarketConfigured ? await getPolymarketAccountHealth(env) : null;
   const active = state.active ? `Active round: ${state.active}` : 'No active Bitcoin round';
-  const text = `🔗 Bitcoin Provider\n\nRequested: ${state.requested}\n${active}${state.switchPending ? '\n\nتغییر در پایان راند فعلی اعمال می‌شود.' : ''}${state.polymarketConfigured ? '' : '\n\n⚠️ Polymarket wallet secrets are incomplete.'}${notice ? `\n\n${notice}` : ''}`;
+  const walletType = health?.walletType === 0 ? 'EOA'
+    : health?.walletType === 1 ? 'POLY_PROXY'
+      : health?.walletType === 2 ? 'GNOSIS_SAFE'
+        : health?.walletType === 3 ? 'DEPOSIT_WALLET'
+          : '—';
+  const balance = health?.balanceUsd == null
+    ? '—'
+    : `$${health.balanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} pUSD`;
+  const geo = !health
+    ? '—'
+    : health.geoblocked == null
+      ? 'Unknown'
+      : health.geoblocked
+        ? `Blocked${health.country ? ` (${health.country}${health.region ? `-${health.region}` : ''})` : ''}`
+        : `Allowed from backend${health.country ? ` (${health.country}${health.region ? `-${health.region}` : ''})` : ''}`;
+  const text = [
+    '🔗 Bitcoin Provider',
+    '',
+    `Requested: ${state.requested}`,
+    active,
+    state.switchPending ? 'تغییر در پایان راند فعلی اعمال می‌شود.' : '',
+    state.polymarketConfigured ? '' : '⚠️ Polymarket wallet secrets are incomplete.',
+    '',
+    '💼 Polymarket Treasury — read only',
+    `Balance: ${balance}`,
+    `Account wallet: ${health?.walletAddress || '—'}`,
+    `Signer: ${health?.signerAddress || '—'}`,
+    `Wallet type: ${walletType}`,
+    `Deposit bridge: ${health?.bridgeEvmAddress ? 'Ready' : '—'}`,
+    `Backend geo check: ${geo}`,
+    '',
+    'این صفحه فقط وضعیت کیف‌پول فعلی Vexa را می‌خواند و هیچ پولی جابه‌جا نمی‌کند.',
+    notice,
+  ].filter(Boolean).join('\n');
   await upsert(env, chatId, messageId, text, [
     [{ text: `${state.requested === 'polymarket' ? '✅ ' : ''}Polymarket shared wallet`, callback_data: 'botadmin:predictops:provider:polymarket' }],
     [{ text: `${state.requested === 'vexa' ? '✅ ' : ''}Vexa internal`, callback_data: 'botadmin:predictops:provider:vexa' }],
+    [{ text: '🔄 Refresh wallet', callback_data: 'botadmin:predictops:provider' }],
     [{ text: '⬅️ Predict Ops', callback_data: 'botadmin:predictops:menu' }],
   ]);
 }

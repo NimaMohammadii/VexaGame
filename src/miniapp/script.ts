@@ -140,7 +140,8 @@ export const MINIAPP_SCRIPT = `
   function openInitialTarget(){
     try{
       var params=new URLSearchParams(location.search);
-      var section=(params.get('section')||location.hash.replace(/^#/, '')||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40);
+      var startParam=String(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param||'');
+      var section=(params.get('section')||location.hash.replace(/^#/, '')||startParam||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40);
       if(!section)return;
       var open=function(){if(ensureSection(section))show(section)};
       var lazy=window.VexaLazySections;

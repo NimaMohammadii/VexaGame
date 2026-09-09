@@ -47,7 +47,7 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
 #predictzone .predict-zone-history-card{height:28px!important}
 #predictzone .predict-zone-bet-presets button,
 #predictzone .predict-zone-bet-submit{
-  height:32px!important;
+  height:35px!important;
   padding:0 14px!important;
   background:#000!important;
   font-size:13px!important;

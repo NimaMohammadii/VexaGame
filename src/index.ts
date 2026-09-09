@@ -5,6 +5,7 @@ import { registerWheelRoutes } from './wheel-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
 import { handleGameBotWebhook } from './telegram-game-bot';
 import { addUserXpBatch, getUserLevel } from './levels';
+import { getUserControls, settleGameTonBalanceRound } from './user-controls';
 import type { Env, TelegramUpdate } from './types';
 import { gameBotToken, PUBLIC_BASE_URL, validateTelegramInitData } from './utils';
 
@@ -13,6 +14,8 @@ const FALLBACK_PNG = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const HOME_LOTTERY_SLOT_KEY = 'home-lottery-slot';
 const VERSIONED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const DICE_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 50);
+const SLOT_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 200);
 
 type LevelXpEventInput = {
   amount?: unknown;
@@ -136,6 +139,52 @@ app.get('/app/api/home-lottery-slot.png', async (c) => {
   });
 });
 
+app.post('/app/api/dice/roll', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'dice');
+    const amountNano = cleanGameAmount(body.amountNano, DICE_MAX_BET_NANO, 'Dice');
+    const target = cleanDiceTarget(body.target);
+    const mode = String(body.mode || '') === 'over' ? 'over' : String(body.mode || '') === 'under' ? 'under' : '';
+    if (!mode) throw new Error('Invalid Dice mode');
+    const chance = mode === 'under' ? target : 100 - target;
+    const multiplier = (100 - 1) / chance;
+    const rawRoll = secureRandomUnit() * 100;
+    const win = mode === 'under' ? rawRoll < target : rawRoll > target;
+    const roll = Math.max(0.01, Math.min(99.99, Math.round(rawRoll * 100) / 100));
+    const payoutNano = win ? Math.floor(amountNano * multiplier) : 0;
+    const roundId = `dice_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    const settled = await settleGameTonBalanceRound(c.env, userId, amountNano, payoutNano, {
+      referenceId: roundId,
+      referenceType: 'dice_round',
+      metadata: { section: 'dice', mode, target, chance, multiplier, roll, result: win ? 'win' : 'lose' },
+    });
+    return c.json({ ok: true, roundId, win, roll, target, chance, multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not roll Dice' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/slot/spin', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'slot');
+    const amountNano = cleanGameAmount(body.amountNano, SLOT_MAX_BET_NANO, 'Slot');
+    const result = serverSlotResult();
+    const profile = serverSlotProfile(result);
+    const payoutNano = profile.multiplier > 0 ? Math.floor(amountNano * profile.multiplier) : 0;
+    const roundId = `slot_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    const settled = await settleGameTonBalanceRound(c.env, userId, amountNano, payoutNano, {
+      referenceId: roundId,
+      referenceType: 'slot_round',
+      metadata: { section: 'slot', result, tier: profile.tier, multiplier: profile.multiplier },
+    });
+    return c.json({ ok: true, roundId, result, tier: profile.tier, multiplier: profile.multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not spin Slot' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
 registerFriendGameRoutes(app);
 registerWheelRoutes(app);
 registerSlotAssetRoutes(app);
@@ -152,6 +201,80 @@ app.onError((error, c) => {
   console.error(error);
   return c.json({ error: 'Internal error' }, 500);
 });
+
+async function authenticatedGameUser(env: Env, initData: unknown, section: string): Promise<{ userId: string; controls: Awaited<ReturnType<typeof getUserControls>> }> {
+  const userId = await validateTelegramInitData(String(initData || ''), gameBotToken(env));
+  const controls = await getUserControls(env, userId);
+  if (controls.banned) throw new Error('Your access to all sections is blocked.');
+  if (controls.blockedSections.includes(section)) throw new Error(`${section} is blocked for this account.`);
+  return { userId, controls };
+}
+
+function cleanGameAmount(value: unknown, max: number, label: string): number {
+  const amount = Math.floor(Number(value));
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > max) throw new Error(`Invalid ${label} bet`);
+  return amount;
+}
+
+function secureRandomUnit(): number {
+  const value = new Uint32Array(1);
+  crypto.getRandomValues(value);
+  return value[0] / 4_294_967_296;
+}
+
+function secureRandomInt(max: number): number {
+  const limit = Math.max(1, Math.floor(max));
+  return Math.floor(secureRandomUnit() * limit);
+}
+
+function secureShuffle<T>(items: T[]): T[] {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = secureRandomInt(i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function cleanDiceTarget(value: unknown): number {
+  const target = Number(value);
+  if (!Number.isFinite(target) || target < 2 || target > 98) throw new Error('Invalid Dice target');
+  return Math.round(target * 100) / 100;
+}
+
+function serverSlotResult(): number[] {
+  const roll = secureRandomInt(10_000);
+  if (roll < 6500) return secureShuffle([0, 1, 2, 3, 4, 5, 6, 7]).slice(0, 3);
+  if (roll < 9071) {
+    const fruit = secureRandomInt(5);
+    let third = secureRandomInt(7);
+    if (third >= fruit) third += 1;
+    return secureShuffle([fruit, fruit, third]);
+  }
+  if (roll < 9909) {
+    const fruit = secureRandomInt(5);
+    return [fruit, fruit, fruit];
+  }
+  if (roll < 9989) return [5, 5, 5];
+  if (roll < 9999) return [6, 6, 6];
+  return [7, 7, 7];
+}
+
+function serverSlotProfile(result: number[]): { tier: string; multiplier: number } {
+  const counts = new Map<number, number>();
+  for (const value of result) counts.set(value, (counts.get(value) || 0) + 1);
+  let symbol = -1;
+  let count = 0;
+  for (const [key, value] of counts) if (value > count) { symbol = key; count = value; }
+  if (count === 3) {
+    if (symbol >= 0 && symbol <= 4) return { tier: 'triple-fruit', multiplier: 5 };
+    if (symbol === 5) return { tier: 'triple-diamond', multiplier: 15 };
+    if (symbol === 6) return { tier: 'triple-gold', multiplier: 30 };
+    if (symbol === 7) return { tier: 'triple-seven', multiplier: 200 };
+  }
+  if (count === 2 && symbol >= 0 && symbol <= 4) return { tier: 'pair-fruit', multiplier: 0.8 };
+  return { tier: 'standard', multiplier: 0 };
+}
 
 function html(content: string, extraHeaders: Record<string, string> = {}): Response {
   return new Response(content, {

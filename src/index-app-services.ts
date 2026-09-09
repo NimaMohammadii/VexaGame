@@ -69,7 +69,7 @@ app.post('/app/api/ton-balance/game-delta', zValidator('json', gameTonBalanceSch
     const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
     if (userId !== body.userId) throw new Error('Telegram user mismatch');
     const deltas = body.deltas;
-    if (deltas.some((item) => ['plinko','crash'].includes(String(item.section || '').trim().toLowerCase()))) throw new Error('Plinko and Crash balances are settled by secure server endpoints.');
+    if (deltas.some((item) => ['plinko','crash','mines'].includes(String(item.section || '').trim().toLowerCase()))) throw new Error('Plinko, Crash, and Mines balances are settled by secure server endpoints.');
     return c.json(await applyGameTonBalanceDeltas(c.env, userId, deltas));
   }
   catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Could not update GRAM balance' }, 400); }
@@ -181,6 +181,6 @@ async function getAssetResponse(env: Env, key: string, fallbackUrl: string | nul
 function parseByteRange(header: string | undefined, size: number): { start: number; end: number } | null { if (!header || !Number.isFinite(size) || size <= 0) return null; const match = header.match(/^bytes=(\d*)-(\d*)$/); if (!match || (!match[1] && !match[2])) return null; let start = match[1] ? Number(match[1]) : size - Number(match[2]); let end = match[2] ? Number(match[2]) : size - 1; if (!Number.isInteger(start) || !Number.isInteger(end)) return null; start = Math.max(0, start); end = Math.min(size - 1, end); return start <= end ? { start, end } : null; }
 function audioContentTypeFromExtension(extension: string): string { if (extension === 'wav') return 'audio/wav'; if (extension === 'ogg' || extension === 'oga') return 'audio/ogg'; if (extension === 'webm') return 'audio/webm'; if (extension === 'mp4' || extension === 'm4a') return 'audio/mp4'; if (extension === 'aac') return 'audio/aac'; return 'audio/mpeg'; }
 function assetVersion(object: { customMetadata?: Record<string, string> } | null): string { return object?.customMetadata?.version || '1'; }
-async function setGameMenuButton(token: string, url: string): Promise<{ ok: boolean; description?: string }> { const response = await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ menu_button: { type: 'web_app', text: 'Vexa Games', web_app: { url } } }) }); return response.json() as Promise<{ ok: boolean; description?: string }>; }
+async function setGameMenuButton(token: string, url: string): Promise<{ ok: boolean; description?: string }> { const response = await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ menu_button: { type: 'web_app', text: 'Vexa Games', web_app: { url } }) }); return response.json() as Promise<{ ok: boolean; description?: string }>; }
 function escapeHtml(value: string): string { return value.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char] ?? char)); }
 export default app;

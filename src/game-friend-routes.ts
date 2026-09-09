@@ -46,7 +46,7 @@ export function registerFriendGameRoutes(app: App): void {
             if(message.type==='start'){
               const requestedRoundId=cleanRoundId(message.roundId);
               const existing=await loadSoloRoundById(c.env,userId,requestedRoundId);
-              if(existing){round=existing;send({type:'started',requestId,roundId:existing.roundId,...publicSoloRound(existing,existing.status!=='active')});return;}
+              if(existing){round=existing;send({type:'started',requestId,...publicSoloRound(existing,existing.status!=='active')});return;}
               if(round?.status==='active'){send({type:'error',requestId,error:'Round already active'});return;}
               const mines=clampInt(message.mines,1,20,3);
               const amountNano=clampInt(message.amountNano,1,maxSoloBet(mines),10000000);
@@ -54,7 +54,7 @@ export function registerFriendGameRoutes(app: App): void {
               const controls=await debitUserTonBalanceIfEnough(c.env,userId,amountNano,{kind:'game',title:'Mines bet',referenceId:requestedRoundId,referenceType:'mines_round',metadata:{section:'mines',phase:'bet',mines}});
               round=next;
               await saveSoloRound(c.env,next);
-              send({type:'started',requestId,roundId:next.roundId,tonBalanceNano:controls.tonBalanceNano,...publicSoloRound(next,false)});
+              send({type:'started',requestId,tonBalanceNano:controls.tonBalanceNano,...publicSoloRound(next,false)});
               return;
             }
             if(message.type==='reveal'){

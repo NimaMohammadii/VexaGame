@@ -101,7 +101,7 @@ export const PUMP_SECTION = String.raw`
       if(scene3d)scene3d.setState(multiplier,pumps,state);
     }
     function resetSoon(delay){setTimeout(function(){state='idle';roundId='';betNano=0;multiplier=1;pumps=0;render();},delay);}
-    function startRound(){if(busy)return;var balance=readBalanceNano(),amount=normalizeBet();if(balance<amount)return;busy=true;render();requestPump('start',{amountNano:amount}).then(function(data){applyRound(data);render();}).catch(function(){state='idle';render();}).finally(function(){busy=false;render();});}
+    function startRound(){if(busy)return;var amount=normalizeBet();busy=true;render();requestPump('start',{amountNano:amount}).then(function(data){applyRound(data);render();}).catch(function(){state='idle';render();}).finally(function(){busy=false;render();});}
     function pumpOnce(){
       if(busy)return;if(state!=='playing'){startRound();return;}if(!roundId)return;
       busy=true;render();requestPump('pump',{roundId:roundId}).then(function(data){applyRound(data);render();if(state==='popped')resetSoon(1250);}).catch(function(){render();}).finally(function(){busy=false;render();});

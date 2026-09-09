@@ -6,6 +6,7 @@ import { getUserControls, setUserBanned, setUserSectionBlocked, setUserTonBalanc
 import { formatTonAmount, getFinanceLimits, getFinanceStats, setFinanceLimits, tonToNano } from './admin-finance-controls';
 import { getTelegramMenuMessageId, setTelegramMenuMessageId } from './telegram-menu-state';
 import { DEFAULT_VEXA_LOCALE, SHARE_INVITE_BUTTON_TEXT, VEXA_APP_DEEP_LINK, VEXA_LOCALES, VEXA_LOCALE_LABELS, type VexaLocale, vexaLocaleForCountry } from './miniapp/i18n';
+import { makeSimplePdf } from './telegram-pdf';
 
 type TgApi = <T = unknown>(token: string, method: string, payload: unknown) => Promise<T>;
 type AdminUser = Record<string, unknown> & { id?: unknown; firstName?: unknown; username?: unknown; tonBalance?: unknown; tonBalanceNano?: unknown; currentSection?: unknown; status?: unknown; level?: unknown; xp?: unknown; rankName?: unknown; regionCode?: unknown; languageCode?: unknown; regionLabel?: unknown; returnCount?: unknown };
@@ -786,31 +787,3 @@ async function activityRows(env: Env, userId: string): Promise<Array<Record<stri
   for (const [table, column] of sources) for (const row of await queryAll<Record<string, unknown>>(env, `SELECT * FROM ${table} WHERE ${column} = ? ORDER BY datetime(COALESCE(created_at, updated_at, last_seen_at)) DESC LIMIT 80`, userId)) out.push({ type: table, ...row });
   return out;
 }
-
-function makeSimplePdf(lines: string[]): Uint8Array {
-  const safe = lines.flatMap((line) => ascii(line).match(/.{1,92}/g) || ['']).slice(0, 1200);
-  const pages: string[][] = [];
-  for (let i = 0; i < safe.length; i += 68) pages.push(safe.slice(i, i + 68));
-  if (!pages.length) pages.push(['No data']);
-  const objects: string[] = ['<< /Type /Catalog /Pages 2 0 R >>', ''];
-  const pageObjectIds: number[] = [];
-  for (const pageLines of pages) {
-    const content = ['BT', '/F1 9 Tf', '36 806 Td', '11 TL', ...pageLines.map((line, i) => `${i ? 'T* ' : ''}(${pdfEscape(line)}) Tj`), 'ET'].join('\n');
-    const pageId = objects.length + 1;
-    const contentId = pageId + 1;
-    pageObjectIds.push(pageId);
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`);
-    objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
-  }
-  objects[1] = `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageObjectIds.length} >>`;
-  objects.splice(2, 0, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-  const fixedPageIds = pageObjectIds.map((id) => id + 1);
-  objects[1] = `<< /Type /Pages /Kids [${fixedPageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${fixedPageIds.length} >>`;
-  for (let i = 3; i < objects.length; i += 2) objects[i] = objects[i].replace('/F1 3 0 R', '/F1 3 0 R').replace(/Contents (\d+) 0 R/, (_m, n) => `Contents ${Number(n) + 1} 0 R`);
-  let pdf = '%PDF-1.4\n'; const offsets = [0];
-  objects.forEach((obj, i) => { offsets.push(pdf.length); pdf += `${i + 1} 0 obj\n${obj}\nendobj\n`; });
-  const xref = pdf.length; pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.slice(1).map((o) => String(o).padStart(10, '0') + ' 00000 n ').join('\n') + `\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return new TextEncoder().encode(pdf);
-}
-function ascii(value: unknown): string { return String(value ?? '—').replace(/[^\x20-\x7E]/g, '?').slice(0, 500); }
-function pdfEscape(value: string): string { return value.replace(/[\\()]/g, '\\$&'); }

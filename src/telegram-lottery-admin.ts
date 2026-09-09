@@ -1,6 +1,7 @@
 import type { Env } from './types';
 import { getCurrentLotteryRound, getLotteryAdminOverview, getLotterySettings, setLotteryDrawMinutesFromNow, startLotteryNow, updateLotterySettings } from './lottery';
-import { adjustLotteryPrizePool, clearLotteryWinnerSelections, getLotteryPrizePoolNano, getLotteryPrizes, getLotteryWinnerSelections, LOTTERY_WINNER_COUNT, searchLotteryTicketHolders, setLotteryPrizePercentages, setLotteryWinnerSelection } from './lottery-prizes';
+import { adjustLotteryPrizePool, clearLotteryWinnerSelections, getLotteryPrizePoolNano, getLotteryPrizes, getLotteryRoundTicketHolder, getLotteryUserHistory, getLotteryWinnerSelections, listLotteryRoundTicketHolders, LOTTERY_WINNER_COUNT, searchLotteryTicketHolders, setLotteryPrizePercentages, setLotteryWinnerSelection } from './lottery-prizes';
+import { makeSimplePdf } from './telegram-pdf';
 import { getTelegramMenuMessageId, setTelegramMenuMessageId, upsertTelegramTextMenu } from './telegram-menu-state';
 
 type Message = { message_id: number; chat: { id: number }; from?: { id: number }; text?: string };
@@ -72,6 +73,21 @@ async function handleCallback(env: Env, callback: Callback): Promise<Response> {
 
     if (action === 'winners') {
       await sendWinnerMenu(env, chatId, messageId);
+      return ok();
+    }
+
+    if (action === 'holders') {
+      await sendTicketHoldersMenu(env, chatId, messageId, Number(arg));
+      return ok();
+    }
+
+    if (action === 'holder') {
+      await sendTicketHolderDetail(env, chatId, messageId, parts[3] || '');
+      return ok();
+    }
+
+    if (action === 'holderpdf') {
+      await sendLotteryHistoryPdf(env, chatId, parts[3] || '');
       return ok();
     }
 
@@ -267,6 +283,7 @@ async function sendLotteryMenu(env: Env, chatId: number, messageId?: number, not
   const rows: Keyboard = [
     [{ text: '🚀 Start Now', callback_data: 'botadmin:lottery:startnow' }],
     [{ text: '🎯 تعیین ۳ برنده راند بعدی', callback_data: 'botadmin:lottery:winners' }],
+    [{ text: '👥 کاربران و تیکت‌های راند', callback_data: 'botadmin:lottery:holders:0' }],
     [{ text: '🏆 تقسیم Prize Pool برای ۳ برنده', callback_data: 'botadmin:lottery:prizes' }],
     [
       { text: '➕ افزایش Prize Pool', callback_data: 'botadmin:lottery:ask:pooladd' },
@@ -298,6 +315,98 @@ async function sendLotteryMenu(env: Env, chatId: number, messageId?: number, not
   ];
   const active = await upsert(env, env.BOT_TOKEN, chatId, messageId, text, rows);
   if (active) await setTelegramMenuMessageId(env, chatId, active);
+}
+
+async function sendTicketHoldersMenu(env: Env, chatId: number, messageId: number | undefined, requestedPage = 0): Promise<void> {
+  const round = await getCurrentLotteryRound(env, false);
+  if (!round || round.status !== 'open') {
+    await sendLotteryMenu(env, chatId, messageId, 'راند باز Lottery وجود ندارد.');
+    return;
+  }
+  const pageSize = 8;
+  const initial = await listLotteryRoundTicketHolders(env, round.id, requestedPage, pageSize);
+  const lastPage = Math.max(0, Math.ceil(initial.total / pageSize) - 1);
+  const data = initial.page > lastPage ? await listLotteryRoundTicketHolders(env, round.id, lastPage, pageSize) : initial;
+  const text = [
+    '👥 کاربران راند فعلی',
+    '',
+    `Round: ${round.id}`,
+    `کاربران: ${data.total.toLocaleString()} · صفحه ${data.total ? data.page + 1 : 0} از ${Math.max(1, lastPage + 1)}`,
+    '',
+    data.holders.length ? 'هر ردیف: جزئیات کاربر و دانلود PDF تاریخچهٔ لاتاری.' : 'هنوز تیکتی برای این راند خریده نشده است.',
+  ].join('\n');
+  const rows: Keyboard = data.holders.map((holder) => [
+    { text: `${clip(holder.displayName, 24)} · ${holder.ticketCount} 🎫`, callback_data: `botadmin:lottery:holder:${holder.userId}` },
+    { text: '📄 PDF', callback_data: `botadmin:lottery:holderpdf:${holder.userId}` },
+  ]);
+  if (lastPage > 0) {
+    const pages: Button[] = [];
+    if (data.page > 0) pages.push({ text: '⬅️ قبلی', callback_data: `botadmin:lottery:holders:${data.page - 1}` });
+    if (data.page < lastPage) pages.push({ text: 'بعدی ➡️', callback_data: `botadmin:lottery:holders:${data.page + 1}` });
+    if (pages.length) rows.push(pages);
+  }
+  rows.push([{ text: '⬅️ Lottery Control', callback_data: 'botadmin:lottery:menu' }]);
+  const active = await upsert(env, env.BOT_TOKEN, chatId, messageId, text, rows);
+  if (active) await setTelegramMenuMessageId(env, chatId, active);
+}
+
+async function sendTicketHolderDetail(env: Env, chatId: number, messageId: number | undefined, userId: string): Promise<void> {
+  const user = await getLotteryUserHistory(env, userId);
+  const round = await getCurrentLotteryRound(env, false);
+  const current = round ? await getLotteryRoundTicketHolder(env, round.id, user.user.userId) : null;
+  const text = [
+    '👤 جزئیات کاربر Lottery',
+    '',
+    `نام: ${user.user.displayName}`,
+    `ID: ${user.user.userId}`,
+    `Username: ${user.user.username ? `@${user.user.username}` : '—'}`,
+    '',
+    `تیکت راند فعلی: ${current?.ticketCount || 0}`,
+    `Paid / Free: ${current?.paidTicketCount || 0} / ${current?.freeTicketCount || 0}`,
+    `کل تیکت‌ها: ${user.totalTicketCount}`,
+    `تعداد راندها: ${user.roundsEntered}`,
+    `بردها: ${user.winCount}`,
+    `جایزهٔ کل: ${formatPrizePoolGram(user.totalPrizeNano)} GRAM`,
+    `آخرین تیکت: ${user.user.lastTicketAt || '—'}`,
+  ].join('\n');
+  const rows: Keyboard = [
+    [{ text: '📄 دانلود تاریخچهٔ Lottery (PDF)', callback_data: `botadmin:lottery:holderpdf:${user.user.userId}` }],
+    [{ text: '⬅️ کاربران راند', callback_data: 'botadmin:lottery:holders:0' }],
+  ];
+  const active = await upsert(env, env.BOT_TOKEN, chatId, messageId, text, rows);
+  if (active) await setTelegramMenuMessageId(env, chatId, active);
+}
+
+async function sendLotteryHistoryPdf(env: Env, chatId: number, userId: string): Promise<void> {
+  const history = await getLotteryUserHistory(env, userId);
+  const lines = [
+    'Vexa Game - Lottery User History',
+    `Generated at: ${new Date().toISOString()}`,
+    `User ID: ${history.user.userId}`,
+    `Name: ${history.user.displayName}`,
+    `Username: ${history.user.username ? `@${history.user.username}` : ''}`,
+    '',
+    `Total tickets: ${history.totalTicketCount}`,
+    `Paid tickets: ${history.totalPaidTicketCount}`,
+    `Free tickets: ${history.totalFreeTicketCount}`,
+    `Rounds entered: ${history.roundsEntered}`,
+    `Wins: ${history.winCount}`,
+    `Total prize: ${formatPrizePoolGram(history.totalPrizeNano)} GRAM`,
+    `Ticket records in this file: ${history.tickets.length} of ${history.totalTicketCount}`,
+    '',
+    'Wins:',
+    ...(history.wins.length ? history.wins.map((win) => `${win.createdAt} | Round ${win.roundId} | Rank ${win.rank} | Ticket ${win.ticketCode} | ${formatPrizePoolGram(win.prizeNano)} GRAM | ${win.paid ? 'paid' : 'pending'}`) : ['No lottery wins']),
+    '',
+    'Tickets:',
+    ...(history.tickets.length ? history.tickets.map((ticket) => `${ticket.createdAt} | Round ${ticket.roundId} | Ticket ${ticket.ticketCode} | ${ticket.isFree ? 'free' : `${formatPrizePoolGram(ticket.priceNano)} GRAM`}`) : ['No lottery tickets']),
+  ];
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('caption', `📄 Lottery history - ${history.user.userId}`);
+  form.append('document', new Blob([makeSimplePdf(lines, 1_500)], { type: 'application/pdf' }), `lottery-user-${history.user.userId}.pdf`);
+  const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendDocument`, { method: 'POST', body: form });
+  const result = await response.json().catch(() => ({})) as { ok?: boolean; description?: string };
+  if (!response.ok || !result.ok) throw new Error(result.description || 'ارسال PDF ناموفق بود.');
 }
 
 async function sendWinnerMenu(env: Env, chatId: number, messageId?: number, notice = ''): Promise<void> {

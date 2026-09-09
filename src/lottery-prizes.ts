@@ -31,6 +31,9 @@ type WinnerRow = {
 type CandidateRow = { id: string; user_id: string; code: string };
 type ExistingWinnerRow = { rank: number; user_id: string };
 type SelectedWinnerRow = { rank: number; user_id: string };
+type TicketHolderRow = { user_id: string; username?: string | null; first_name?: string | null; ticket_count: number; paid_ticket_count: number; free_ticket_count: number; first_ticket_at: string; last_ticket_at: string };
+type TicketHistoryRow = { round_id: string; ticket_code?: string | null; ticket_number: string; price_nano: number; is_free: number; created_at: string };
+type WinnerHistoryRow = { round_id: string; rank: number; ticket_code: string; prize_nano: number; payout_status: string; paid_at?: string | null; created_at: string };
 
 export type LotteryPrize = {
   rank: number;
@@ -52,6 +55,29 @@ export type LotteryWinner = {
   prizeNano: number;
   paid: boolean;
   createdAt: string;
+};
+
+export type LotteryRoundTicketHolder = {
+  userId: string;
+  displayName: string;
+  username: string | null;
+  ticketCount: number;
+  paidTicketCount: number;
+  freeTicketCount: number;
+  firstTicketAt: string;
+  lastTicketAt: string;
+};
+
+export type LotteryUserHistory = {
+  user: LotteryRoundTicketHolder;
+  totalTicketCount: number;
+  totalPaidTicketCount: number;
+  totalFreeTicketCount: number;
+  roundsEntered: number;
+  winCount: number;
+  totalPrizeNano: number;
+  tickets: Array<{ roundId: string; ticketCode: string; priceNano: number; isFree: boolean; createdAt: string }>;
+  wins: Array<{ roundId: string; rank: number; ticketCode: string; prizeNano: number; paid: boolean; paidAt: string | null; createdAt: string }>;
 };
 
 export async function ensureLotteryPrizeTables(env: Env): Promise<void> {
@@ -162,6 +188,102 @@ export async function searchLotteryTicketHolders(env: Env, roundIdInput: unknown
       ticketCount: Math.max(0, Math.floor(Number(row.ticket_count) || 0)),
     };
   });
+}
+
+export async function listLotteryRoundTicketHolders(env: Env, roundIdInput: unknown, pageInput: unknown = 0, pageSizeInput: unknown = 8): Promise<{ holders: LotteryRoundTicketHolder[]; total: number; page: number; pageSize: number }> {
+  await ensureLotteryPrizeTables(env);
+  const roundId = String(roundIdInput || '').trim();
+  const pageSize = Math.max(1, Math.min(12, Math.floor(Number(pageSizeInput) || 8)));
+  const page = Math.max(0, Math.floor(Number(pageInput) || 0));
+  if (!roundId) return { holders: [], total: 0, page: 0, pageSize };
+  const [totalRow, rows] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(DISTINCT user_id) AS count FROM lottery_tickets WHERE round_id=?').bind(roundId).first<{ count: number }>(),
+    env.DB.prepare(`SELECT t.user_id,u.username,u.first_name,COUNT(*) AS ticket_count,
+        SUM(CASE WHEN t.is_free=0 THEN 1 ELSE 0 END) AS paid_ticket_count,
+        SUM(CASE WHEN t.is_free=1 THEN 1 ELSE 0 END) AS free_ticket_count,
+        MIN(t.created_at) AS first_ticket_at,MAX(t.created_at) AS last_ticket_at
+      FROM lottery_tickets t LEFT JOIN app_users u ON u.telegram_user_id=t.user_id
+      WHERE t.round_id=?
+      GROUP BY t.user_id,u.username,u.first_name
+      ORDER BY ticket_count DESC,datetime(last_ticket_at) ASC,t.user_id ASC LIMIT ? OFFSET ?`)
+      .bind(roundId, pageSize, page * pageSize).all<TicketHolderRow>(),
+  ]);
+  return {
+    holders: (rows.results || []).map(publicTicketHolder),
+    total: Math.max(0, Math.floor(Number(totalRow?.count || 0))),
+    page,
+    pageSize,
+  };
+}
+
+export async function getLotteryRoundTicketHolder(env: Env, roundIdInput: unknown, userIdInput: unknown): Promise<LotteryRoundTicketHolder | null> {
+  await ensureLotteryPrizeTables(env);
+  const roundId = String(roundIdInput || '').trim();
+  const userId = String(userIdInput || '').trim();
+  if (!roundId || !userId) return null;
+  const row = await env.DB.prepare(`SELECT t.user_id,u.username,u.first_name,COUNT(*) AS ticket_count,
+      SUM(CASE WHEN t.is_free=0 THEN 1 ELSE 0 END) AS paid_ticket_count,
+      SUM(CASE WHEN t.is_free=1 THEN 1 ELSE 0 END) AS free_ticket_count,
+      MIN(t.created_at) AS first_ticket_at,MAX(t.created_at) AS last_ticket_at
+    FROM lottery_tickets t LEFT JOIN app_users u ON u.telegram_user_id=t.user_id
+    WHERE t.round_id=? AND t.user_id=?
+    GROUP BY t.user_id,u.username,u.first_name`).bind(roundId, userId).first<TicketHolderRow>();
+  return row ? publicTicketHolder(row) : null;
+}
+
+export async function getLotteryUserHistory(env: Env, userIdInput: unknown): Promise<LotteryUserHistory> {
+  await ensureLotteryPrizeTables(env);
+  const userId = String(userIdInput || '').trim();
+  if (!userId) throw new Error('Missing Lottery user');
+  const [profile, totals, tickets, wins] = await Promise.all([
+    env.DB.prepare('SELECT telegram_user_id AS user_id,username,first_name FROM app_users WHERE telegram_user_id=? LIMIT 1').bind(userId).first<{ user_id: string; username?: string | null; first_name?: string | null }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS ticket_count,
+        SUM(CASE WHEN is_free=0 THEN 1 ELSE 0 END) AS paid_ticket_count,
+        SUM(CASE WHEN is_free=1 THEN 1 ELSE 0 END) AS free_ticket_count,
+        COUNT(DISTINCT round_id) AS rounds_entered
+      FROM lottery_tickets WHERE user_id=?`).bind(userId).first<{ ticket_count: number; paid_ticket_count: number; free_ticket_count: number; rounds_entered: number }>(),
+    env.DB.prepare(`SELECT round_id,ticket_code,ticket_number,price_nano,is_free,created_at FROM lottery_tickets
+      WHERE user_id=? ORDER BY datetime(created_at) DESC,id DESC LIMIT 1200`).bind(userId).all<TicketHistoryRow>(),
+    env.DB.prepare(`SELECT round_id,rank,ticket_code,prize_nano,payout_status,paid_at,created_at FROM lottery_winners
+      WHERE user_id=? ORDER BY datetime(created_at) DESC,rank ASC`).bind(userId).all<WinnerHistoryRow>(),
+  ]);
+  const winnerRows = wins.results || [];
+  const ticketRows = tickets.results || [];
+  const totalPrizeNano = winnerRows.reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.prize_nano) || 0)), 0);
+  return {
+    user: publicTicketHolder({
+      user_id: userId,
+      username: profile?.username || null,
+      first_name: profile?.first_name || null,
+      ticket_count: Number(totals?.ticket_count || 0),
+      paid_ticket_count: Number(totals?.paid_ticket_count || 0),
+      free_ticket_count: Number(totals?.free_ticket_count || 0),
+      first_ticket_at: ticketRows[ticketRows.length - 1]?.created_at || '',
+      last_ticket_at: ticketRows[0]?.created_at || '',
+    }),
+    totalTicketCount: Math.max(0, Math.floor(Number(totals?.ticket_count || 0))),
+    totalPaidTicketCount: Math.max(0, Math.floor(Number(totals?.paid_ticket_count || 0))),
+    totalFreeTicketCount: Math.max(0, Math.floor(Number(totals?.free_ticket_count || 0))),
+    roundsEntered: Math.max(0, Math.floor(Number(totals?.rounds_entered || 0))),
+    winCount: winnerRows.length,
+    totalPrizeNano,
+    tickets: ticketRows.map((row) => ({
+      roundId: String(row.round_id || ''),
+      ticketCode: String(row.ticket_code || row.ticket_number || '').replace(/[^0-9]/g, '').slice(-5).padStart(5, '0'),
+      priceNano: Math.max(0, Math.floor(Number(row.price_nano) || 0)),
+      isFree: Number(row.is_free || 0) === 1,
+      createdAt: String(row.created_at || ''),
+    })),
+    wins: winnerRows.map((row) => ({
+      roundId: String(row.round_id || ''),
+      rank: Math.max(1, Math.floor(Number(row.rank) || 1)),
+      ticketCode: String(row.ticket_code || '').replace(/[^0-9]/g, '').slice(-5).padStart(5, '0'),
+      prizeNano: Math.max(0, Math.floor(Number(row.prize_nano) || 0)),
+      paid: String(row.payout_status || '') === 'paid',
+      paidAt: row.paid_at ? String(row.paid_at) : null,
+      createdAt: String(row.created_at || ''),
+    })),
+  };
 }
 
 export async function getLotteryPrizePoolNano(env: Env, roundIdInput: unknown): Promise<number> {
@@ -404,6 +526,21 @@ function publicWinner(row: WinnerRow): LotteryWinner {
     prizeNano: Math.max(0, Math.floor(Number(row.prize_nano) || 0)),
     paid: String(row.payout_status || '') === 'paid',
     createdAt: String(row.created_at || ''),
+  };
+}
+
+function publicTicketHolder(row: TicketHolderRow): LotteryRoundTicketHolder {
+  const username = cleanUsername(row.username);
+  const firstName = String(row.first_name || '').trim().slice(0, 80);
+  return {
+    userId: String(row.user_id || ''),
+    displayName: firstName || (username ? `@${username}` : `ID ${row.user_id}`),
+    username: username || null,
+    ticketCount: Math.max(0, Math.floor(Number(row.ticket_count) || 0)),
+    paidTicketCount: Math.max(0, Math.floor(Number(row.paid_ticket_count) || 0)),
+    freeTicketCount: Math.max(0, Math.floor(Number(row.free_ticket_count) || 0)),
+    firstTicketAt: String(row.first_ticket_at || ''),
+    lastTicketAt: String(row.last_ticket_at || ''),
   };
 }
 

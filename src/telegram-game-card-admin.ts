@@ -20,8 +20,9 @@ type AudioGame = 'slot' | 'dice' | 'wallet-credit' | 'loading';
 type PaymentMethod = 'stars' | 'gram' | 'usdt' | 'nft';
 type PredictAsset = 'logo';
 type PredictMarket = 'bitcoin' | 'gold' | 'oil';
+type MinesTile = 'safe' | 'bomb';
 
-type UploadTarget = { kind: 'game'; game: string } | { kind: 'background'; game: string } | { kind: 'crash-stage'; slot: number } | { kind: 'ton' } | { kind: 'home-slot' } | { kind: 'rank'; rank: string } | { kind: 'ghost-asset'; asset: string } | { kind: 'slot-symbol'; symbol: string } | { kind: 'payment-method'; method: PaymentMethod } | { kind: 'predict'; asset: PredictAsset; market: PredictMarket } | { kind: 'audio'; game: AudioGame } | { kind: 'main-menu' } | { kind: 'share-invite' };
+type UploadTarget = { kind: 'game'; game: string } | { kind: 'background'; game: string } | { kind: 'crash-stage'; slot: number } | { kind: 'ton' } | { kind: 'home-slot' } | { kind: 'rank'; rank: string } | { kind: 'ghost-asset'; asset: string } | { kind: 'slot-symbol'; symbol: string } | { kind: 'mines-tile'; tile: MinesTile } | { kind: 'payment-method'; method: PaymentMethod } | { kind: 'predict'; asset: PredictAsset; market: PredictMarket } | { kind: 'audio'; game: AudioGame } | { kind: 'main-menu' } | { kind: 'share-invite' };
 
 const GAMES = [
   ['mines', 'Mines'], ['plinko', 'Plinko'], ['slot', 'Slot'],
@@ -42,6 +43,7 @@ const CRASH_STAGE_STATE_PREFIX = 'crash-stage:';
 const RANK_STATE_PREFIX = 'rank:';
 const GHOST_ASSET_STATE_PREFIX = 'ghost-asset:';
 const SLOT_SYMBOL_STATE_PREFIX = 'slot-symbol:';
+const MINES_TILE_STATE_PREFIX = 'mines-tile:';
 const PAYMENT_METHOD_STATE_PREFIX = 'payment-method:';
 const AUDIO_STATE_PREFIX = 'audio:';
 const PREDICT_STATE_PREFIX = 'predict:';
@@ -63,6 +65,9 @@ const GHOST_ASSETS = [
 const SLOT_SYMBOLS = [
   ['cherry', '🍒 گیلاس'], ['lemon', '🍋 لیمو'], ['orange', '🍊 پرتقال'], ['grape', '🍇 انگور'],
   ['watermelon', '🍉 هندوانه'], ['diamond', '💎 الماس'], ['gold', '⭐ طلایی'], ['lucky7', '7️⃣ عدد ۷'],
+] as const;
+const MINES_TILES = [
+  ['safe', '✅ Safe'], ['bomb', '💣 Bomb'],
 ] as const;
 const PAYMENT_METHODS = [
   ['stars', '⭐ Stars'], ['gram', '💎 Gram'], ['usdt', '💵 USDT'], ['nft', '🖼 NFT'],
@@ -211,6 +216,7 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
       || data === 'botadmin:ranks'
       || data === 'botadmin:ghostassets'
       || data === 'botadmin:slotsymbols'
+      || data === 'botadmin:minestiles'
       || data.startsWith('botadmin:paymentmethod:')
       || data.startsWith('botadmin:audio:')
       || data.startsWith('botadmin:gameimage:')
@@ -220,6 +226,7 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
       || data.startsWith('botadmin:rank:')
       || data.startsWith('botadmin:ghostasset:')
       || data.startsWith('botadmin:slotsymbol:')
+      || data.startsWith('botadmin:minestile:')
       || data.startsWith('botadmin:predictimage:');
     if (!ours) return null;
     if (!isAdmin(env, callback.from.id)) return ok();
@@ -251,6 +258,9 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
     } else if (data === 'botadmin:crashstage') {
       await clearState(env, callback.from.id);
       await sendCrashStageMenu(env, token, chatId, messageId);
+    } else if (data === 'botadmin:minestiles') {
+      await clearState(env, callback.from.id);
+      await sendMinesTileMenu(env, token, chatId, messageId);
     } else if (data === 'botadmin:tonlogo') {
       await env.BOT_CACHE.put(stateKey(callback.from.id), TON_STATE, { expirationTtl: 900 });
       await upsert(token, chatId, messageId, '💎 لوگوی TON\n\nبرای حفظ فرمت و شفافیت، تصویر PNG را حتماً به‌صورت File/Document بفرستید.', [
@@ -308,6 +318,12 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
       if (symbol) {
         await env.BOT_CACHE.put(stateKey(callback.from.id), `${SLOT_SYMBOL_STATE_PREFIX}${symbol}`, { expirationTtl: 900 });
         await promptImage(token, chatId, messageId, `🎰 ${slotSymbolLabel(symbol)}`, 'تصویر این شکل اسلات را بفرستید. تصویر بلافاصله روی ریل‌های بازی استفاده می‌شود.', 'botadmin:slotsymbols');
+      }
+    } else if (data.startsWith('botadmin:minestile:')) {
+      const tile = normalizeMinesTile(data.slice('botadmin:minestile:'.length));
+      if (tile) {
+        await env.BOT_CACHE.put(stateKey(callback.from.id), `${MINES_TILE_STATE_PREFIX}${tile}`, { expirationTtl: 900 });
+        await promptImage(token, chatId, messageId, `💣 Mines · ${minesTileLabel(tile)}`, 'تصویر را به‌صورت File/Document بفرستید تا بدون فشرده‌سازی ذخیره شود.', 'botadmin:minestiles');
       }
     } else if (data.startsWith('botadmin:predictimage:')) {
       const [assetValue, marketValue] = data.slice('botadmin:predictimage:'.length).split(':');
@@ -389,6 +405,7 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
     else if (target.kind === 'rank') await sendRankMenu(env, token, message.chat.id, menuMessageId);
     else if (target.kind === 'ghost-asset') await sendGhostAssetMenu(env, token, message.chat.id, menuMessageId);
     else if (target.kind === 'slot-symbol') await sendSlotSymbolMenu(env, token, message.chat.id, menuMessageId);
+    else if (target.kind === 'mines-tile') await sendMinesTileMenu(env, token, message.chat.id, menuMessageId);
     else if (target.kind === 'payment-method') await sendPaymentMethodMenu(env, token, message.chat.id, menuMessageId);
     else if (target.kind === 'predict') await sendPredictImageMenu(env, token, message.chat.id, menuMessageId);
     else if (target.kind === 'audio') await sendAudioMenu(env, token, message.chat.id, menuMessageId);
@@ -488,6 +505,10 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
     await replaceUploadPrompt(env, token, message, '❌ برای اینکه تصویرهای متصل Crash فشرده و تار نشوند، تصویر را از بخش File به‌صورت Document بفرستید؛ عکس معمولی پذیرفته نمی‌شود.');
     return ok();
   }
+  if (target.kind === 'mines-tile' && source.via !== 'document') {
+    await replaceUploadPrompt(env, token, message, '❌ تصویر Safe/Bomb بازی Mines را به‌صورت File/Document بفرستید تا تلگرام آن را فشرده نکند.', 'botadmin:minestiles');
+    return ok();
+  }
   if (target.kind === 'background' && homePromoSlotFromGame(target.game) && source.via !== 'document') {
     await replaceUploadPrompt(env, token, message, '❌ تصاویر تبلیغاتی Home باید فقط به‌صورت File/Document ارسال شوند تا تلگرام هیچ فشرده‌سازی یا تبدیلی روی فایل انجام ندهد.', 'botadmin:homepromos');
     return ok();
@@ -539,6 +560,8 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
       await sendSavedImage(env, token, message.chat.id, `${PUBLIC_BASE_URL}/app/api/ghost-run-asset/${target.asset}.png?v=${Date.now()}`, `✅ ${ghostAssetLabel(target.asset)} ذخیره شد.`, '👻 تصاویر Ghost Run', 'botadmin:ghostassets');
     } else if (target.kind === 'slot-symbol') {
       await sendSavedImage(env, token, message.chat.id, `${PUBLIC_BASE_URL}/app/api/uploaded-image/slot-symbols/${target.symbol}?v=${Date.now()}`, `✅ ${slotSymbolLabel(target.symbol)} ذخیره شد و روی ریل‌های Slot نمایش داده می‌شود.`, '🎰 شکل‌های اسلات', 'botadmin:slotsymbols');
+    } else if (target.kind === 'mines-tile') {
+      await sendSavedImage(env, token, message.chat.id, `${PUBLIC_BASE_URL}/app/api/uploaded-image/mines-${target.tile}.png?v=${Date.now()}`, `✅ تصویر ${minesTileLabel(target.tile)} بازی Mines ذخیره شد.`, '💣 شکل‌های Mines', 'botadmin:minestiles');
     } else if (target.kind === 'payment-method') {
       await sendSavedImage(env, token, message.chat.id, `${PUBLIC_BASE_URL}/app/api/uploaded-image/payment-method/${target.method}.png?v=${Date.now()}`, `✅ تصویر روش پرداخت ${paymentMethodLabel(target.method)} ذخیره شد.`, '💳 تصاویر روش پرداخت', 'botadmin:paymentmethods');
     } else if (target.kind === 'predict') {
@@ -569,6 +592,7 @@ async function sendImagesMenu(token: string, chatId: number, messageId?: number)
       { text: '🎮 کارت بازی‌ها', callback_data: 'botadmin:gameimages' },
       { text: '🌄 بک‌گراندها', callback_data: 'botadmin:gamebackgrounds' },
     ],
+    [{ text: '💣 شکل‌های Mines', callback_data: 'botadmin:minestiles' }],
     [{ text: '🖼 تبلیغات Home', callback_data: 'botadmin:homepromos' }],
     [{ text: '🎵 صداها', callback_data: 'botadmin:audiomenu' }],
     [{ text: '🎪 مدیای منوی اصلی 𝗩𝗲𝘅𝗮 𝗚𝗮𝗺𝗲', callback_data: 'botadmin:mainmenuimage' }],
@@ -628,6 +652,15 @@ async function sendGameMenu(token: string, chatId: number, messageId?: number): 
   }
   rows.push([{ text: '⬅️ تصاویر و ظاهر', callback_data: 'botadmin:imagesmenu' }]);
   await upsert(token, chatId, messageId, '🎮 تصاویر کارت بازی‌ها\n\nیک بازی را انتخاب کنید. تصویر را می‌توانید عادی یا به‌صورت فایل بفرستید.', rows);
+}
+
+async function sendMinesTileMenu(env: Env, token: string, chatId: number, messageId?: number): Promise<void> {
+  const present = await Promise.all(MINES_TILES.map(([tile]) => env.ASSETS.head(minesTileKey(tile)).then(Boolean).catch(() => false)));
+  const buttons = MINES_TILES.map(([tile, title], index) => ({ text: `${present[index] ? '✅ ' : ''}${title}`, callback_data: `botadmin:minestile:${tile}` }));
+  await upsert(token, chatId, messageId, '💣 شکل‌های بازی Mines\n\nتصویر Safe و Bomb را جداگانه آپلود کنید. برای حفظ کیفیت، فایل را به‌صورت File/Document بفرستید.', [
+    buttons,
+    [{ text: '⬅️ تصاویر و ظاهر', callback_data: 'botadmin:imagesmenu' }],
+  ]);
 }
 
 async function sendPredictImageMenu(env: Env, token: string, chatId: number, messageId?: number): Promise<void> {
@@ -756,10 +789,11 @@ async function saveImage(env: Env, token: string, target: Exclude<UploadTarget, 
       : target.kind === 'rank' ? `rank-character/${target.rank}`
         : target.kind === 'ghost-asset' ? `ghost-run-assets/${target.asset}`
           : target.kind === 'slot-symbol' ? `slot-symbol/${target.symbol}`
-            : target.kind === 'payment-method' ? paymentMethodKey(target.method)
-              : target.kind === 'predict' ? predictAssetKey(target.asset, target.market)
-              : target.kind === 'background' ? sectionBackgroundR2Key(target.game)
-                : target.kind === 'crash-stage' ? crashStageKey(target.slot) : gameKey(target.game);
+            : target.kind === 'mines-tile' ? minesTileKey(target.tile)
+              : target.kind === 'payment-method' ? paymentMethodKey(target.method)
+                : target.kind === 'predict' ? predictAssetKey(target.asset, target.market)
+                  : target.kind === 'background' ? sectionBackgroundR2Key(target.game)
+                    : target.kind === 'crash-stage' ? crashStageKey(target.slot) : gameKey(target.game);
   const metadata: Record<string, string> = target.kind === 'ton'
     ? { version, assetId: 'ton-icon', contentType, uploadedVia: `telegram-admin-${source.via}` }
     : target.kind === 'background'
@@ -774,11 +808,13 @@ async function saveImage(env: Env, token: string, target: Exclude<UploadTarget, 
               ? { version, kind: target.asset, contentType, uploadedVia: `telegram-admin-${source.via}` }
               : target.kind === 'slot-symbol'
                 ? { version, symbolId: target.symbol, contentType, uploadedVia: `telegram-admin-${source.via}` }
-                : target.kind === 'payment-method'
-                  ? { version, paymentMethod: target.method, contentType, uploadedVia: `telegram-admin-${source.via}` }
-                  : target.kind === 'predict'
-                    ? { version, predictAsset: target.asset, market: target.market, contentType, uploadedVia: `telegram-admin-${source.via}` }
-                  : { version, gameId: target.game, contentType, uploadedVia: `telegram-admin-${source.via}` };
+                : target.kind === 'mines-tile'
+                  ? { version, assetId: `mines-tile-${target.tile}`, tile: target.tile, contentType, uploadedVia: `telegram-admin-${source.via}` }
+                  : target.kind === 'payment-method'
+                    ? { version, paymentMethod: target.method, contentType, uploadedVia: `telegram-admin-${source.via}` }
+                    : target.kind === 'predict'
+                      ? { version, predictAsset: target.asset, market: target.market, contentType, uploadedVia: `telegram-admin-${source.via}` }
+                      : { version, gameId: target.game, contentType, uploadedVia: `telegram-admin-${source.via}` };
   await env.ASSETS.put(assetKey, bytes, {
     httpMetadata: { contentType },
     customMetadata: metadata,
@@ -903,6 +939,10 @@ function normalizeTarget(value: unknown): UploadTarget | null {
     const symbol = normalizeSlotSymbol(raw.slice(SLOT_SYMBOL_STATE_PREFIX.length));
     return symbol ? { kind: 'slot-symbol', symbol } : null;
   }
+  if (raw.startsWith(MINES_TILE_STATE_PREFIX)) {
+    const tile = normalizeMinesTile(raw.slice(MINES_TILE_STATE_PREFIX.length));
+    return tile ? { kind: 'mines-tile', tile } : null;
+  }
   if (raw.startsWith(BACKGROUND_STATE_PREFIX)) {
     const game = normalizeBackgroundGame(raw.slice(BACKGROUND_STATE_PREFIX.length));
     return game ? { kind: 'background', game } : null;
@@ -928,6 +968,9 @@ function normalizeGhostAsset(value: unknown): string | null { const clean = Stri
 function ghostAssetLabel(asset: string): string { return GHOST_ASSETS.find(([id]) => id === asset)?.[1] || asset; }
 function normalizeSlotSymbol(value: unknown): string | null { const clean = String(value || '').trim().toLowerCase(); return SLOT_SYMBOLS.some(([symbol]) => symbol === clean) ? clean : null; }
 function slotSymbolLabel(symbol: string): string { return SLOT_SYMBOLS.find(([id]) => id === symbol)?.[1] || symbol; }
+function normalizeMinesTile(value: unknown): MinesTile | null { const clean = String(value || '').trim().toLowerCase(); return clean === 'safe' || clean === 'bomb' ? clean : null; }
+function minesTileLabel(tile: MinesTile): string { return MINES_TILES.find(([id]) => id === tile)?.[1] || tile; }
+function minesTileKey(tile: MinesTile): string { return `mines-tile/${tile}`; }
 function label(game: string): string { return GAMES.find(([id]) => id === game)?.[1] || game; }
 function backgroundLabel(game: string): string { return BACKGROUND_GAMES.find(([id]) => id === game)?.[1] || game; }
 function gameKey(game: string): string { return `game-card-images/${game}`; }

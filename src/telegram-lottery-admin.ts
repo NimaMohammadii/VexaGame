@@ -557,6 +557,11 @@ function formatRemaining(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return 'الان';
   return formatMinutes(Math.max(1, Math.ceil(ms / 60_000)));
 }
+function clip(value: unknown, maxLength: number): string {
+  const text = String(value || '').trim();
+  const max = Math.max(1, Math.floor(Number(maxLength) || 1));
+  return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
+}
 async function upsert(env: Env, token: string, chatId: number, messageId: number | undefined, text: string, keyboard: Keyboard): Promise<number | undefined> {
   return upsertTelegramTextMenu(env, token, tg, chatId, messageId, {
     text,

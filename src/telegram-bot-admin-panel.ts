@@ -787,3 +787,5 @@ async function activityRows(env: Env, userId: string): Promise<Array<Record<stri
   for (const [table, column] of sources) for (const row of await queryAll<Record<string, unknown>>(env, `SELECT * FROM ${table} WHERE ${column} = ? ORDER BY datetime(COALESCE(created_at, updated_at, last_seen_at)) DESC LIMIT 80`, userId)) out.push({ type: table, ...row });
   return out;
 }
+
+function ascii(value: unknown): string { return String(value ?? '—').replace(/[^\x20-\x7E]/g, '?').slice(0, 500); }

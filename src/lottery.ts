@@ -9,6 +9,10 @@ export const LOTTERY_DRAW_DELAY_MS = 5_000;
 export const LOTTERY_DRAW_ANIMATION_MS = 18_260;
 export const LOTTERY_NEXT_ROUND_DELAY_MS = 10_000;
 
+const LOTTERY_SCHEDULER_NAME = 'global';
+const LOTTERY_SCHEDULER_RETRY_MS = 2_000;
+let lotterySchedulerBootstrap: Promise<void> | null = null;
+
 export type LotterySettings = {
   enabled: boolean;
   salesOpen: boolean;
@@ -271,6 +275,7 @@ export async function startLotteryNow(env: Env): Promise<LotteryRound> {
 
   row = await env.DB.prepare("SELECT * FROM lottery_rounds WHERE status='open' ORDER BY datetime(created_at) DESC LIMIT 1").first<RoundRow>();
   if (!row) throw new Error('Could not start Lottery round');
+  await syncLotteryScheduler(env);
   return publicRound(row);
 }
 
@@ -293,6 +298,7 @@ export async function getLotteryUserState(env: Env, userId: string): Promise<Lot
   const tickets = displayRound ? await listLotteryTickets(env, id, displayRound.id, 100) : [];
   const freeTicketAvailable = Boolean(settings.freeTicketEnabled && openRound && !(await hasClaimedFreeTicket(env, id, openRound.id)));
   const controls = await getUserControls(env, id);
+  await ensureLotterySchedulerStarted(env).catch((error) => console.warn('Lottery scheduler bootstrap failed', error));
   const reason = !settings.enabled ? 'Lottery is disabled'
     : !settings.salesOpen ? 'Ticket sales are paused'
       : !openRound ? 'This round is closed'
@@ -467,6 +473,7 @@ export async function getLotteryAdminOverview(env: Env): Promise<{
       COALESCE(SUM(price_nano),0) AS revenue_nano
       FROM lottery_tickets WHERE round_id=?`).bind(round.id).first<AdminStatsRow>();
   }
+  await syncLotteryScheduler(env);
   return {
     settings,
     round,
@@ -510,7 +517,9 @@ export async function updateLotterySettings(env: Env, patch: Partial<{
   if (patch.nextDrawAt !== undefined) {
     await env.DB.prepare("UPDATE lottery_rounds SET draw_at=?,draw_lock=NULL,updated_at=CURRENT_TIMESTAMP WHERE status='open'").bind(next.nextDrawAt).run();
   }
-  return getLotterySettings(env);
+  const updated = await getLotterySettings(env);
+  await syncLotteryScheduler(env);
+  return updated;
 }
 
 export async function setLotteryDrawMinutesFromNow(env: Env, minutesInput: unknown): Promise<LotterySettings> {
@@ -707,4 +716,62 @@ function randomHex(length: number): string {
   const bytes = new Uint8Array(Math.ceil(length / 2));
   crypto.getRandomValues(bytes);
   return Array.from(bytes).map((value) => value.toString(16).padStart(2, '0')).join('').slice(0, length);
+}
+
+export async function syncLotteryScheduler(env: Env): Promise<void> {
+  const id = env.LOTTERY_SCHEDULER.idFromName(LOTTERY_SCHEDULER_NAME);
+  const response = await env.LOTTERY_SCHEDULER.get(id).fetch('https://lottery-scheduler/sync', { method: 'POST' });
+  if (!response.ok) throw new Error(`Lottery scheduler sync failed (${response.status})`);
+}
+
+async function ensureLotterySchedulerStarted(env: Env): Promise<void> {
+  if (!lotterySchedulerBootstrap) {
+    lotterySchedulerBootstrap = syncLotteryScheduler(env).catch((error) => {
+      lotterySchedulerBootstrap = null;
+      throw error;
+    });
+  }
+  return lotterySchedulerBootstrap;
+}
+
+export class LotteryScheduler {
+  constructor(private state: DurableObjectState, private env: Env) {}
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method !== 'POST' || url.pathname !== '/sync') return new Response('Not found', { status: 404 });
+    const nextAlarmAt = await this.synchronize();
+    return Response.json({ ok: true, nextAlarmAt });
+  }
+
+  async alarm(): Promise<void> {
+    try {
+      await this.synchronize();
+    } catch (error) {
+      console.warn('Lottery scheduler alarm failed', error);
+      await this.state.storage.setAlarm(Date.now() + LOTTERY_SCHEDULER_RETRY_MS).catch(() => undefined);
+    }
+  }
+
+  private async synchronize(): Promise<number | null> {
+    const settings = await getLotterySettings(this.env);
+    if (!settings.enabled) {
+      await this.state.storage.deleteAlarm();
+      return null;
+    }
+
+    const round = await getCurrentLotteryRound(this.env, true);
+    const target = round?.status === 'open'
+      ? Date.parse(round.drawAt)
+      : Date.parse(String(round?.nextRoundStartsAt || settings.nextDrawAt || ''));
+    if (!Number.isFinite(target) || target <= 0) {
+      await this.state.storage.deleteAlarm();
+      return null;
+    }
+
+    const nextAlarmAt = Math.max(Date.now(), target);
+    const currentAlarmAt = await this.state.storage.getAlarm();
+    if (currentAlarmAt !== nextAlarmAt) await this.state.storage.setAlarm(nextAlarmAt);
+    return nextAlarmAt;
+  }
 }

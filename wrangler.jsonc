@@ -33,6 +33,10 @@
       {
         "name": "CRASH_LIVE",
         "class_name": "CrashLiveRoom"
+      },
+      {
+        "name": "LOTTERY_SCHEDULER",
+        "class_name": "LotteryScheduler"
       }
     ]
   },
@@ -85,6 +89,10 @@
     {
       "tag": "v11",
       "deleted_classes": ["PredictSettlementScheduler"]
+    },
+    {
+      "tag": "v12",
+      "new_sqlite_classes": ["LotteryScheduler"]
     }
   ],
   "d1_databases": [

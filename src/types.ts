@@ -3,6 +3,7 @@ export type Env = {
   BOT_CACHE: KVNamespace;
   SECTION_LOCK_EVENTS: DurableObjectNamespace;
   LIVE_ACTIVITY: DurableObjectNamespace;
+  LOTTERY_SCHEDULER: DurableObjectNamespace;
   GHOST_RUN_LIVE: DurableObjectNamespace;
   CRASH_LIVE: DurableObjectNamespace;
   RATE_LIMITS: KVNamespace;

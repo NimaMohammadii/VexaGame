@@ -25,6 +25,7 @@ import type { Env } from './types';
 import type { TonWithdrawal } from './ton-withdrawals';
 export { SectionLockEvents } from './section-lock-events';
 export { LiveActivityRoom } from './live-activity';
+export { LotteryScheduler } from './lottery';
 
 export { PlinkoLiveRoom } from './plinko-live';
 

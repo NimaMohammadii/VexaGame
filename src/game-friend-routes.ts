@@ -15,6 +15,7 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
+      await assertSoloAccess(c.env, userId);
       await ensureTables(c.env);
       let round = await soloRound(c.env, userId);
       if (!round) return c.json({ ok: true, active: false });
@@ -29,10 +30,11 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
-      const amountNano = clampInt(body.amountNano, 1, Number.MAX_SAFE_INTEGER, 0);
+      await assertSoloAccess(c.env, userId);
       const mineCount = soloMineCount(body.mineCount);
-      if (!amountNano) return c.json({ error: 'Invalid point amount' }, 400);
       if (!mineCount) return c.json({ error: 'Invalid mine count' }, 400);
+      const amountNano = soloAmount(body.amountNano, mineCount);
+      if (!amountNano) return c.json({ error: 'Invalid point amount' }, 400);
       await ensureTables(c.env);
 
       let current = await soloRound(c.env, userId);
@@ -77,6 +79,7 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
+      await assertSoloAccess(c.env, userId);
       const roundId = clean(body.roundId, 'Round not found');
       const cell = clampInt(body.cell, 0, 24, -1);
       if (cell < 0) return c.json({ error: 'Invalid cell' }, 400);
@@ -115,7 +118,7 @@ export function registerFriendGameRoutes(app: App): void {
       const nextRevealed = [...revealed, cell].sort((a, b) => a - b);
       const multiplier = soloMultiplier(Number(round.mine_count), nextRevealed.length, Number(round.board_size) || 25);
       const cleared = nextRevealed.length >= (Number(round.board_size) || 25) - Number(round.mine_count);
-      const payoutNano = cleared ? Math.max(0, Math.floor(Number(round.amount_nano) * multiplier)) : 0;
+      const payoutNano = cleared ? soloPayout(Number(round.amount_nano), multiplier) : 0;
       const result = await c.env.DB.prepare(`UPDATE mines_solo_rounds
         SET revealed_cells_json=?, multiplier=?, status=?, payout_nano=?, updated_at=CURRENT_TIMESTAMP
         WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?`)
@@ -131,6 +134,7 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
+      await assertSoloAccess(c.env, userId);
       const roundId = clean(body.roundId, 'Round not found');
       await ensureTables(c.env);
       let round = await soloRound(c.env, userId);
@@ -141,7 +145,7 @@ export function registerFriendGameRoutes(app: App): void {
         const revealed = parseNums(round.revealed_cells_json);
         if (revealed.length < minSafePicksForCollect(Number(round.mine_count))) return c.json({ error: 'Open more safe tiles before collecting' }, 409);
         const multiplier = soloMultiplier(Number(round.mine_count), revealed.length, Number(round.board_size) || 25);
-        const payoutNano = Math.max(0, Math.floor(Number(round.amount_nano) * multiplier));
+        const payoutNano = soloPayout(Number(round.amount_nano), multiplier);
         const previousJson = round.revealed_cells_json;
         await c.env.DB.prepare(`UPDATE mines_solo_rounds
           SET status='cashed_out', multiplier=?, payout_nano=?, updated_at=CURRENT_TIMESTAMP
@@ -246,6 +250,7 @@ async function ensureTables(env:Env){
 }
 
 async function soloUser(env:Env,initData:unknown){return validateTelegramInitData(String(initData||''),gameBotToken(env));}
+async function assertSoloAccess(env:Env,userId:string){const controls=await getUserControls(env,userId);if(controls.banned)throw new Error('Mines is blocked for this account');if(controls.blockedSections.includes('mines'))throw new Error('Mines is blocked for this account');}
 async function soloRound(env:Env,userId:string){return env.DB.prepare('SELECT * FROM mines_solo_rounds WHERE user_id=?').bind(userId).first<SoloMineRound>();}
 async function activateSoloRound(env:Env,round:SoloMineRound){
   if(round.status!=='pending')return{round,controls:await getUserControls(env,round.user_id)};
@@ -261,8 +266,8 @@ async function activateSoloRound(env:Env,round:SoloMineRound){
   return{round:active,controls};
 }
 async function settleSoloPayout(env:Env,round:SoloMineRound){
-  const payout=Math.max(0,Math.floor(Number(round.payout_nano)||0));
-  if(round.status!=='cashed_out'||!payout)return getUserControls(env,round.user_id);
+  const payout=Math.floor(Number(round.payout_nano)||0);
+  if(round.status!=='cashed_out'||!Number.isSafeInteger(payout)||payout<=0)return getUserControls(env,round.user_id);
   return applyGameTonBalanceDelta(env,round.user_id,payout,{kind:'game',title:'Mines reward',referenceId:round.round_id,referenceType:'mines_solo_payout',roundId:round.round_id,metadata:{game:'mines',mineCount:Number(round.mine_count),multiplier:Number(round.multiplier)||1}});
 }
 function soloState(round:SoloMineRound,tonBalanceNano:number){
@@ -272,6 +277,8 @@ function soloState(round:SoloMineRound,tonBalanceNano:number){
 }
 function minSafePicksForCollect(mineCount:number){return mineCount<=5?2:1;}
 function soloMineCount(value:unknown){const n=Math.floor(Number(value));return SOLO_MINE_COUNTS.has(n)?n:0;}
+function soloAmount(value:unknown,mineCount:number){const amount=Math.floor(Number(value));if(!Number.isSafeInteger(amount)||amount<=0)return 0;const maxMultiplier=soloMultiplier(mineCount,25-mineCount,25),maxAmount=Math.floor(Number.MAX_SAFE_INTEGER/maxMultiplier);return amount<=maxAmount?amount:0;}
+function soloPayout(amount:number,multiplier:number){const payout=Math.floor(amount*multiplier);if(!Number.isSafeInteger(payout)||payout<=0)throw new Error('Invalid Mines payout');return payout;}
 function soloMultiplier(mineCount:number,picks:number,size:number){
   const safePicks=Math.max(0,Math.min(Math.floor(Number(picks)||0),size-mineCount));if(!safePicks)return 1;
   let probability=1;for(let i=0;i<safePicks;i++)probability*=((size-mineCount-i)/(size-i));
@@ -307,4 +314,4 @@ function clampInt(value:unknown,min:number,max:number,fallback:number){const num
 function hiddenCells(size:number,count:number){const set=new Set<number>();while(set.size<Math.min(size-1,count))set.add(Math.floor(Math.random()*size));return[...set].sort((a,b)=>a-b);}
 function parseNums(value:string){try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map(Number).filter((n)=>Number.isInteger(n)&&n>=0&&n<25):[];}catch{return[];}}
 function parseRevealed(value:string):Array<{cell:number;byUserId:string;result:'safe'|'hidden'}>{try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map((item)=>({cell:Number(item.cell),byUserId:String(item.byUserId||''),result:item.result==='hidden'?'hidden' as const:'safe' as const})).filter((item)=>Number.isInteger(item.cell)&&item.cell>=0&&item.cell<25):[];}catch{return[];}}
-function fail(c:any,error:unknown,fallback:string){const message=error instanceof Error?error.message:fallback;return c.json({error:message},message==='Room not found'?404:400);}
+function fail(c:any,error:unknown,fallback:string){const message=error instanceof Error?error.message:fallback;return c.json({error:message},message==='Room not found'?404:/blocked/i.test(message)?403:400);}

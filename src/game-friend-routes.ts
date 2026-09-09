@@ -32,7 +32,6 @@ export function registerFriendGameRoutes(app: App): void {
       const mineCount = soloMineCount(body.mineCount);
       if (!amountNano) return c.json({ error: 'Invalid point amount' }, 400);
       if (!mineCount) return c.json({ error: 'Invalid mine count' }, 400);
-      if (!(await limited(c.env, `mines-solo:${userId}`))) return c.json({ error: 'Too many Mines rounds. Try again later.' }, 429);
       await ensureTables(c.env);
 
       let current = await soloRound(c.env, userId);
@@ -105,9 +104,10 @@ export function registerFriendGameRoutes(app: App): void {
           SET status='lost', updated_at=CURRENT_TIMESTAMP
           WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?`)
           .bind(userId, roundId, previousJson).run();
+        const changed = Number(result.meta?.changes || 0) > 0;
         round = await soloRound(c.env, userId) as SoloMineRound;
         const controls = await getUserControls(c.env, userId);
-        return c.json({ ...soloState(round, controls.tonBalanceNano), result: 'mine', selectedCell: cell, newReveal: Number(result.meta?.changes || 0) > 0 });
+        return c.json({ ...soloState(round, controls.tonBalanceNano), ...(changed ? { result: 'mine', selectedCell: cell } : {}), newReveal: changed });
       }
 
       const nextRevealed = [...revealed, cell].sort((a, b) => a - b);
@@ -120,7 +120,8 @@ export function registerFriendGameRoutes(app: App): void {
         .bind(JSON.stringify(nextRevealed), multiplier, cleared ? 'cashed_out' : 'active', payoutNano, userId, roundId, previousJson).run();
       round = await soloRound(c.env, userId) as SoloMineRound;
       const controls = round.status === 'cashed_out' ? await settleSoloPayout(c.env, round) : await getUserControls(c.env, userId);
-      return c.json({ ...soloState(round, controls.tonBalanceNano), result: 'safe', selectedCell: cell, newReveal: Number(result.meta?.changes || 0) > 0 });
+      const changed = Number(result.meta?.changes || 0) > 0;
+      return c.json({ ...soloState(round, controls.tonBalanceNano), ...(changed ? { result: 'safe', selectedCell: cell } : {}), newReveal: changed });
     } catch (e) { return fail(c, e, 'Could not select tile.'); }
   });
 
@@ -246,15 +247,16 @@ async function soloUser(env:Env,initData:unknown){return validateTelegramInitDat
 async function soloRound(env:Env,userId:string){return env.DB.prepare('SELECT * FROM mines_solo_rounds WHERE user_id=?').bind(userId).first<SoloMineRound>();}
 async function activateSoloRound(env:Env,round:SoloMineRound){
   if(round.status!=='pending')return{round,controls:await getUserControls(env,round.user_id)};
+  let controls;
   try{
-    const controls=await debitUserTonBalanceIfEnough(env,round.user_id,Number(round.amount_nano),{kind:'game',title:'Mines bet',referenceId:round.round_id,referenceType:'mines_solo_bet',roundId:round.round_id,metadata:{game:'mines',mineCount:Number(round.mine_count)}});
-    await env.DB.prepare("UPDATE mines_solo_rounds SET status='active',updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='pending'").bind(round.user_id,round.round_id).run();
-    const active=await soloRound(env,round.user_id);if(!active)throw new Error('Round not found');
-    return{round:active,controls};
+    controls=await debitUserTonBalanceIfEnough(env,round.user_id,Number(round.amount_nano),{kind:'game',title:'Mines bet',referenceId:round.round_id,referenceType:'mines_solo_bet',roundId:round.round_id,metadata:{game:'mines',mineCount:Number(round.mine_count)}});
   }catch(error){
     await env.DB.prepare("UPDATE mines_solo_rounds SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='pending'").bind(round.user_id,round.round_id).run().catch(()=>undefined);
     throw error;
   }
+  await env.DB.prepare("UPDATE mines_solo_rounds SET status='active',updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='pending'").bind(round.user_id,round.round_id).run();
+  const active=await soloRound(env,round.user_id);if(!active)throw new Error('Round not found');
+  return{round:active,controls};
 }
 async function settleSoloPayout(env:Env,round:SoloMineRound){
   const payout=Math.max(0,Math.floor(Number(round.payout_nano)||0));

@@ -53,7 +53,7 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
   font-size:13px!important;
 }
 #predictzone .predict-zone-glass-card.bet-mode .predict-zone-bet-stage{
-  transform:translate3d(0,-32px,0)!important;
+  transform:translate3d(0,-36px,0)!important;
 }
 @media(max-width:380px){
   #predictzone .predict-zone-countdown{font-size:18px!important}

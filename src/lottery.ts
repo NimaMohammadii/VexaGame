@@ -275,7 +275,7 @@ export async function startLotteryNow(env: Env): Promise<LotteryRound> {
 
   row = await env.DB.prepare("SELECT * FROM lottery_rounds WHERE status='open' ORDER BY datetime(created_at) DESC LIMIT 1").first<RoundRow>();
   if (!row) throw new Error('Could not start Lottery round');
-  await syncLotteryScheduler(env);
+  await syncLotterySchedulerSafely(env, 'start Lottery round');
   return publicRound(row);
 }
 
@@ -473,7 +473,7 @@ export async function getLotteryAdminOverview(env: Env): Promise<{
       COALESCE(SUM(price_nano),0) AS revenue_nano
       FROM lottery_tickets WHERE round_id=?`).bind(round.id).first<AdminStatsRow>();
   }
-  await syncLotteryScheduler(env);
+  await syncLotterySchedulerSafely(env, 'load Lottery admin overview');
   return {
     settings,
     round,
@@ -518,7 +518,7 @@ export async function updateLotterySettings(env: Env, patch: Partial<{
     await env.DB.prepare("UPDATE lottery_rounds SET draw_at=?,draw_lock=NULL,updated_at=CURRENT_TIMESTAMP WHERE status='open'").bind(next.nextDrawAt).run();
   }
   const updated = await getLotterySettings(env);
-  await syncLotteryScheduler(env);
+  await syncLotterySchedulerSafely(env, 'update Lottery settings');
   return updated;
 }
 
@@ -722,6 +722,10 @@ export async function syncLotteryScheduler(env: Env): Promise<void> {
   const id = env.LOTTERY_SCHEDULER.idFromName(LOTTERY_SCHEDULER_NAME);
   const response = await env.LOTTERY_SCHEDULER.get(id).fetch('https://lottery-scheduler/sync', { method: 'POST' });
   if (!response.ok) throw new Error(`Lottery scheduler sync failed (${response.status})`);
+}
+
+async function syncLotterySchedulerSafely(env: Env, action: string): Promise<void> {
+  await syncLotteryScheduler(env).catch((error) => console.warn(`Lottery scheduler sync failed after ${action}`, error));
 }
 
 async function ensureLotterySchedulerStarted(env: Env): Promise<void> {

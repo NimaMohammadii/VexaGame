@@ -1,6 +1,6 @@
 import type { Env } from './types';
 
-export type LiveActivityKind = 'deposit' | 'withdraw' | 'ticket';
+export type LiveActivityKind = 'deposit' | 'withdraw' | 'ticket' | 'lottery';
 
 export type LiveActivityInput = {
   kind: LiveActivityKind;
@@ -118,13 +118,14 @@ function actionFor(input: LiveActivityInput): string {
   const amount = Math.abs(Math.floor(Number(input.amountNano) || 0));
   if (input.kind === 'deposit') return 'Deposited';
   if (input.kind === 'withdraw') return 'Requested a withdrawal';
+  if (input.kind === 'lottery') return 'Lottery updated';
   const quantity = Math.max(1, Math.floor(Number(input.quantity) || 1));
   if (!amount && quantity === 1) return 'Claimed a free ticket';
   return `Bought ${quantity} ticket${quantity === 1 ? '' : 's'}`;
 }
 
 function isLiveActivityKind(value: unknown): value is LiveActivityKind {
-  return value === 'deposit' || value === 'withdraw' || value === 'ticket';
+  return value === 'deposit' || value === 'withdraw' || value === 'ticket' || value === 'lottery';
 }
 
 function isLiveActivityEvent(value: unknown): value is LiveActivityEvent {
@@ -210,7 +211,7 @@ export const LIVE_ACTIVITY_CLIENT_SCRIPT = `
   var socket=null;
   var reconnectTimer=0;
   var reconnectAttempt=0;
-  function allowed(event){return !!event&&!!event.id&&(event.kind==='deposit'||event.kind==='withdraw'||event.kind==='ticket')}
+  function allowed(event){return !!event&&!!event.id&&(event.kind==='deposit'||event.kind==='withdraw'||event.kind==='ticket'||event.kind==='lottery')}
   function broadcast(event){try{window.dispatchEvent(new CustomEvent('vexa:live-activity',{detail:event}))}catch(e){}}
   function delay(){return Math.min(30000,900*Math.pow(2,Math.min(reconnectAttempt++,5)))}
   function connect(){

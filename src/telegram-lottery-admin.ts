@@ -1,6 +1,7 @@
 import type { Env } from './types';
 import { getCurrentLotteryRound, getLotteryAdminOverview, getLotterySettings, setLotteryDrawMinutesFromNow, startLotteryNow, updateLotterySettings } from './lottery';
 import { adjustLotteryPrizePool, clearLotteryWinnerSelections, getLotteryPrizePoolNano, getLotteryPrizes, getLotteryRoundTicketHolder, getLotteryUserHistory, getLotteryWinnerSelections, listLotteryRoundTicketHolders, LOTTERY_WINNER_COUNT, searchLotteryTicketHolders, setLotteryPrizePercentages, setLotteryWinnerSelection } from './lottery-prizes';
+import { publishLiveActivity } from './live-activity';
 import { makeSimplePdf } from './telegram-pdf';
 import { getTelegramMenuMessageId, setTelegramMenuMessageId, upsertTelegramTextMenu } from './telegram-menu-state';
 
@@ -133,6 +134,7 @@ async function handleCallback(env: Env, callback: Callback): Promise<Response> {
       await getCurrentLotteryRound(env, false);
       const round = await startLotteryNow(env);
       const settings = await getLotterySettings(env);
+      await publishLotteryRefresh(env, callback.from.id, round.id, 'Lottery started now');
       await sendLotteryMenu(env, chatId, messageId, `🚀 Lottery از همین الان شروع شد. Draw بعدی ${formatMinutes(settings.drawIntervalMinutes)} دیگر است.\nRound: ${round.id}`);
       return ok();
     }
@@ -142,6 +144,8 @@ async function handleCallback(env: Env, callback: Callback): Promise<Response> {
       if (arg === 'enabled') await updateLotterySettings(env, { enabled: !settings.enabled });
       else if (arg === 'sales') await updateLotterySettings(env, { salesOpen: !settings.salesOpen });
       else if (arg === 'free') await updateLotterySettings(env, { freeTicketEnabled: !settings.freeTicketEnabled });
+      const round = await getCurrentLotteryRound(env, false);
+      await publishLotteryRefresh(env, callback.from.id, round?.id, 'Lottery settings updated');
       await sendLotteryMenu(env, chatId, messageId, '✅ تنظیمات ذخیره شد.');
       return ok();
     }
@@ -150,7 +154,8 @@ async function handleCallback(env: Env, callback: Callback): Promise<Response> {
       const minutes = Number(arg);
       if (![60, 360, 720, 1440].includes(minutes)) throw new Error('Invalid draw time');
       await setLotteryDrawMinutesFromNow(env, minutes);
-      await getCurrentLotteryRound(env, true);
+      const round = await getCurrentLotteryRound(env, true);
+      await publishLotteryRefresh(env, callback.from.id, round?.id, 'Lottery draw time updated');
       await sendLotteryMenu(env, chatId, messageId, `✅ زمان Draw روی ${formatMinutes(minutes)} از الان تنظیم شد.`);
       return ok();
     }
@@ -185,6 +190,8 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
     if (mode === 'prizes') {
       const percentBps = parsePrizePercentages(text);
       await setLotteryPrizePercentages(env, percentBps);
+      const round = await getCurrentLotteryRound(env, false);
+      await publishLotteryRefresh(env, userId, round?.id, 'Lottery prize split updated');
       await finishInput(env, userId);
       await sendPrizeMenu(env, message.chat.id, menuMessageId, '✅ تقسیم Prize Pool برای سه برنده ذخیره شد.');
       return;
@@ -195,6 +202,7 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
       if (!round || round.status !== 'open') throw new Error('راند باز Lottery وجود ندارد.');
       const amountNano = parsePrizePoolAmountNano(text);
       const nextPoolNano = await adjustLotteryPrizePool(env, round.id, mode === 'pooladd' ? amountNano : -amountNano);
+      await publishLotteryRefresh(env, userId, round.id, 'Lottery prize pool updated', nextPoolNano);
       await finishInput(env, userId);
       await sendLotteryMenu(env, message.chat.id, menuMessageId, `✅ Prize Pool ${mode === 'pooladd' ? 'افزایش' : 'کاهش'} یافت.\nمقدار جدید: ${formatPrizePoolGram(nextPoolNano)} GRAM`);
       return;
@@ -214,7 +222,8 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
       if (!/^\d+$/.test(text)) throw new Error('تعداد دقیقه را فقط به‌صورت عدد صحیح بفرستید.');
       const minutes = Number(text);
       await setLotteryDrawMinutesFromNow(env, minutes);
-      await getCurrentLotteryRound(env, true);
+      const round = await getCurrentLotteryRound(env, true);
+      await publishLotteryRefresh(env, userId, round?.id, 'Lottery draw time updated');
       await finishInput(env, userId);
       await sendLotteryMenu(env, message.chat.id, menuMessageId, `✅ Draw برای ${formatMinutes(minutes)} دیگر تنظیم شد.`);
       return;
@@ -225,6 +234,8 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
       if (!Number.isFinite(gram) || gram <= 0 || gram > 1000) throw new Error('قیمت معتبر GRAM بفرستید. مثال: 0.15');
       const nano = Math.round(gram * NANO);
       await updateLotterySettings(env, { ticketPriceNano: nano });
+      const round = await getCurrentLotteryRound(env, false);
+      await publishLotteryRefresh(env, userId, round?.id, 'Lottery ticket price updated');
       await finishInput(env, userId);
       await sendLotteryMenu(env, message.chat.id, menuMessageId, `✅ قیمت هر تیکت روی ${formatGram(nano)} GRAM تنظیم شد.`);
       return;
@@ -234,6 +245,8 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
       if (!/^\d+$/.test(text)) throw new Error('یک عدد صحیح بفرستید. 0 یعنی بدون محدودیت.');
       const limit = Number(text);
       await updateLotterySettings(env, { maxTicketsPerUser: limit });
+      const round = await getCurrentLotteryRound(env, false);
+      await publishLotteryRefresh(env, userId, round?.id, 'Lottery ticket limit updated');
       await finishInput(env, userId);
       await sendLotteryMenu(env, message.chat.id, menuMessageId, `✅ سقف تیکت هر کاربر ${limit === 0 ? 'برداشته شد' : `روی ${limit} قرار گرفت`}.`);
       return;
@@ -243,6 +256,8 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
       if (!/^\d+$/.test(text)) throw new Error('فاصله Draw را به دقیقه بفرستید. مثال: 1440');
       const minutes = Number(text);
       await updateLotterySettings(env, { drawIntervalMinutes: minutes });
+      const round = await getCurrentLotteryRound(env, false);
+      await publishLotteryRefresh(env, userId, round?.id, 'Lottery draw interval updated');
       await finishInput(env, userId);
       await sendLotteryMenu(env, message.chat.id, menuMessageId, `✅ فاصله پیش‌فرض Draw روی ${formatMinutes(minutes)} تنظیم شد.`);
     }
@@ -561,6 +576,17 @@ function clip(value: unknown, maxLength: number): string {
   const text = String(value || '').trim();
   const max = Math.max(1, Math.floor(Number(maxLength) || 1));
   return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
+}
+async function publishLotteryRefresh(env: Env, userId: number, roundId?: string | null, action = 'Lottery updated', prizePoolNano?: number): Promise<void> {
+  await publishLiveActivity(env, {
+    kind: 'lottery',
+    userId: String(userId),
+    section: 'home',
+    roundId: roundId || null,
+    prizePoolNano,
+    action,
+    key: `lottery_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+  }).catch((error) => console.warn('Lottery live refresh failed', error));
 }
 async function upsert(env: Env, token: string, chatId: number, messageId: number | undefined, text: string, keyboard: Keyboard): Promise<number | undefined> {
   return upsertTelegramTextMenu(env, token, tg, chatId, messageId, {

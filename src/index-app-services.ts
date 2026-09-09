@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import app from './index';
 import { trackAppUser } from './admin-users';
-import { applyGameTonBalanceDeltas, publicUserControls } from './user-controls';
+import { publicUserControls } from './user-controls';
 import { setTelegramWebhook } from './telegram-game-bot';
-import { gameBotToken, PUBLIC_BASE_URL, validateTelegramInitData } from './utils';
+import { PUBLIC_BASE_URL } from './utils';
 import { cleanSectionId, sectionBackgroundInfo, sectionBackgroundR2Key } from './section-backgrounds';
 import type { Env } from './types';
 import { getOnlineUserCountConfig, ONLINE_COUNT_SECTIONS, resetOnlineUserCountConfig, saveOnlineUserCountConfig } from './online-user-counts';
@@ -43,8 +43,6 @@ const activitySchema = z.object({ userId: z.string().min(1).max(64), username: z
 const lockSchema = z.object({ sectionId: z.string().min(1).max(40), locked: z.boolean() });
 const codeLockSchema = z.object({ sectionId: z.string().min(1).max(40), code: z.string().min(1).max(80) });
 const userIdSchema = z.object({ userId: z.string().min(1).max(80) });
-const gameBalanceEventSchema = z.object({ eventId: z.string().min(12).max(80).regex(/^[0-9A-Za-z_-]+$/), deltaNano: z.number().int(), section: z.string().max(40).optional() });
-const gameTonBalanceSchema = z.object({ userId: z.string().min(1).max(80), initData: z.string().min(1).max(8192), deltas: z.array(gameBalanceEventSchema).min(1).max(20) });
 const userTonBalanceSchema = z.object({ userId: z.string().min(1).max(80), tonBalanceNano: z.number().int().nonnegative() });
 const userTonBalanceAdjustSchema = z.object({ userId: z.string().min(1).max(80), deltaNano: z.number().int() });
 const userWinChanceSchema = z.object({ userId: z.string().min(1).max(80), winChancePercent: z.number().int().min(0).max(100) });
@@ -63,17 +61,6 @@ app.get('/setup-webhook', async (c) => {
 });
 
 app.post('/app/api/activity', zValidator('json', activitySchema), async (c) => c.json(await trackAppUser(c.env, c.req.valid('json'))));
-app.post('/app/api/ton-balance/game-delta', zValidator('json', gameTonBalanceSchema), async (c) => {
-  const body = c.req.valid('json');
-  try {
-    const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
-    if (userId !== body.userId) throw new Error('Telegram user mismatch');
-    const deltas = body.deltas;
-    if (deltas.some((item) => ['plinko','crash'].includes(String(item.section || '').trim().toLowerCase()))) throw new Error('Plinko and Crash balances are settled by secure server endpoints.');
-    return c.json(await applyGameTonBalanceDeltas(c.env, userId, deltas));
-  }
-  catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Could not update GRAM balance' }, 400); }
-});
 
 app.get('/app/api/section-backgrounds', async (c) => {
   const adminSections = [

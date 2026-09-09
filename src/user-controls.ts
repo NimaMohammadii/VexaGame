@@ -28,14 +28,7 @@ export type UserControls = {
   sectionBlocks: UserSectionBlock[];
 };
 
-export type GameTonBalanceDelta = {
-  eventId?: string;
-  deltaNano: number;
-  section?: string;
-};
-
 const VALID_SECTIONS = new Set(['home', 'plinko', 'playzone', 'mines', 'crash', 'wheel', 'dice', 'tower', 'slot', 'coinflip', 'hilo', 'ghostrun', 'predict-bitcoin', 'predict-gold', 'predict-oil']);
-const GAME_BALANCE_BATCH_MAX = 20;
 let gameBalanceLedgerReady: Promise<void> | null = null;
 
 type StoredUserControls = {
@@ -91,54 +84,6 @@ export async function applyGameTonBalanceDelta(env: Env, userId: string, deltaNa
   await addUserTonBalance(env, id, baseDelta);
   const after = await readUserTonBalance(env, id);
   await recordTonTransaction(env, id, after - before, after, effectiveMeta);
-  return controlsWithBalance(env, id, after);
-}
-
-export async function applyGameTonBalanceDeltas(env: Env, userId: string, input: GameTonBalanceDelta[]): Promise<UserControls> {
-  const id = cleanUserId(userId);
-  await assertUserNotBanned(env, id);
-  const deltas = (Array.isArray(input) ? input : []).slice(0, GAME_BALANCE_BATCH_MAX).map((item) => ({
-    eventId: cleanGameEventId(item?.eventId),
-    deltaNano: Math.floor(Number(item?.deltaNano) || 0),
-    section: cleanGameSection(item?.section) || 'unknown',
-  })).filter((item) => item.deltaNano !== 0);
-  if (!deltas.length) return getUserControls(env, id);
-  if (deltas.some((item) => !item.eventId)) throw new Error('Missing game balance event id');
-
-  await ensureAppUserBalanceRow(env, id);
-  await ensureGameBalanceLedger(env);
-
-  const statements = [];
-  for (const item of deltas) {
-    const eventId = item.eventId;
-    const requestNonce = crypto.randomUUID();
-    const transactionId = gameDeltaTransactionId(id, eventId);
-    const metadataJson = JSON.stringify({ section: item.section, requestedDeltaNano: item.deltaNano, eventId, requestNonce });
-    const title = item.deltaNano >= 0 ? 'Game reward' : 'Game bet';
-    statements.push(
-      env.DB.prepare(`INSERT OR IGNORE INTO ton_transactions (
-        id, user_id, kind, title, description, amount_nano, balance_after_nano, status,
-        reference_id, reference_type, metadata_json, created_at
-      )
-      SELECT ?, ?, 'game', ?, NULL,
-        max(0, ton_balance_nano + ?) - ton_balance_nano,
-        max(0, ton_balance_nano + ?),
-        'completed', ?, 'game_delta', ?, CURRENT_TIMESTAMP
-      FROM app_users
-      WHERE telegram_user_id = ?`)
-        .bind(transactionId, id, title, item.deltaNano, item.deltaNano, eventId, metadataJson, id),
-      env.DB.prepare(`UPDATE app_users
-        SET ton_balance_nano = max(0, ton_balance_nano + ?), updated_at = CURRENT_TIMESTAMP
-        WHERE telegram_user_id = ?
-          AND EXISTS (
-            SELECT 1 FROM ton_transactions
-            WHERE id = ? AND user_id = ? AND reference_type = 'game_delta' AND reference_id = ? AND metadata_json = ?
-          )`)
-        .bind(item.deltaNano, id, transactionId, id, eventId, metadataJson),
-    );
-  }
-  await env.DB.batch(statements);
-  const after = await readUserTonBalance(env, id);
   return controlsWithBalance(env, id, after);
 }
 
@@ -491,18 +436,6 @@ function normalizeWinChance(value: unknown): number {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return 50;
   return Math.max(0, Math.min(100, n));
-}
-
-function cleanGameEventId(value: unknown): string {
-  return String(value || '').trim().replace(/[^0-9A-Za-z_-]/g, '').slice(0, 80);
-}
-
-function gameDeltaTransactionId(userId: string, eventId: string): string {
-  return `gdelta:${userId}:${eventId}`;
-}
-
-function cleanGameSection(value: unknown): string {
-  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
 }
 
 function key(userId: string): string {

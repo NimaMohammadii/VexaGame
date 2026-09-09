@@ -13,7 +13,7 @@ const CACHE_PREDICT_IMAGE_MANIFEST = 'public, max-age=300, stale-while-revalidat
 const PREDICT_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const TRADE_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const ASTER_FUTURES_REST_BASE = 'https://fapi.asterdex.com';
-const BINANCE_SPOT_REST_BASE = 'https://api.binance.com';
+const BINANCE_SPOT_REST_BASE = 'https://data-api.binance.vision';
 const ROUND_MS = 5 * 60 * 1000;
 const MONTH_BET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_MS = 0;
@@ -397,7 +397,7 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
       }
       if (!(Number(polymarketRound.startPrice) > 0)) {
         const retryMs = await deferPredictRoundBootstrap(env, id, new Error('Polymarket Bitcoin start price is unavailable for this round')).catch(() => ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
-        throw new PredictRoundStartingError(id, startsAt, endsAt, retryMs);
+        throw new PredictRoundStartingError(id, startsAt, endsAt, ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
       }
       startPrice = Number(polymarketRound.startPrice);
       await persistPolymarketRound(env, id, polymarketRound);
@@ -1103,7 +1103,7 @@ async function readPredictOpsFeed(env: Env, market: TradeMarket): Promise<Predic
   try {
     const parsed = JSON.parse(raw) as Partial<PredictOpsFeed>;
     const lastPrice = Number(parsed.lastPrice);
-    return { lastPrice: Number.isFinite(lastPrice) && lastPrice > 0 ? lastPrice : null, lastSuccessAt: typeof parsed.lastSuccessAt === 'string' ? parsed.lastSuccessAt : null, circuitOpen: parsed.circuitOpen === true, circuitReason: typeof parsed.circuitReason === 'string' ? parsed.circuitReason.slice(0, 220) : null, circuitOpenedAt: typeof parsed.circuitOpenedAt === 'string' ? parsed.circuitOpenedAt : null, lastError: typeof parsed.lastError === 'string' ? parsed.lastError.slice(0, 220) : null, lastErrorAt: typeof parsed.lastErrorAt === 'string' ? parsed.lastErrorAt : null };
+    return { lastPrice: Number.isFinite(lastPrice) && lastPrice > 0 ? lastPrice : null, lastSuccessAt: typeof parsed.lastSuccessAt === 'string' ? parsed.lastSuccessAt : null, circuitOpen: parsed.circuitOpen === true, circuitReason: typeof parsed.circuitReason === 'string' ? parsed.circuitReason.slice(0, 220) : null, circuitOpenedAt: typeof parsed.circuitOpenedAt === 'string' ? parsed.circuitOpenedAt.slice(0, 40) : null, lastError: typeof parsed.lastError === 'string' ? parsed.lastError.slice(0, 220) : null, lastErrorAt: typeof parsed.lastErrorAt === 'string' ? parsed.lastErrorAt : null };
   } catch { return fallback; }
 }
 function writePredictOpsFeed(env: Env, market: TradeMarket, value: PredictOpsFeed): Promise<void> { return env.BOT_CACHE.put(PREDICT_OPS_FEED_PREFIX + market, JSON.stringify(value)); }

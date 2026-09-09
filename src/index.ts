@@ -5,7 +5,7 @@ import { registerWheelRoutes } from './wheel-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
 import { handleGameBotWebhook } from './telegram-game-bot';
 import { addUserXpBatch, getUserLevel } from './levels';
-import { getUserControls, settleGameTonBalanceRound } from './user-controls';
+import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, settleGameTonBalanceRound } from './user-controls';
 import type { Env, TelegramUpdate } from './types';
 import { gameBotToken, PUBLIC_BASE_URL, validateTelegramInitData } from './utils';
 
@@ -16,6 +16,7 @@ const HOME_LOTTERY_SLOT_KEY = 'home-lottery-slot';
 const VERSIONED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const DICE_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 50);
 const SLOT_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 200);
+const PUMP_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 24);
 
 type LevelXpEventInput = {
   amount?: unknown;
@@ -30,6 +31,18 @@ type LevelXpBody = LevelXpEventInput & {
 };
 
 type StaticAssetsEnv = Env & { STATIC_ASSETS: { fetch(request: Request): Promise<Response> } };
+type PumpRoundRow = {
+  round_id: string;
+  user_id: string;
+  amount_nano: number;
+  burst_at: number;
+  multiplier: number;
+  pumps: number;
+  status: string;
+  payout_nano: number;
+};
+
+let pumpTablesReady: Promise<void> | null = null;
 
 async function serveVersionedStaticAsset(request: Request, env: Env, assetPath: string): Promise<Response> {
   const staticAssets = (env as StaticAssetsEnv).STATIC_ASSETS;
@@ -185,6 +198,120 @@ app.post('/app/api/slot/spin', async (c) => {
   }
 });
 
+app.post('/app/api/pump/start', async (c) => {
+  let userId = '';
+  let roundId = '';
+  let amountNano = 0;
+  let debited = false;
+  try {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const { userId: authenticatedUserId } = await authenticatedGameUser(c.env, body.initData, 'coinflip');
+    userId = authenticatedUserId;
+    amountNano = cleanGameAmount(body.amountNano, PUMP_MAX_BET_NANO, 'Pump');
+    await ensurePumpTables(c.env);
+    const active = await readActivePumpRound(c.env, userId);
+    if (active) {
+      const controls = await getUserControls(c.env, userId);
+      return c.json({ ok: true, restored: true, ...publicPumpRound(active), tonBalanceNano: controls.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+    }
+    roundId = `pump_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    const burstAt = serverPumpBurstPoint();
+    const afterDebit = await debitUserTonBalanceIfEnough(c.env, userId, amountNano, {
+      kind: 'game',
+      title: 'Pump bet',
+      referenceId: `${roundId}:bet`,
+      referenceType: 'pump_round',
+      metadata: { section: 'coinflip', roundId },
+    });
+    debited = true;
+    const inserted = await c.env.DB.prepare(`INSERT INTO pump_rounds
+      (round_id,user_id,amount_nano,burst_at,multiplier,pumps,status,payout_nano,created_at,updated_at)
+      VALUES (?,?,?, ?,1,0,'active',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+      .bind(roundId, userId, amountNano, burstAt).run();
+    if (Number(inserted.meta?.changes || 0) <= 0) throw new Error('Could not start Pump round');
+    const row = await readPumpRound(c.env, userId, roundId);
+    if (!row) throw new Error('Could not start Pump round');
+    return c.json({ ok: true, restored: false, ...publicPumpRound(row), tonBalanceNano: afterDebit.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    if (debited && userId && roundId && amountNano > 0) {
+      await adjustUserTonBalance(c.env, userId, amountNano, {
+        kind: 'adjustment',
+        title: 'Pump start refund',
+        referenceId: `${roundId}:refund`,
+        referenceType: 'pump_round',
+        metadata: { section: 'coinflip', roundId, reason: 'start-failed' },
+      }).catch(() => undefined);
+    }
+    return c.json({ error: error instanceof Error ? error.message : 'Could not start Pump round' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/pump/pump', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'coinflip');
+    const roundId = cleanRoundId(body.roundId, 'Pump round is not ready');
+    await ensurePumpTables(c.env);
+    const current = await readPumpRound(c.env, userId, roundId);
+    if (!current) throw new Error('Pump round not found');
+    if (current.status !== 'active') {
+      const controls = await getUserControls(c.env, userId);
+      return c.json({ ok: true, ...publicPumpRound(current), tonBalanceNano: controls.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+    }
+    const nextPumps = Math.max(1, Math.floor(Number(current.pumps) || 0) + 1);
+    const currentMultiplier = Math.max(1, Number(current.multiplier) || 1);
+    const nextMultiplier = Math.round((currentMultiplier + 0.09 + currentMultiplier * 0.085 + nextPumps * 0.012) * 100) / 100;
+    const nextStatus = nextMultiplier >= Number(current.burst_at) ? 'popped' : 'active';
+    await c.env.DB.prepare(`UPDATE pump_rounds SET pumps=?,multiplier=?,status=?,updated_at=CURRENT_TIMESTAMP
+      WHERE round_id=? AND user_id=? AND status='active' AND pumps=?`)
+      .bind(nextPumps, nextMultiplier, nextStatus, roundId, userId, current.pumps).run();
+    const row = await readPumpRound(c.env, userId, roundId);
+    if (!row) throw new Error('Pump round not found');
+    const controls = await getUserControls(c.env, userId);
+    return c.json({ ok: true, ...publicPumpRound(row), tonBalanceNano: controls.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not pump' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/pump/cashout', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'coinflip');
+    const roundId = cleanRoundId(body.roundId, 'Pump round is not ready');
+    await ensurePumpTables(c.env);
+    let row = await readPumpRound(c.env, userId, roundId);
+    if (!row) throw new Error('Pump round not found');
+    if (row.status === 'popped') throw new Error('This Pump round has already popped');
+    if (row.status === 'active') {
+      if (Number(row.pumps || 0) < 1) throw new Error('Pump at least once before cashing out');
+      const payoutNano = Math.max(0, Math.floor(Number(row.amount_nano || 0) * Number(row.multiplier || 1)));
+      await c.env.DB.prepare(`UPDATE pump_rounds SET status='cashout_pending',payout_nano=?,updated_at=CURRENT_TIMESTAMP
+        WHERE round_id=? AND user_id=? AND status='active'`).bind(payoutNano, roundId, userId).run();
+      row = await readPumpRound(c.env, userId, roundId);
+      if (!row) throw new Error('Pump round not found');
+    }
+    if (row.status !== 'cashout_pending' && row.status !== 'cashed') throw new Error('Pump round is not cashable');
+    const payoutNano = Math.max(0, Math.floor(Number(row.payout_nano || 0)));
+    let controls = await getUserControls(c.env, userId);
+    if (row.status === 'cashout_pending') {
+      controls = await adjustUserTonBalance(c.env, userId, payoutNano, {
+        kind: 'game',
+        title: 'Pump reward',
+        referenceId: `${roundId}:cashout`,
+        referenceType: 'pump_round',
+        metadata: { section: 'coinflip', roundId, multiplier: Number(row.multiplier || 1), pumps: Number(row.pumps || 0) },
+      });
+      await c.env.DB.prepare(`UPDATE pump_rounds SET status='cashed',updated_at=CURRENT_TIMESTAMP
+        WHERE round_id=? AND user_id=? AND status='cashout_pending'`).bind(roundId, userId).run();
+      row = await readPumpRound(c.env, userId, roundId) || row;
+    }
+    return c.json({ ok: true, ...publicPumpRound(row), payoutNano, tonBalanceNano: controls.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not cash out Pump round' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
 registerFriendGameRoutes(app);
 registerWheelRoutes(app);
 registerSlotAssetRoutes(app);
@@ -274,6 +401,64 @@ function serverSlotProfile(result: number[]): { tier: string; multiplier: number
   }
   if (count === 2 && symbol >= 0 && symbol <= 4) return { tier: 'pair-fruit', multiplier: 0.8 };
   return { tier: 'standard', multiplier: 0 };
+}
+
+function serverPumpBurstPoint(): number {
+  const roll = secureRandomUnit();
+  let point = 1.18 + Math.pow(roll, 1.9) * 6.2;
+  if (secureRandomUnit() < 0.055) point += 4 + secureRandomUnit() * 8;
+  return Math.min(24, Math.round(point * 100) / 100);
+}
+
+async function ensurePumpTables(env: Env): Promise<void> {
+  if (!pumpTablesReady) {
+    pumpTablesReady = (async () => {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_rounds (
+        round_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        amount_nano INTEGER NOT NULL,
+        burst_at REAL NOT NULL,
+        multiplier REAL NOT NULL DEFAULT 1,
+        pumps INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        payout_nano INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`).run();
+      await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_pump_rounds_active_user ON pump_rounds(user_id) WHERE status='active'").run();
+      await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_pump_rounds_user_created ON pump_rounds(user_id,created_at)').run();
+    })().catch((error) => {
+      pumpTablesReady = null;
+      throw error;
+    });
+  }
+  await pumpTablesReady;
+}
+
+async function readPumpRound(env: Env, userId: string, roundId: string): Promise<PumpRoundRow | null> {
+  return env.DB.prepare('SELECT * FROM pump_rounds WHERE user_id=? AND round_id=? LIMIT 1').bind(userId, roundId).first<PumpRoundRow>();
+}
+
+async function readActivePumpRound(env: Env, userId: string): Promise<PumpRoundRow | null> {
+  return env.DB.prepare("SELECT * FROM pump_rounds WHERE user_id=? AND status='active' ORDER BY datetime(created_at) DESC LIMIT 1").bind(userId).first<PumpRoundRow>();
+}
+
+function publicPumpRound(row: PumpRoundRow): { roundId: string; amountNano: number; multiplier: number; pumps: number; status: string; popped: boolean; payoutNano: number } {
+  return {
+    roundId: String(row.round_id),
+    amountNano: Math.max(1, Math.floor(Number(row.amount_nano) || 1)),
+    multiplier: Math.max(1, Number(row.multiplier) || 1),
+    pumps: Math.max(0, Math.floor(Number(row.pumps) || 0)),
+    status: String(row.status || ''),
+    popped: String(row.status || '') === 'popped',
+    payoutNano: Math.max(0, Math.floor(Number(row.payout_nano) || 0)),
+  };
+}
+
+function cleanRoundId(value: unknown, message: string): string {
+  const roundId = String(value || '').replace(/[^0-9A-Za-z_-]/g, '').slice(0, 80);
+  if (!roundId) throw new Error(message);
+  return roundId;
 }
 
 function html(content: string, extraHeaders: Record<string, string> = {}): Response {

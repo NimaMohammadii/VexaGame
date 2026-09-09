@@ -54,7 +54,7 @@ input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amou
 #predictzone .predict-zone-bet-presets button{height:38px!important}
 #predictzone .predict-zone-bet-submit{height:35px!important}
 #predictzone .predict-zone-glass-card.bet-mode .predict-zone-bet-stage{
-  transform:translate3d(0,-42px,0)!important;
+  transform:translate3d(0,-50px,0)!important;
 }
 @media(max-width:380px){
   #predictzone .predict-zone-countdown{font-size:18px!important}

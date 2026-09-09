@@ -9,9 +9,6 @@ import { mnemonicToAccount } from 'viem/accounts';
 import { bsc } from 'viem/chains';
 
 const TON_NANO = 1_000_000_000;
-const MIN_WITHDRAW_NANO = 10 * TON_NANO;
-const MAX_WITHDRAW_NANO = 100 * TON_NANO;
-const DAILY_WITHDRAW_LIMIT_NANO = 100 * TON_NANO;
 const DEFAULT_TON_WITHDRAW_WALLET_ADDRESS = 'UQBM3omem7qMV3hoELAxiFEBRlldbRfRoHGKHobgdq0yUxvs';
 const TONCENTER_BASE = 'https://toncenter.com/api/v2';
 const BSC_CHAIN_ID = 56;
@@ -108,8 +105,9 @@ export async function createTonWithdrawal(
   const amountNano = tonToNano(amountTonInput);
   await assertUserNotBanned(env, userId);
   const limits = await getFinanceLimits(env);
-  const minWithdrawNano = limits.minWithdrawNano || MIN_WITHDRAW_NANO;
-  const maxWithdrawNano = limits.maxWithdrawNano || MAX_WITHDRAW_NANO;
+  const minWithdrawNano = limits.minWithdrawNano;
+  const maxWithdrawNano = limits.maxWithdrawNano;
+  const dailyWithdrawLimitNano = limits.maxWithdrawNano;
   if (amountNano < minWithdrawNano) throw new Error(`Minimum withdrawal is ${formatGramAmount(minWithdrawNano)} Gram`);
   if (amountNano > maxWithdrawNano) throw new Error(`Maximum withdrawal is ${formatGramAmount(maxWithdrawNano)} Gram`);
 
@@ -153,7 +151,7 @@ export async function createTonWithdrawal(
             AND status != 'rejected'
             AND date(created_at) = date('now')
         ) + ? <= ?`)
-      .bind(amountNano, userId, amountNano, userId, amountNano, DAILY_WITHDRAW_LIMIT_NANO),
+      .bind(amountNano, userId, amountNano, userId, amountNano, dailyWithdrawLimitNano),
     env.DB.prepare(`INSERT INTO ton_withdrawals
       (id, user_id, wallet_address, amount_nano, payout_asset, payout_network, payout_amount_units, payout_rate_usd, status, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -175,8 +173,8 @@ export async function createTonWithdrawal(
       getDailyWithdrawalUsedNano(env, userId),
     ]);
     if (current.tonBalanceNano < amountNano) throw new Error('Not enough Gram balance');
-    const remainingNano = Math.max(0, DAILY_WITHDRAW_LIMIT_NANO - usedTodayNano);
-    throw new Error(`Daily withdrawal limit is 100 Gram. Remaining today: ${formatGramAmount(remainingNano)} Gram`);
+    const remainingNano = Math.max(0, dailyWithdrawLimitNano - usedTodayNano);
+    throw new Error(`Daily withdrawal limit is ${formatGramAmount(dailyWithdrawLimitNano)} Gram. Remaining today: ${formatGramAmount(remainingNano)} Gram`);
   }
 
   const row = await env.DB.prepare('SELECT * FROM ton_withdrawals WHERE id = ?').bind(id).first<WithdrawRow>();

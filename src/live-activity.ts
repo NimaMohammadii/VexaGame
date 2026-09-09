@@ -83,10 +83,28 @@ export async function publishLiveActivity(env: Env, input: LiveActivityInput): P
   const userId = cleanUserId(input.userId);
   const event = await buildEvent(env, userId, input);
   const id = env.LIVE_ACTIVITY.idFromName('global');
-  await env.LIVE_ACTIVITY.get(id).fetch('https://live-activity/publish', {
+  const response = await env.LIVE_ACTIVITY.get(id).fetch('https://live-activity/publish', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(event),
+  });
+  if (!response.ok) throw new Error(`Live activity publish failed (${response.status})`);
+}
+
+export async function publishLotteryLiveRefresh(env: Env, input: {
+  roundId?: string | null;
+  prizePoolNano?: number | null;
+  action?: string;
+  key?: string;
+} = {}): Promise<void> {
+  await publishLiveActivity(env, {
+    kind: 'lottery',
+    userId: 'lottery-system',
+    section: 'home',
+    roundId: input.roundId || null,
+    prizePoolNano: input.prizePoolNano,
+    action: input.action || 'Lottery updated',
+    key: input.key || `lottery_${Date.now().toString(36)}_${randomHex(10)}`,
   });
 }
 

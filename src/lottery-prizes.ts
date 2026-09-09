@@ -439,7 +439,7 @@ async function randomCandidate(env: Env, roundId: string, excludedUsers: string[
   const exclusion = excludedUsers.length ? ` AND user_id NOT IN (${excludedUsers.map(() => '?').join(',')})` : '';
   const countSql = `SELECT COUNT(*) AS count FROM lottery_tickets
     WHERE round_id=? AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''
-    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND w.created_at>?)${exclusion}`;
+    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND datetime(w.created_at)>datetime(?))${exclusion}`;
   const cooldownCutoff = lotteryWinnerCooldownCutoff();
   const countRow = await env.DB.prepare(countSql).bind(roundId, cooldownCutoff, ...excludedUsers).first<{ count: number }>();
   const count = Math.max(0, Math.floor(Number(countRow?.count || 0)));
@@ -449,7 +449,7 @@ async function randomCandidate(env: Env, roundId: string, excludedUsers: string[
   const rowSql = `SELECT id,user_id,COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5)) AS code
     FROM lottery_tickets
     WHERE round_id=? AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''
-    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND w.created_at>?)${exclusion}
+    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND datetime(w.created_at)>datetime(?))${exclusion}
     ORDER BY datetime(created_at) ASC,id ASC LIMIT 1 OFFSET ?`;
   const row = await env.DB.prepare(rowSql).bind(roundId, cooldownCutoff, ...excludedUsers, offset).first<CandidateRow>();
   if (!row) return null;

@@ -1,6 +1,7 @@
 import type { Env } from './types';
 import { adjustUserTonBalance, assertUserNotBanned, debitUserTonBalanceIfEnough, getUserControls } from './user-controls';
 import { finalizeLotteryWinners } from './lottery-prizes';
+import { publishLotteryLiveRefresh } from './live-activity';
 
 export const LOTTERY_DEFAULT_TICKET_PRICE_NANO = 150_000_000;
 export const LOTTERY_DEFAULT_DRAW_INTERVAL_MINUTES = 24 * 60;
@@ -328,14 +329,29 @@ export async function listLotteryTickets(env: Env, userId: string, roundId?: str
   return (rows.results || []).map(publicTicket);
 }
 
-export async function buyLotteryTickets(env: Env, userId: string, quantityInput: unknown, purchaseIdInput: unknown): Promise<{
+type LotteryPurchaseResult = {
   tickets: LotteryTicket[];
   ticketCount: number;
   freeTicketAvailable: boolean;
   paidNano: number;
   gramBalanceNano: number;
   round: LotteryRound;
-}> {
+};
+
+export async function buyLotteryTickets(env: Env, userId: string, quantityInput: unknown, purchaseIdInput: unknown): Promise<LotteryPurchaseResult> {
+  const user = cleanUserId(userId);
+  const id = env.LOTTERY_SCHEDULER.idFromName(`purchase:${user}`);
+  const response = await env.LOTTERY_SCHEDULER.get(id).fetch('https://lottery-scheduler/purchase', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user, quantity: quantityInput, purchaseId: purchaseIdInput }),
+  });
+  const payload = await response.json().catch(() => null) as (LotteryPurchaseResult & { error?: string }) | null;
+  if (!response.ok || !payload) throw new Error(payload?.error || `Lottery ticket purchase failed (${response.status})`);
+  return payload;
+}
+
+async function buyLotteryTicketsSerialized(env: Env, userId: string, quantityInput: unknown, purchaseIdInput: unknown): Promise<LotteryPurchaseResult> {
   const user = cleanUserId(userId);
   const quantity = cleanQuantity(quantityInput);
   const purchaseId = cleanPurchaseId(purchaseIdInput);
@@ -348,12 +364,13 @@ export async function buyLotteryTickets(env: Env, userId: string, quantityInput:
     const roundRow = await env.DB.prepare('SELECT * FROM lottery_rounds WHERE id=?').bind(existingRoundId).first<RoundRow>();
     if (!roundRow) throw new Error('Lottery round is unavailable');
     const current = publicRound(roundRow);
-    const all = await listLotteryTickets(env, user, existingRoundId, 250);
+    const countRow = await env.DB.prepare('SELECT COUNT(*) AS count FROM lottery_tickets WHERE user_id=? AND round_id=?')
+      .bind(user, existingRoundId).first<{ count: number }>();
     const controls = await getUserControls(env, user);
     const settings = await getLotterySettings(env);
     return {
       tickets: existing,
-      ticketCount: all.length,
+      ticketCount: Math.max(0, Math.floor(Number(countRow?.count || 0))),
       freeTicketAvailable: settings.freeTicketEnabled && current.status === 'open' && Date.parse(current.drawAt) > Date.now() && !(await hasClaimedFreeTicket(env, user, existingRoundId)),
       paidNano: existing.reduce((sum, ticket) => sum + ticket.priceNano, 0),
       gramBalanceNano: controls.tonBalanceNano,
@@ -412,8 +429,11 @@ export async function buyLotteryTickets(env: Env, userId: string, quantityInput:
       try {
         const statements = drafts.map((ticket) => env.DB.prepare(`INSERT INTO lottery_tickets
           (id,round_id,user_id,ticket_number,ticket_code,price_nano,is_free,purchase_id,created_at)
-          VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-          .bind(ticket.id, round.id, user, ticket.internalNumber, ticket.ticketCode, ticket.priceNano, ticket.isFree ? 1 : 0, purchaseId));
+          SELECT ?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP
+          WHERE EXISTS (SELECT 1 FROM lottery_rounds
+            WHERE id=? AND status='open' AND (draw_lock IS NULL OR draw_lock='')
+              AND datetime(draw_at)>datetime('now'))`)
+          .bind(ticket.id, round.id, user, ticket.internalNumber, ticket.ticketCode, ticket.priceNano, ticket.isFree ? 1 : 0, purchaseId, round.id));
         await env.DB.batch(statements);
         inserted = await ticketsForPurchase(env, user, purchaseId);
         if (inserted.length !== quantity) throw new Error('Ticket purchase was not fully saved');
@@ -425,7 +445,10 @@ export async function buyLotteryTickets(env: Env, userId: string, quantityInput:
         }
       } catch (error) {
         lastError = error;
-        await env.DB.prepare('DELETE FROM lottery_tickets WHERE user_id=? AND purchase_id=?').bind(user, purchaseId).run().catch(() => undefined);
+        if (drafts.length) {
+          await env.DB.prepare(`DELETE FROM lottery_tickets WHERE user_id=? AND id IN (${drafts.map(() => '?').join(',')})`)
+            .bind(user, ...drafts.map((ticket) => ticket.id)).run().catch(() => undefined);
+        }
       }
     }
     if (!inserted.length) throw (lastError instanceof Error ? lastError : new Error('Could not create lottery tickets'));
@@ -739,22 +762,67 @@ async function ensureLotterySchedulerStarted(env: Env): Promise<void> {
 }
 
 export class LotteryScheduler {
+  private purchaseQueue: Promise<void> = Promise.resolve();
+
   constructor(private state: DurableObjectState, private env: Env) {}
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/purchase') {
+      const body = await request.json().catch(() => null) as { userId?: unknown; quantity?: unknown; purchaseId?: unknown } | null;
+      if (!body) return Response.json({ error: 'Invalid Lottery purchase request' }, { status: 400 });
+      return this.serializePurchase(async () => {
+        try {
+          const result = await buyLotteryTicketsSerialized(this.env, String(body.userId || ''), body.quantity, body.purchaseId);
+          return Response.json(result);
+        } catch (error) {
+          return Response.json({ error: error instanceof Error ? error.message : 'Lottery ticket purchase failed' }, { status: 400 });
+        }
+      });
+    }
     if (request.method !== 'POST' || url.pathname !== '/sync') return new Response('Not found', { status: 404 });
-    const nextAlarmAt = await this.synchronize();
-    return Response.json({ ok: true, nextAlarmAt });
+    try {
+      const nextAlarmAt = await this.synchronize();
+      return Response.json({ ok: true, nextAlarmAt });
+    } catch (error) {
+      console.warn('Lottery scheduler sync failed', error);
+      const retryAt = await this.scheduleRetry();
+      return Response.json({ ok: false, retryAt }, { status: 503 });
+    }
+  }
+
+  private async serializePurchase<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.purchaseQueue;
+    let release: () => void = () => {};
+    this.purchaseQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   async alarm(): Promise<void> {
     try {
+      const roundBefore = await getCurrentLotteryRound(this.env, false).catch(() => null);
       await this.synchronize();
+      const roundAfter = await getCurrentLotteryRound(this.env, false).catch(() => null);
+      await publishLotteryLiveRefresh(this.env, {
+        roundId: roundAfter?.id || roundBefore?.id || null,
+        action: 'Lottery lifecycle updated',
+        key: `lottery_alarm_${Date.now().toString(36)}_${randomHex(8)}`,
+      }).catch((error) => console.warn('Lottery scheduler live refresh failed', error));
     } catch (error) {
       console.warn('Lottery scheduler alarm failed', error);
-      await this.state.storage.setAlarm(Date.now() + LOTTERY_SCHEDULER_RETRY_MS).catch(() => undefined);
+      await this.scheduleRetry();
     }
+  }
+
+  private async scheduleRetry(): Promise<number> {
+    const retryAt = Date.now() + LOTTERY_SCHEDULER_RETRY_MS;
+    await this.state.storage.setAlarm(retryAt);
+    return retryAt;
   }
 
   private async synchronize(): Promise<number | null> {

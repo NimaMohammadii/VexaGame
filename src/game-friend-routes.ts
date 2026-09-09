@@ -1,99 +1,11 @@
 import type { Hono } from 'hono';
 import type { Env } from './types';
-import { adjustUserTonBalance, debitUserTonBalanceIfEnough } from './user-controls';
-import { gameBotToken, id, rateLimit, validateTelegramInitData } from './utils';
+import { id, rateLimit } from './utils';
 
 type App = Hono<{ Bindings: Env }>;
 type MineRoom = { id:string; host_user_id:string; host_name:string|null; guest_user_id:string|null; guest_name:string|null; status:string; current_turn_user_id:string|null; hidden_cells_json:string; revealed_cells_json:string; mine_count:number; board_size:number; round_index:number; finished_reason:string|null; host_ready:number|null; guest_ready:number|null; host_has_points:number|null; guest_has_points:number|null; amount_nano:number|null; created_at:string; updated_at:string; expires_at:string };
-type SoloRound = { roundId:string; userId:string; amountNano:number; mines:number; bombs:number[]; revealed:number[]; status:'active'|'lost'|'collected'; multiplier:number; payoutNano:number; settled:boolean };
-type SoloRoundRow = { round_id:string; user_id:string; amount_nano:number; mine_count:number; bomb_cells_json:string; revealed_cells_json:string; status:string; multiplier:number; payout_nano:number; settled:number };
-
-const SOLO_SIZE = 25;
-const SOLO_RTP = 0.92;
-let soloSchemaReady: Promise<void> | null = null;
 
 export function registerFriendGameRoutes(app: App): void {
-  app.get('/app/api/mines/solo/live', async (c) => {
-    if (c.req.header('Upgrade') !== 'websocket') return c.json({ error:'Expected websocket.' },426,{ 'cache-control':'no-store' });
-    try {
-      const userId = await validateTelegramInitData(c.req.query('initData') || '', gameBotToken(c.env));
-      await ensureSoloTables(c.env);
-      let round = await loadSoloRound(c.env,userId);
-      const pair = new WebSocketPair();
-      const client = pair[0];
-      const server = pair[1];
-      const ctx = c.executionCtx;
-      let chain = Promise.resolve();
-      server.accept();
-      const send = (payload:unknown) => { try { server.send(JSON.stringify(payload)); } catch { /* closed */ } };
-      const persist = () => { if (round) ctx.waitUntil(saveSoloRound(c.env,round).catch((error)=>console.warn('Mines round snapshot failed',error))); };
-      const settle = (current:SoloRound) => {
-        if (current.status !== 'collected' || current.settled) return;
-        ctx.waitUntil(settleSoloPayout(c.env,current).then((tonBalanceNano)=>{
-          current.settled=true;
-          return saveSoloRound(c.env,current).then(()=>send({type:'settled',roundId:current.roundId,tonBalanceNano}));
-        }).catch((error)=>console.warn('Mines payout settlement failed',error)));
-      };
-      if (round?.status === 'collected' && !round.settled) settle(round);
-      send(round?.status === 'active' ? { type:'resume', round:publicSoloRound(round,false) } : { type:'ready' });
-      server.addEventListener('message',(event)=>{
-        if(typeof event.data!=='string')return;
-        chain=chain.then(async()=>{
-          let message:Record<string,unknown>;
-          try{message=JSON.parse(event.data) as Record<string,unknown>;}catch{return;}
-          const requestId=cleanRequestId(message.requestId);
-          try{
-            if(message.type==='start'){
-              const requestedRoundId=cleanRoundId(message.roundId);
-              const existing=await loadSoloRoundById(c.env,userId,requestedRoundId);
-              if(existing){round=existing;send({type:'started',requestId,...publicSoloRound(existing,existing.status!=='active')});return;}
-              if(round?.status==='active'){send({type:'error',requestId,error:'Round already active'});return;}
-              const mines=clampInt(message.mines,1,20,3);
-              const amountNano=clampInt(message.amountNano,1,maxSoloBet(mines),10000000);
-              const next:SoloRound={roundId:requestedRoundId,userId,amountNano,mines,bombs:secureHiddenCells(SOLO_SIZE,mines),revealed:[],status:'active',multiplier:1,payoutNano:0,settled:false};
-              const controls=await debitUserTonBalanceIfEnough(c.env,userId,amountNano,{kind:'game',title:'Mines bet',referenceId:requestedRoundId,referenceType:'mines_round',metadata:{section:'mines',phase:'bet',mines}});
-              round=next;
-              await saveSoloRound(c.env,next);
-              send({type:'started',requestId,tonBalanceNano:controls.tonBalanceNano,...publicSoloRound(next,false)});
-              return;
-            }
-            if(message.type==='reveal'){
-              if(!round||round.status!=='active'||String(message.roundId||'')!==round.roundId)throw new Error('Round is not active');
-              const cell=clampInt(message.cell,0,SOLO_SIZE-1,-1);if(cell<0)throw new Error('Invalid tile');
-              if(round.revealed.includes(cell)){send({type:'reveal',requestId,roundId:round.roundId,result:'safe',revealed:round.revealed.length,multiplier:round.multiplier});return;}
-              if(round.bombs.includes(cell)){
-                round.status='lost';round.settled=true;
-                send({type:'reveal',requestId,roundId:round.roundId,result:'mine',bombs:round.bombs.slice(),revealed:round.revealed.length,multiplier:round.multiplier});
-                persist();
-                return;
-              }
-              round.revealed.push(cell);
-              round.revealed.sort((a,b)=>a-b);
-              round.multiplier=soloMultiplier(round.mines,round.revealed.length);
-              if(round.revealed.length>=SOLO_SIZE-round.mines){
-                round.status='collected';round.payoutNano=Math.max(0,Math.floor(round.amountNano*round.multiplier));
-                send({type:'reveal',requestId,roundId:round.roundId,result:'safe',revealed:round.revealed.length,multiplier:round.multiplier,autoCollected:true,payoutNano:round.payoutNano,bombs:round.bombs.slice()});
-                persist();settle(round);return;
-              }
-              send({type:'reveal',requestId,roundId:round.roundId,result:'safe',revealed:round.revealed.length,multiplier:round.multiplier});
-              persist();
-              return;
-            }
-            if(message.type==='collect'){
-              if(!round||round.status!=='active'||String(message.roundId||'')!==round.roundId)throw new Error('Round is not active');
-              if(round.revealed.length<soloMinCollect(round.mines))throw new Error('Reveal more safe tiles first');
-              round.status='collected';round.payoutNano=Math.max(0,Math.floor(round.amountNano*round.multiplier));
-              send({type:'collected',requestId,roundId:round.roundId,multiplier:round.multiplier,payoutNano:round.payoutNano,bombs:round.bombs.slice()});
-              persist();settle(round);return;
-            }
-            if(message.type==='sync') send({type:'sync',requestId,round:round?publicSoloRound(round,round.status!=='active'):null});
-          }catch(error){send({type:'error',requestId,error:error instanceof Error?error.message:'Mines request failed'});}
-        }).catch((error)=>console.warn('Mines websocket message failed',error));
-      });
-      return new Response(null,{status:101,webSocket:client});
-    }catch{return new Response('Unauthorized',{status:401});}
-  });
-
   app.post('/app/api/mines/friend/rooms', async (c) => {
     try {
       const body = await c.req.json() as Record<string, unknown>;
@@ -178,34 +90,22 @@ export function registerFriendGameRoutes(app: App): void {
   });
 }
 
-async function ensureSoloTables(env:Env):Promise<void>{
-  if(!soloSchemaReady){soloSchemaReady=(async()=>{
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_solo_rounds (round_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,amount_nano INTEGER NOT NULL,mine_count INTEGER NOT NULL,bomb_cells_json TEXT NOT NULL DEFAULT '[]',mine_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL,multiplier REAL NOT NULL DEFAULT 1,payout_nano INTEGER NOT NULL DEFAULT 0,settled INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-    await env.DB.prepare("ALTER TABLE mines_solo_rounds ADD COLUMN bomb_cells_json TEXT NOT NULL DEFAULT '[]'").run().catch(()=>undefined);
-    await env.DB.prepare("ALTER TABLE mines_solo_rounds ADD COLUMN mine_cells_json TEXT NOT NULL DEFAULT '[]'").run().catch(()=>undefined);
-    await env.DB.prepare("ALTER TABLE mines_solo_rounds ADD COLUMN settled INTEGER NOT NULL DEFAULT 0").run().catch(()=>undefined);
-    await env.DB.prepare("UPDATE mines_solo_rounds SET bomb_cells_json=mine_cells_json WHERE bomb_cells_json='[]' AND mine_cells_json!='[]'").run().catch(()=>undefined);
-    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_mines_solo_user_status ON mines_solo_rounds(user_id,status,updated_at)").run();
-  })().catch((error)=>{soloSchemaReady=null;throw error;});}
-  await soloSchemaReady;
+async function ensureTables(env:Env){
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_friend_rooms (id TEXT PRIMARY KEY,host_user_id TEXT NOT NULL,host_name TEXT,guest_user_id TEXT,guest_name TEXT,status TEXT NOT NULL DEFAULT 'waiting',current_turn_user_id TEXT,hidden_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',mine_count INTEGER NOT NULL DEFAULT 3,board_size INTEGER NOT NULL DEFAULT 25,round_index INTEGER NOT NULL DEFAULT 1,finished_reason TEXT,host_ready INTEGER,guest_ready INTEGER,host_has_points INTEGER,guest_has_points INTEGER,amount_nano INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL)").run();
 }
-async function loadSoloRound(env:Env,userId:string):Promise<SoloRound|null>{await ensureSoloTables(env);const row=await env.DB.prepare("SELECT * FROM mines_solo_rounds WHERE user_id=? AND ((status='active') OR (status='collected' AND settled=0)) ORDER BY updated_at DESC LIMIT 1").bind(userId).first<SoloRoundRow>();return row?soloFromRow(row):null;}
-async function loadSoloRoundById(env:Env,userId:string,roundId:string):Promise<SoloRound|null>{await ensureSoloTables(env);const row=await env.DB.prepare('SELECT * FROM mines_solo_rounds WHERE user_id=? AND round_id=? LIMIT 1').bind(userId,roundId).first<SoloRoundRow>();return row?soloFromRow(row):null;}
-async function saveSoloRound(env:Env,round:SoloRound):Promise<void>{await ensureSoloTables(env);const bombs=JSON.stringify(round.bombs);await env.DB.prepare(`INSERT INTO mines_solo_rounds (round_id,user_id,amount_nano,mine_count,bomb_cells_json,mine_cells_json,revealed_cells_json,status,multiplier,payout_nano,settled,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT DO UPDATE SET round_id=excluded.round_id,user_id=excluded.user_id,amount_nano=excluded.amount_nano,mine_count=excluded.mine_count,bomb_cells_json=excluded.bomb_cells_json,mine_cells_json=excluded.mine_cells_json,revealed_cells_json=excluded.revealed_cells_json,status=excluded.status,multiplier=excluded.multiplier,payout_nano=excluded.payout_nano,settled=excluded.settled,updated_at=CURRENT_TIMESTAMP`).bind(round.roundId,round.userId,round.amountNano,round.mines,bombs,bombs,JSON.stringify(round.revealed),round.status,round.multiplier,round.payoutNano,round.settled?1:0).run();}
-async function settleSoloPayout(env:Env,round:SoloRound):Promise<number>{const controls=await adjustUserTonBalance(env,round.userId,round.payoutNano,{kind:'game',title:'Mines reward',referenceId:`${round.roundId}:payout`,referenceType:'mines_round',metadata:{section:'mines',phase:'payout',mines:round.mines,multiplier:round.multiplier,revealed:round.revealed.length}});return controls.tonBalanceNano;}
-function soloFromRow(row:SoloRoundRow):SoloRound{return{roundId:row.round_id,userId:row.user_id,amountNano:Math.max(1,Number(row.amount_nano)||1),mines:clampInt(row.mine_count,1,20,3),bombs:parseNums(row.bomb_cells_json),revealed:parseNums(row.revealed_cells_json),status:row.status==='lost'?'lost':row.status==='collected'?'collected':'active',multiplier:Math.max(1,Number(row.multiplier)||1),payoutNano:Math.max(0,Number(row.payout_nano)||0),settled:Number(row.settled||0)===1};}
-function publicSoloRound(round:SoloRound,includeBombs:boolean){return{roundId:round.roundId,amountNano:round.amountNano,mines:round.mines,revealed:round.revealed.slice(),status:round.status,multiplier:round.multiplier,payoutNano:round.payoutNano,bombs:includeBombs?round.bombs.slice():undefined};}
-function soloMultiplier(mines:number,picks:number){if(picks<=0)return 1;let probability=1;for(let i=0;i<picks;i++)probability*=((SOLO_SIZE-mines-i)/(SOLO_SIZE-i));return probability>0?Math.max(1,SOLO_RTP/probability):1;}
-function soloMinCollect(mines:number){return mines<=5?2:1;}
-function maxSoloBet(mines:number){const max=soloMultiplier(mines,SOLO_SIZE-mines);return Math.max(1,Math.floor(Number.MAX_SAFE_INTEGER/Math.max(1,max)));}
-function secureHiddenCells(size:number,count:number){const set=new Set<number>();const data=new Uint32Array(1);while(set.size<Math.min(size-1,count)){crypto.getRandomValues(data);set.add(data[0]%size);}return[...set].sort((a,b)=>a-b);}
-function cleanRoundId(value:unknown){const clean=String(value||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,80);if(clean.length<12)throw new Error('Invalid round');return clean;}
-function cleanRequestId(value:unknown){return String(value||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,80);}
-
-async function ensureTables(env:Env){await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_friend_rooms (id TEXT PRIMARY KEY,host_user_id TEXT NOT NULL,host_name TEXT,guest_user_id TEXT,guest_name TEXT,status TEXT NOT NULL DEFAULT 'waiting',current_turn_user_id TEXT,hidden_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',mine_count INTEGER NOT NULL DEFAULT 3,board_size INTEGER NOT NULL DEFAULT 25,round_index INTEGER NOT NULL DEFAULT 1,finished_reason TEXT,host_ready INTEGER,guest_ready INTEGER,host_has_points INTEGER,guest_has_points INTEGER,amount_nano INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL)").run();}
 async function mineRoom(env:Env,id:string){await ensureTables(env);return env.DB.prepare('SELECT * FROM mines_friend_rooms WHERE id=?').bind(id).first<MineRoom>();}
-async function minesState(env:Env,roomId:string,userId:string){const room=await mineRoom(env,roomId);if(!room)throw new Error('Room not found');if(expired(room.expires_at)&&room.status!=='finished'){await expire(env,'mines_friend_rooms',roomId);room.status='expired';}const playerRole=mineRole(room,userId),hidden=parseNums(room.hidden_cells_json),revealed=parseRevealed(room.revealed_cells_json),finished=room.status==='finished'||room.status==='expired',hostReady=Boolean(room.host_ready),guestReady=Boolean(room.guest_ready);return {ok:true,youReady:playerRole==='host'?hostReady:playerRole==='guest'?guestReady:false,friendReady:playerRole==='host'?guestReady:playerRole==='guest'?hostReady:false,youHavePoints:playerRole==='host'?(hostReady?Boolean(room.host_has_points):null):playerRole==='guest'?(guestReady?Boolean(room.guest_has_points):null):null,friendHasPoints:playerRole==='host'?(guestReady?Boolean(room.guest_has_points):null):playerRole==='guest'?(hostReady?Boolean(room.host_has_points):null):null,amountNano:Math.max(1,Number(room.amount_nano)||10000000),room:{id:room.id,status:room.status,hostName:room.host_name||'Host',guestName:room.guest_name||null,hasGuest:Boolean(room.guest_user_id),currentTurnRole:room.current_turn_user_id===room.host_user_id?'host':room.current_turn_user_id===room.guest_user_id?'guest':null,isYourTurn:Boolean(userId&&room.current_turn_user_id===userId&&room.status==='active'),boardSize:Number(room.board_size||25),mineCount:Number(room.mine_count||hidden.length||3),amountNano:Math.max(1,Number(room.amount_nano)||10000000),roundIndex:Number(room.round_index||1),finishedReason:room.finished_reason,createdAt:room.created_at,updatedAt:room.updated_at,expiresAt:room.expires_at},player:{role:playerRole},board:{revealed:revealed.map((item)=>({cell:item.cell,result:item.result,byRole:item.byUserId===room.host_user_id?'host':item.byUserId===room.guest_user_id?'guest':null})),hiddenCells:finished?hidden:[]}};}
-async function invite(env:Env,roomId:string,userId:string,displayName:string){const numeric=Number(userId);if(!env.BOT_TOKEN||!Number.isSafeInteger(numeric)||numeric<=0)throw new Error('Telegram share is available only inside Telegram.');const username=await botUsername(env),short=String(env.MINI_APP_SHORT_NAME||'').replace(/[^0-9A-Za-z_]/g,''),start=`minesroom_${roomId}`,url=`https://t.me/${username}${short?`/${short}`:''}?startapp=${encodeURIComponent(start)}`;const fallbackText=`🎮 ${displayName} invited you to a Mines friend round.`;const response=await telegram<{ok:boolean;result?:{id?:string};description?:string}>(env.BOT_TOKEN,'savePreparedInlineMessage',{user_id:numeric,result:{type:'article',id:`mines_invite_${roomId}`.slice(0,64),title:'Mines Friend Round',description:'Join a private game in Vexa.',input_message_content:{message_text:fallbackText,disable_web_page_preview:true},reply_markup:{inline_keyboard:[[{text:'🎮 Join Friend Round',url}]]}},allow_user_chats:true,allow_bot_chats:false,allow_group_chats:true,allow_channel_chats:false});if(!response.ok||!response.result?.id)throw new Error(response.description||'Telegram could not prepare invite');return{preparedMessageId:response.result.id,inviteUrl:url,fallbackText};}
+async function minesState(env:Env,roomId:string,userId:string){
+  const room=await mineRoom(env,roomId);if(!room)throw new Error('Room not found');if(expired(room.expires_at)&&room.status!=='finished'){await expire(env,'mines_friend_rooms',roomId);room.status='expired';}
+  const playerRole=mineRole(room,userId),hidden=parseNums(room.hidden_cells_json),revealed=parseRevealed(room.revealed_cells_json),finished=room.status==='finished'||room.status==='expired',hostReady=Boolean(room.host_ready),guestReady=Boolean(room.guest_ready);
+  return {ok:true,youReady:playerRole==='host'?hostReady:playerRole==='guest'?guestReady:false,friendReady:playerRole==='host'?guestReady:playerRole==='guest'?hostReady:false,youHavePoints:playerRole==='host'?(hostReady?Boolean(room.host_has_points):null):playerRole==='guest'?(guestReady?Boolean(room.guest_has_points):null):null,friendHasPoints:playerRole==='host'?(guestReady?Boolean(room.guest_has_points):null):playerRole==='guest'?(hostReady?Boolean(room.host_has_points):null):null,amountNano:Math.max(1,Number(room.amount_nano)||10000000),room:{id:room.id,status:room.status,hostName:room.host_name||'Host',guestName:room.guest_name||null,hasGuest:Boolean(room.guest_user_id),currentTurnRole:room.current_turn_user_id===room.host_user_id?'host':room.current_turn_user_id===room.guest_user_id?'guest':null,isYourTurn:Boolean(userId&&room.current_turn_user_id===userId&&room.status==='active'),boardSize:Number(room.board_size||25),mineCount:Number(room.mine_count||hidden.length||3),amountNano:Math.max(1,Number(room.amount_nano)||10000000),roundIndex:Number(room.round_index||1),finishedReason:room.finished_reason,createdAt:room.created_at,updatedAt:room.updated_at,expiresAt:room.expires_at},player:{role:playerRole},board:{revealed:revealed.map((item)=>({cell:item.cell,result:item.result,byRole:item.byUserId===room.host_user_id?'host':item.byUserId===room.guest_user_id?'guest':null})),hiddenCells:finished?hidden:[]}};
+}
+async function invite(env:Env,roomId:string,userId:string,displayName:string){
+  const numeric=Number(userId);if(!env.BOT_TOKEN||!Number.isSafeInteger(numeric)||numeric<=0)throw new Error('Telegram share is available only inside Telegram.');
+  const username=await botUsername(env),short=String(env.MINI_APP_SHORT_NAME||'').replace(/[^0-9A-Za-z_]/g,''),start=`minesroom_${roomId}`,url=`https://t.me/${username}${short?`/${short}`:''}?startapp=${encodeURIComponent(start)}`;
+  const fallbackText=`🎮 ${displayName} invited you to a Mines friend round.`;
+  const response=await telegram<{ok:boolean;result?:{id?:string};description?:string}>(env.BOT_TOKEN,'savePreparedInlineMessage',{user_id:numeric,result:{type:'article',id:`mines_invite_${roomId}`.slice(0,64),title:'Mines Friend Round',description:'Join a private game in Vexa.',input_message_content:{message_text:fallbackText,disable_web_page_preview:true},reply_markup:{inline_keyboard:[[{text:'🎮 Join Friend Round',url}]]}},allow_user_chats:true,allow_bot_chats:false,allow_group_chats:true,allow_channel_chats:false});
+  if(!response.ok||!response.result?.id)throw new Error(response.description||'Telegram could not prepare invite');return{preparedMessageId:response.result.id,inviteUrl:url,fallbackText};
+}
 async function botUsername(env:Env){const key=`telegram:bot-username:${env.BOT_TOKEN.split(':')[0]||'default'}`,cached=await env.BOT_CACHE.get(key).catch(()=>null);if(cached)return cached;const data=await telegram<{ok:boolean;result?:{username?:string};description?:string}>(env.BOT_TOKEN,'getMe',{}),username=String(data.result?.username||'').replace(/^@/,'').replace(/[^0-9A-Za-z_]/g,'');if(!data.ok||!username)throw new Error(data.description||'Telegram bot username is unavailable');await env.BOT_CACHE.put(key,username,{expirationTtl:86400}).catch(()=>undefined);return username;}
 async function telegram<T>(token:string,method:string,payload:Record<string,unknown>){const response=await fetch(`https://api.telegram.org/bot${token}/${method}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});return response.json() as Promise<T>;}
 async function limited(env:Env,key:string){try{return await rateLimit(env.RATE_LIMITS,key,20,3600);}catch{return true;}}

@@ -14,7 +14,6 @@ const FALLBACK_PNG = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const HOME_LOTTERY_SLOT_KEY = 'home-lottery-slot';
 const VERSIONED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
-const NANO_PER_TON = 1_000_000_000;
 const DICE_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 50);
 const SLOT_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 200);
 
@@ -143,15 +142,16 @@ app.get('/app/api/home-lottery-slot.png', async (c) => {
 app.post('/app/api/dice/roll', async (c) => {
   try {
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    const { userId, controls } = await authenticatedGameUser(c.env, body.initData, 'dice');
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'dice');
     const amountNano = cleanGameAmount(body.amountNano, DICE_MAX_BET_NANO, 'Dice');
     const target = cleanDiceTarget(body.target);
     const mode = String(body.mode || '') === 'over' ? 'over' : String(body.mode || '') === 'under' ? 'under' : '';
     if (!mode) throw new Error('Invalid Dice mode');
     const chance = mode === 'under' ? target : 100 - target;
     const multiplier = (100 - 1) / chance;
-    const win = secureRandomUnit() * 100 < controls.winChancePercent;
-    const roll = diceRollForResult(mode, target, win);
+    const rawRoll = secureRandomUnit() * 100;
+    const win = mode === 'under' ? rawRoll < target : rawRoll > target;
+    const roll = Math.max(0.01, Math.min(99.99, Math.round(rawRoll * 100) / 100));
     const payoutNano = win ? Math.floor(amountNano * multiplier) : 0;
     const roundId = `dice_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
     const settled = await settleGameTonBalanceRound(c.env, userId, amountNano, payoutNano, {
@@ -168,10 +168,9 @@ app.post('/app/api/dice/roll', async (c) => {
 app.post('/app/api/slot/spin', async (c) => {
   try {
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    const { userId, controls } = await authenticatedGameUser(c.env, body.initData, 'slot');
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'slot');
     const amountNano = cleanGameAmount(body.amountNano, SLOT_MAX_BET_NANO, 'Slot');
-    const win = secureRandomUnit() * 100 < controls.winChancePercent;
-    const result = serverSlotResult(win);
+    const result = serverSlotResult();
     const profile = serverSlotProfile(result);
     const payoutNano = profile.multiplier > 0 ? Math.floor(amountNano * profile.multiplier) : 0;
     const roundId = `slot_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
@@ -243,17 +242,9 @@ function cleanDiceTarget(value: unknown): number {
   return Math.round(target * 100) / 100;
 }
 
-function diceRollForResult(mode: 'under' | 'over', target: number, win: boolean): number {
-  const lowWin = mode === 'under' ? win : !win;
-  const raw = lowWin
-    ? secureRandomUnit() * Math.max(0.01, target - 0.01)
-    : target + 0.01 + secureRandomUnit() * Math.max(0.01, 99.99 - target);
-  return Math.max(0.01, Math.min(99.99, Math.round(raw * 100) / 100));
-}
-
-function serverSlotResult(win: boolean): number[] {
-  if (!win) return secureShuffle([0, 1, 2, 3, 4, 5, 6, 7]).slice(0, 3);
-  const roll = 6500 + secureRandomInt(3500);
+function serverSlotResult(): number[] {
+  const roll = secureRandomInt(10_000);
+  if (roll < 6500) return secureShuffle([0, 1, 2, 3, 4, 5, 6, 7]).slice(0, 3);
   if (roll < 9071) {
     const fruit = secureRandomInt(5);
     let third = secureRandomInt(7);

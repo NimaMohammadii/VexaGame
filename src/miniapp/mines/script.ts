@@ -19,7 +19,8 @@ export const MINES_SCRIPT = `
   var friendLastSyncAt=0;
   var friendCreditBlocked=false;
   var lastFriendMessage='';
-  var tileImages={safe:'/app/api/uploaded-image/mines-safe.png',bomb:'/app/api/uploaded-image/mines-bomb.png'};
+  var tileImages={safe:'',bomb:''};
+  var imageLoadPromise=null;
   var state={active:false,ended:false,amountNano:10000000,mines:3,revealed:0,bombs:{},safe:{},multiplier:1};
   var xpRoundActive=false;
   var xpRoundFinished=false;
@@ -34,12 +35,15 @@ export const MINES_SCRIPT = `
   function toNano(value){return Math.max(0,Math.floor((Number(String(value||'').replace(',','.'))||0)*NANO))}
   function fromNano(value){var ton=Math.max(0,Math.floor(Number(value)||0))/NANO;return ton.toFixed(2)}
   function preload(url){if(!url)return;var img=new Image();img.decoding='async';img.src=url;if(img.decode)img.decode().catch(function(){})}
-  function imageEl(kind){var img=document.createElement('img');img.decoding='async';img.loading='eager';img.alt=kind==='bomb'?'Mine':'Safe';img.src=kind==='bomb'?tileImages.bomb:tileImages.safe;img.onerror=function(){img.remove()};return img}
+  function imageEl(kind){var img=document.createElement('img');var src=kind==='bomb'?tileImages.bomb:tileImages.safe;img.decoding='async';img.loading='eager';img.alt=kind==='bomb'?'Mine':'Safe';if(src)img.src=src;img.onerror=function(){img.remove()};return img}
   function applyImages(data){if(!data)return;if(data.minesSafeUrl)tileImages.safe=data.minesSafeUrl;if(data.minesBombUrl)tileImages.bomb=data.minesBombUrl;preload(tileImages.safe);preload(tileImages.bomb);primeBoardImages()}
   function loadImages(){
-    var cached=window.VexaUploadedImages&&window.VexaUploadedImages.read?window.VexaUploadedImages.read():null;
-    if(cached)applyImages(cached);else{preload(tileImages.safe);preload(tileImages.bomb);primeBoardImages()}
-    if(window.VexaUploadedImages&&window.VexaUploadedImages.load){window.VexaUploadedImages.load().then(applyImages).catch(function(){})}
+    if(imageLoadPromise)return imageLoadPromise;
+    imageLoadPromise=fetch('/app/api/uploaded-images?context=mines',{credentials:'same-origin',cache:'no-store'})
+      .then(function(r){return r.ok?r.json():null})
+      .then(function(data){if(data)applyImages(data);return data})
+      .catch(function(){return null});
+    return imageLoadPromise;
   }
   function tone(freq,duration,type,gain){try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();var osc=audioCtx.createOscillator();var vol=audioCtx.createGain();osc.type=type||'sine';osc.frequency.value=freq;vol.gain.value=0.0001;osc.connect(vol);vol.connect(audioCtx.destination);var now=audioCtx.currentTime;vol.gain.exponentialRampToValueAtTime(gain||0.035,now+0.012);vol.gain.exponentialRampToValueAtTime(0.0001,now+duration);osc.start(now);osc.stop(now+duration+0.02)}catch(e){}}
   function sound(name){if(name==='start'){tone(240,.09,'sine',.026);setTimeout(function(){tone(360,.11,'sine',.026)},55)}else if(name==='safe'){tone(520,.075,'triangle',.022);setTimeout(function(){tone(720,.08,'triangle',.018)},38)}else if(name==='mine'){tone(120,.18,'sawtooth',.026);setTimeout(function(){tone(72,.24,'sine',.022)},70)}else if(name==='cash'){tone(620,.08,'triangle',.025);setTimeout(function(){tone(880,.1,'triangle',.022)},55);setTimeout(function(){tone(1180,.12,'sine',.018)},120)}}
@@ -66,7 +70,7 @@ export const MINES_SCRIPT = `
   function refresh(){var amount=q('minesBet');var count=q('minesCount');if(!friendMode){state.amountNano=clamp(toNano(amount&&amount.value),1,999999999999999);state.mines=clamp(Math.floor(Number(count&&count.value)||3),1,20)}if(amount){amount.setAttribute('step','0.01');amount.value=fromNano(state.amountNano);amount.disabled=friendMode}if(count)count.disabled=friendMode;setMultiplierText();var start=q('minesStart');if(start){start.textContent=friendMode?'Friend Round':state.active?'Playing':'Start Round';start.disabled=friendMode}var cash=q('minesCashout');if(cash)cash.disabled=friendMode||!state.active||state.revealed<minSafePicksForCollect();var invite=q('minesInviteFriend');if(invite)invite.disabled=friendBusy;var exit=q('minesFriendExit');if(exit)exit.style.display=friendMode?'block':'none'}
   function tileKind(i){return state.active||state.ended?state.bombs[i]?'bomb':'safe':'safe'}
   function boardTiles(){var board=q('minesBoard');return board?Array.prototype.slice.call(board.querySelectorAll('[data-mine-cell]')):[]}
-  function setTileBack(tile,kind){var back=tile&&tile.querySelector&&tile.querySelector('.mine-tile-back');if(!back)return;var src=kind==='bomb'?tileImages.bomb:tileImages.safe;var img=back.querySelector('img');if(back.getAttribute('data-kind')===kind&&img&&img.getAttribute('src')===src)return;back.setAttribute('data-kind',kind);if(!img){back.textContent='';img=imageEl(kind);back.appendChild(img);return}img.alt=kind==='bomb'?'Mine':'Safe';if(img.getAttribute('src')!==src)img.src=src}
+  function setTileBack(tile,kind){var back=tile&&tile.querySelector&&tile.querySelector('.mine-tile-back');if(!back)return;var src=kind==='bomb'?tileImages.bomb:tileImages.safe;var img=back.querySelector('img');if(back.getAttribute('data-kind')===kind&&img&&img.getAttribute('src')===src)return;back.setAttribute('data-kind',kind);if(!img){back.textContent='';img=imageEl(kind);back.appendChild(img);return}img.alt=kind==='bomb'?'Mine':'Safe';if(src&&img.getAttribute('src')!==src)img.src=src}
   function primeBoardImages(){boardTiles().forEach(function(tile){var i=Number(tile.getAttribute('data-mine-cell'));setTileBack(tile,tileKind(i))})}
   function markFlipping(tile){if(!tile)return;tile.classList.add('is-flipping');clearTimeout(tile.__minesFlipTimer);tile.__minesFlipTimer=setTimeout(function(){tile.classList.remove('is-flipping');tile.__minesFlipTimer=0},FLIP_MS+90)}
   function buildBoard(){var board=q('minesBoard');if(!board)return;var existing=board.querySelectorAll('[data-mine-cell]');if(existing.length===size)return;board.textContent='';var frag=document.createDocumentFragment();for(var i=0;i<size;i++){var b=document.createElement('button');var card=document.createElement('span');var front=document.createElement('span');var back=document.createElement('span');b.type='button';b.className='mine-tile';b.setAttribute('data-mine-cell',String(i));b.setAttribute('aria-label','Hidden tile');card.className='mine-tile-card';front.className='mine-tile-face mine-tile-front';back.className='mine-tile-face mine-tile-back';card.appendChild(front);card.appendChild(back);b.appendChild(card);setTileBack(b,'safe');frag.appendChild(b)}board.appendChild(frag)}

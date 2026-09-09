@@ -33,6 +33,7 @@ const PAGE_SIZE = 8;
 const NANO = 1_000_000_000;
 const REGION_SETTINGS_KEY = 'admin:bot-region-settings';
 const CHANNEL_POST_SETTINGS_KEY = 'admin:channel-post-settings';
+const CHANNEL_POST_STATE_PREFIX = 'admin:channel-post-state:';
 const CHANNEL_DESTINATIONS = [
   ['home', '🏠 Home'],
   ['predictzone', '🔮 Predict'],
@@ -101,7 +102,7 @@ export async function handleBotAdminCallback(env: Env, token: string, q: Telegra
   const id = parts[2] || '';
   const arg = parts[3] || '';
   const pageArg = Number(parts[4]) || 0;
-  const pendingState = action.startsWith('channel') ? await getAdminState(env, q.from.id) : null;
+  const pendingState = action.startsWith('channel') ? await getChannelAdminState(env, q.from.id) : null;
   await clearAdminState(env, q.from.id);
   if (action === 'home') return sendAdminHome(env, token, chatId, tg, messageId);
   if (action === 'channelpost') return sendChannelPostMenu(env, token, chatId, tg, q.from.id, messageId);
@@ -471,9 +472,21 @@ async function setAdminMenuMessageId(env: Env, chatId: number, messageId: number
 }
 
 async function getAdminState(env: Env, adminId: unknown): Promise<AdminState | null> { return env.BOT_CACHE.get(stateKey(adminId), 'json').catch(() => null) as Promise<AdminState | null>; }
-async function setAdminState(env: Env, adminId: unknown, state: AdminState): Promise<void> { await env.BOT_CACHE.put(stateKey(adminId), JSON.stringify(state), { expirationTtl: 900 }); }
-async function clearAdminState(env: Env, adminId: unknown): Promise<void> { await env.BOT_CACHE.delete(stateKey(adminId)).catch(() => undefined); }
+async function getChannelAdminState(env: Env, adminId: unknown): Promise<AdminState | null> { return env.BOT_CACHE.get(channelStateKey(adminId), 'json').catch(() => null) as Promise<AdminState | null>; }
+async function setAdminState(env: Env, adminId: unknown, state: AdminState): Promise<void> {
+  const value = JSON.stringify(state);
+  await env.BOT_CACHE.put(stateKey(adminId), value, { expirationTtl: 900 });
+  if (state.mode.startsWith('channel-')) await env.BOT_CACHE.put(channelStateKey(adminId), value, { expirationTtl: 900 });
+  else await env.BOT_CACHE.delete(channelStateKey(adminId)).catch(() => undefined);
+}
+async function clearAdminState(env: Env, adminId: unknown): Promise<void> {
+  await Promise.all([
+    env.BOT_CACHE.delete(stateKey(adminId)).catch(() => undefined),
+    env.BOT_CACHE.delete(channelStateKey(adminId)).catch(() => undefined),
+  ]);
+}
 function stateKey(adminId: unknown): string { return 'botadmin:state:' + String(adminId ?? ''); }
+function channelStateKey(adminId: unknown): string { return CHANNEL_POST_STATE_PREFIX + String(adminId ?? ''); }
 
 function parseTonDelta(value: string): number | null {
   const raw = value.trim().replace(/,/g, '.');

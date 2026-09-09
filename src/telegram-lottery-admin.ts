@@ -1,5 +1,5 @@
 import type { Env } from './types';
-import { getCurrentLotteryRound, getLotteryAdminOverview, getLotterySettings, setLotteryDrawMinutesFromNow, startLotteryNow, updateLotterySettings } from './lottery';
+import { getCurrentLotteryRound, getLotteryAdminOverview, getLotterySettings, setLotteryDrawMinutesFromNow, startLotteryNow, subtractLotteryDrawMinutes, updateLotterySettings } from './lottery';
 import { adjustLotteryPrizePool, clearLotteryWinnerSelections, getLotteryPrizePoolNano, getLotteryPrizes, getLotteryRoundTicketHolder, getLotteryUserHistory, getLotteryWinnerSelections, listLotteryRoundTicketHolders, LOTTERY_WINNER_COUNT, searchLotteryTicketHolders, setLotteryPrizePercentages, setLotteryWinnerSelection } from './lottery-prizes';
 import { publishLotteryLiveRefresh } from './live-activity';
 import { makeSimplePdf } from './telegram-pdf';
@@ -219,13 +219,16 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
     }
 
     if (mode === 'draw') {
-      if (!/^\d+$/.test(text)) throw new Error('تعداد دقیقه را فقط به‌صورت عدد صحیح بفرستید.');
+      if (!/^-?\d+$/.test(text) || Number(text) === 0) throw new Error('تعداد دقیقه را به‌صورت عدد صحیح مثبت یا منفی بفرستید.');
       const minutes = Number(text);
-      await setLotteryDrawMinutesFromNow(env, minutes);
+      if (minutes < 0) await subtractLotteryDrawMinutes(env, Math.abs(minutes));
+      else await setLotteryDrawMinutesFromNow(env, minutes);
       const round = await getCurrentLotteryRound(env, true);
       await publishLotteryRefresh(env, round?.id, 'Lottery draw time updated');
       await finishInput(env, userId);
-      await sendLotteryMenu(env, message.chat.id, menuMessageId, `✅ Draw برای ${formatMinutes(minutes)} دیگر تنظیم شد.`);
+      await sendLotteryMenu(env, message.chat.id, menuMessageId, minutes < 0
+        ? `✅ ${formatMinutes(Math.abs(minutes))} از زمان باقی‌مانده Draw کم شد.`
+        : `✅ Draw برای ${formatMinutes(minutes)} دیگر تنظیم شد.`);
       return;
     }
 
@@ -500,7 +503,7 @@ async function prompt(env: Env, chatId: number, messageId: number | undefined, m
       : mode === 'poolsubtract'
         ? '➖ کاهش Prize Pool\n\nمقداری که می‌خواهید از Prize Pool همین راند کم شود را به GRAM بفرستید.\nمقدار نهایی نمی‌تواند کمتر از صفر شود.'
         : mode === 'draw'
-          ? '🕒 زمان Draw\n\nتعداد دقیقه از الان را بفرستید.\nمثال: 90 یعنی یک ساعت و نیم دیگر.'
+          ? '🕒 زمان Draw\n\nعدد مثبت: زمان Draw از الان تنظیم می‌شود.\nعدد منفی: از زمان باقی‌مانده کم می‌شود.\nمثال: 90 یعنی یک ساعت و نیم دیگر؛ -60 یعنی ۶۰ دقیقه کمتر.'
           : mode === 'price'
             ? '💎 قیمت تیکت\n\nقیمت هر تیکت را به GRAM بفرستید.\nمثال: 0.15'
             : mode === 'limit'

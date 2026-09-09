@@ -551,6 +551,17 @@ export async function setLotteryDrawMinutesFromNow(env: Env, minutesInput: unkno
   return updateLotterySettings(env, { nextDrawAt });
 }
 
+export async function subtractLotteryDrawMinutes(env: Env, minutesInput: unknown): Promise<LotterySettings> {
+  const minutes = cleanInterval(minutesInput);
+  const round = await getCurrentLotteryRound(env, true);
+  if (!round || round.status !== 'open') throw new Error('راند باز Lottery وجود ندارد.');
+  const nextDrawAtMs = Date.parse(round.drawAt) - minutes * 60_000;
+  if (!Number.isFinite(nextDrawAtMs) || nextDrawAtMs <= Date.now() + 5_000) {
+    throw new Error('زمان باقی‌مانده باید حداقل یک دقیقه باشد.');
+  }
+  return updateLotterySettings(env, { nextDrawAt: new Date(nextDrawAtMs).toISOString() });
+}
+
 async function finalizeLotteryRound(env: Env, round: RoundRow): Promise<LotteryDraw | null> {
   if (round.status !== 'open') return null;
   const drawAtMs = Date.parse(round.draw_at);

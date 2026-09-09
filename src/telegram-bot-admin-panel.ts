@@ -5,18 +5,48 @@ import type { Env, TelegramCallbackQuery, TelegramMessage } from './types';
 import { getUserControls, setUserBanned, setUserSectionBlocked, setUserTonBalance, setUserWinChance } from './user-controls';
 import { formatTonAmount, getFinanceLimits, getFinanceStats, setFinanceLimits, tonToNano } from './admin-finance-controls';
 import { getTelegramMenuMessageId, setTelegramMenuMessageId } from './telegram-menu-state';
-import { DEFAULT_VEXA_LOCALE, SHARE_INVITE_BUTTON_TEXT, VEXA_LOCALES, VEXA_LOCALE_LABELS, type VexaLocale, vexaLocaleForCountry } from './miniapp/i18n';
+import { DEFAULT_VEXA_LOCALE, SHARE_INVITE_BUTTON_TEXT, VEXA_APP_DEEP_LINK, VEXA_LOCALES, VEXA_LOCALE_LABELS, type VexaLocale, vexaLocaleForCountry } from './miniapp/i18n';
 
 type TgApi = <T = unknown>(token: string, method: string, payload: unknown) => Promise<T>;
 type AdminUser = Record<string, unknown> & { id?: unknown; firstName?: unknown; username?: unknown; tonBalance?: unknown; tonBalanceNano?: unknown; currentSection?: unknown; status?: unknown; level?: unknown; xp?: unknown; rankName?: unknown; regionCode?: unknown; languageCode?: unknown; regionLabel?: unknown; returnCount?: unknown };
-type AdminState = { mode: 'win' | 'credit' | 'message' | 'broadcast' | 'limit' | 'search'; userId?: string; page?: number; list?: string; locales?: string[]; miniAppButton?: boolean; menuMessageId?: number };
+type AdminState = {
+  mode: 'win' | 'credit' | 'message' | 'broadcast' | 'limit' | 'search' | 'channel-link' | 'channel-destination' | 'channel-button-text' | 'channel-content';
+  userId?: string;
+  page?: number;
+  list?: string;
+  locales?: string[];
+  miniAppButton?: boolean;
+  menuMessageId?: number;
+  channelChatId?: string;
+  channelTitle?: string;
+  channelUsername?: string;
+  destination?: string;
+  buttonText?: string;
+};
 type TelegramSentMessage = { message_id?: number };
+type TelegramChatInfo = { id?: number | string; type?: string; title?: string; username?: string };
+type ChannelPostSettings = { chatId: string; title: string; username?: string };
 type RegionConfig = { code: string; label: string; language: string; timezone: string };
 type RegionSettings = { startPromptEnabled: boolean; commandEnabled: boolean; defaultRegionCode: string | null };
 
 const PAGE_SIZE = 8;
 const NANO = 1_000_000_000;
 const REGION_SETTINGS_KEY = 'admin:bot-region-settings';
+const CHANNEL_POST_SETTINGS_KEY = 'admin:channel-post-settings';
+const CHANNEL_DESTINATIONS = [
+  ['home', '🏠 Home'],
+  ['predictzone', '🔮 Predict'],
+  ['playzone', '🎮 Play Hub'],
+] as const;
+const CHANNEL_GAMES = [
+  ['mines', 'Mines'], ['plinko', 'Plinko'], ['wheel', 'Wheel'],
+  ['slot', 'Slot'], ['ghostrun', 'Ghost Run'], ['crash', 'Crash'],
+  ['dice', 'Dice'], ['hilo', 'Chicken Cross'], ['coinflip', 'Pump'],
+] as const;
+const CHANNEL_DESTINATION_IDS = new Set<string>([
+  ...CHANNEL_DESTINATIONS.map(([id]) => id),
+  ...CHANNEL_GAMES.map(([id]) => id),
+]);
 const REGIONS: RegionConfig[] = [
   { code: 'US', label: '🇺🇸 United States', language: 'en', timezone: 'America/New_York' },
   { code: 'RU', label: '🇷🇺 Russia', language: 'ru', timezone: 'Europe/Moscow' },
@@ -71,8 +101,14 @@ export async function handleBotAdminCallback(env: Env, token: string, q: Telegra
   const id = parts[2] || '';
   const arg = parts[3] || '';
   const pageArg = Number(parts[4]) || 0;
+  const pendingState = action.startsWith('channel') ? await getAdminState(env, q.from.id) : null;
   await clearAdminState(env, q.from.id);
   if (action === 'home') return sendAdminHome(env, token, chatId, tg, messageId);
+  if (action === 'channelpost') return sendChannelPostMenu(env, token, chatId, tg, q.from.id, messageId);
+  if (action === 'channelchange') return promptChannelLink(env, token, chatId, tg, q.from.id, messageId);
+  if (action === 'channelcompose') return beginChannelComposition(env, token, chatId, tg, q.from.id, messageId);
+  if (action === 'channeldestination') return chooseChannelDestination(env, token, chatId, tg, q.from.id, pendingState, id, messageId);
+  if (action === 'channelbutton') return chooseChannelButton(env, token, chatId, tg, q.from.id, pendingState, id === 'yes', messageId);
   if (action === 'users') return sendUsersList(env, token, chatId, tg, Number(id) || 0, messageId);
   if (action === 'returns') return sendReturnUsersMenu(env, token, chatId, tg, messageId);
   if (action === 'asksearch') return promptAdminInput(env, token, chatId, tg, q.from.id, { mode: 'search', list: returnListKey(id) }, searchPrompt(returnListKey(id)), messageId);
@@ -233,6 +269,50 @@ async function promptAdminInput(env: Env, token: string, chatId: number, tg: TgA
 }
 
 async function handleStateMessage(env: Env, token: string, message: TelegramMessage, tg: TgApi, state: AdminState): Promise<true> {
+  if (state.mode === 'channel-link') {
+    const target = normalizeChannelTarget(message.text);
+    if (!target) return sendChannelStateError(env, token, tg, message, state, 'لینک عمومی کانال، @username یا آیدی عددی کانال را بفرستید.');
+    try {
+      const chat = await tg<TelegramChatInfo>(token, 'getChat', { chat_id: target });
+      if (chat.type !== 'channel' || chat.id === undefined) throw new Error('این آدرس مربوط به کانال نیست.');
+      const settings: ChannelPostSettings = {
+        chatId: String(chat.id),
+        title: String(chat.title || chat.username || target).trim().slice(0, 120),
+        ...(chat.username ? { username: String(chat.username).replace(/^@/, '').slice(0, 64) } : {}),
+      };
+      await saveChannelPostSettings(env, settings);
+      await clearAdminState(env, message.from?.id);
+      await cleanupAdminInput(token, tg, message);
+      return sendChannelPostMenu(env, token, message.chat.id, tg, message.from?.id, state.menuMessageId, '✅ کانال ذخیره شد.');
+    } catch (error) {
+      return sendChannelStateError(env, token, tg, message, state, error instanceof Error ? error.message : 'کانال پیدا نشد یا ربات به آن دسترسی ندارد.');
+    }
+  }
+  if (state.mode === 'channel-button-text') {
+    const buttonText = String(message.text || '').trim();
+    if (!buttonText || Array.from(buttonText).length > 64) {
+      return sendChannelStateError(env, token, tg, message, state, 'متن دکمه باید بین ۱ تا ۶۴ کاراکتر باشد.');
+    }
+    await cleanupAdminInput(token, tg, message);
+    return promptChannelContent(env, token, message.chat.id, tg, message.from?.id, { ...state, mode: 'channel-content', miniAppButton: true, buttonText }, state.menuMessageId);
+  }
+  if (state.mode === 'channel-content') {
+    try {
+      await copyAdminMessageToChannel(token, tg, message, state);
+      await clearAdminState(env, message.from?.id);
+      await cleanupAdminInput(token, tg, message);
+      const channel = state.channelUsername ? `@${state.channelUsername}` : state.channelTitle || state.channelChatId || 'کانال';
+      await upsertMessage(env, token, tg, message.chat.id, state.menuMessageId, `✅ پیام با موفقیت در ${channel} منتشر شد.`, [
+        [{ text: '📝 ارسال پیام دیگر', callback_data: 'botadmin:channelcompose' }],
+        [{ text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' }],
+      ]);
+      return true;
+    } catch (error) {
+      await cleanupAdminInput(token, tg, message);
+      await setAdminState(env, message.from?.id, state);
+      return sendChannelStateError(env, token, tg, message, state, error instanceof Error ? error.message : 'ارسال پیام به کانال ناموفق بود.');
+    }
+  }
   if (state.mode === 'win' && state.userId) {
     const value = Number((message.text || '').replace(/[٪%]/g, '').trim());
     if (!Number.isFinite(value)) return sendStateError(env, token, tg, message, state, 'عدد شانس برد معتبر نیست.');
@@ -415,6 +495,171 @@ function chunk<T>(items: T[], size: number): T[][] { const rows: T[][] = []; for
 function cleanId(value: unknown): string { return String(value ?? '').replace(/[^0-9A-Za-z_-]/g, '').slice(0, 80); }
 function cleanText(value: unknown, fallback: string): string { const text = String(value ?? '').trim(); return text && text !== '—' ? text.slice(0, 80) : fallback; }
 function formatTon(value: unknown): string { const n = Math.max(0, Math.floor(Number(value) || 0)); return (n / NANO).toLocaleString('en-US', { maximumFractionDigits: 6 }); }
+
+async function sendChannelPostMenu(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, messageId?: number, notice = ''): Promise<true> {
+  const settings = await getChannelPostSettings(env);
+  if (!settings) return promptChannelLink(env, token, chatId, tg, adminId, messageId);
+  const channel = settings.username ? `@${settings.username}` : settings.title;
+  const text = [notice, '📨 ارسال پیام به کانال', '', `کانال فعلی: ${channel}`, '', 'می‌توانید متن، عکس با کپشن، ویدیو یا فایل ارسال کنید.'].filter(Boolean).join('\n');
+  await upsertMessage(env, token, tg, chatId, messageId, text, [
+    [{ text: '📝 ساخت پیام جدید', callback_data: 'botadmin:channelcompose' }],
+    [{ text: '🔗 تغییر کانال', callback_data: 'botadmin:channelchange' }],
+    [{ text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' }],
+  ]);
+  return true;
+}
+
+async function promptChannelLink(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, messageId?: number): Promise<true> {
+  const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
+  await setAdminState(env, adminId, { mode: 'channel-link', menuMessageId });
+  await upsertMessage(env, token, tg, chatId, messageId,
+    '🔗 لینک کانال را بفرستید.\n\nفرمت قابل قبول:\nhttps://t.me/channelname\n@channelname\nیا آیدی عددی کانال\n\nربات باید داخل کانال ادمین و دارای اجازه ارسال پیام باشد.',
+    [[{ text: 'لغو و بازگشت', callback_data: 'botadmin:channelpost' }]],
+  );
+  return true;
+}
+
+async function beginChannelComposition(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, messageId?: number): Promise<true> {
+  const settings = await getChannelPostSettings(env);
+  if (!settings) return promptChannelLink(env, token, chatId, tg, adminId, messageId);
+  return sendChannelDestinationMenu(env, token, chatId, tg, adminId, settings, messageId);
+}
+
+async function sendChannelDestinationMenu(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, settings: ChannelPostSettings, messageId?: number): Promise<true> {
+  const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
+  await setAdminState(env, adminId, { mode: 'channel-destination', menuMessageId, ...channelState(settings) });
+  await upsertMessage(env, token, tg, chatId, messageId, 'مقصد دکمه داخل اپ را انتخاب کنید.', [
+    ...CHANNEL_DESTINATIONS.map(([id, label]) => [{ text: label, callback_data: `botadmin:channeldestination:${id}` }]),
+    [{ text: '🕹 انتخاب یکی از بازی‌ها', callback_data: 'botadmin:channeldestination:games' }],
+    [{ text: '⬅️ بازگشت', callback_data: 'botadmin:channelpost' }],
+  ]);
+  return true;
+}
+
+async function sendChannelGameMenu(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, settings: ChannelPostSettings, messageId?: number): Promise<true> {
+  const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
+  await setAdminState(env, adminId, { mode: 'channel-destination', menuMessageId, ...channelState(settings) });
+  await upsertMessage(env, token, tg, chatId, messageId, 'بازی مقصد را انتخاب کنید.', [
+    ...chunk(CHANNEL_GAMES.map(([id, label]) => ({ text: label, callback_data: `botadmin:channeldestination:${id}` })), 2),
+    [{ text: '⬅️ بازگشت', callback_data: 'botadmin:channelcompose' }],
+  ]);
+  return true;
+}
+
+async function chooseChannelDestination(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, state: AdminState | null, destination: string, messageId?: number): Promise<true> {
+  const settings = channelSettingsFromState(state) ?? await getChannelPostSettings(env);
+  if (!settings) return promptChannelLink(env, token, chatId, tg, adminId, messageId);
+  if (destination === 'games') return sendChannelGameMenu(env, token, chatId, tg, adminId, settings, messageId);
+  const normalized = normalizeChannelDestination(destination);
+  if (!normalized) return sendChannelDestinationMenu(env, token, chatId, tg, adminId, settings, messageId);
+  const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
+  await setAdminState(env, adminId, { mode: 'channel-destination', menuMessageId, ...channelState(settings), destination: normalized });
+  await upsertMessage(env, token, tg, chatId, messageId, `مقصد انتخاب‌شده: ${channelDestinationLabel(normalized)}\n\nآیا زیر پیام دکمه ورود به اپ قرار بگیرد؟`, [
+    [{ text: '✅ با دکمه', callback_data: 'botadmin:channelbutton:yes' }],
+    [{ text: 'بدون دکمه', callback_data: 'botadmin:channelbutton:no' }],
+    [{ text: '⬅️ تغییر مقصد', callback_data: 'botadmin:channelcompose' }],
+  ]);
+  return true;
+}
+
+async function chooseChannelButton(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, state: AdminState | null, withButton: boolean, messageId?: number): Promise<true> {
+  const settings = channelSettingsFromState(state) ?? await getChannelPostSettings(env);
+  const destination = normalizeChannelDestination(state?.destination);
+  if (!settings || !destination) return beginChannelComposition(env, token, chatId, tg, adminId, messageId);
+  if (withButton) {
+    const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
+    await setAdminState(env, adminId, { mode: 'channel-button-text', menuMessageId, ...channelState(settings), destination, miniAppButton: true });
+    await upsertMessage(env, token, tg, chatId, messageId, 'متن دلخواه دکمه را بفرستید.\n\nمثال: ورود به Vexa Game', [[{ text: '⬅️ بازگشت', callback_data: `botadmin:channeldestination:${destination}` }]]);
+    return true;
+  }
+  return promptChannelContent(env, token, chatId, tg, adminId, { mode: 'channel-content', ...channelState(settings), destination, miniAppButton: false }, messageId);
+}
+
+async function promptChannelContent(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, state: AdminState, messageId?: number): Promise<true> {
+  const menuMessageId = messageId ?? state.menuMessageId ?? await getAdminMenuMessageId(env, chatId);
+  const next: AdminState = { ...state, mode: 'channel-content', menuMessageId };
+  await setAdminState(env, adminId, next);
+  const button = next.miniAppButton ? `بله — ${next.buttonText || 'ورود به اپ'}` : 'خیر';
+  await upsertMessage(env, token, tg, chatId, messageId, `حالا محتوای پیام کانال را بفرستید.\n\nمی‌توانید متن، عکس با کپشن، ویدیو یا فایل بفرستید.\nمقصد: ${channelDestinationLabel(next.destination || '')}\nدکمه: ${button}`, [[{ text: 'لغو و بازگشت', callback_data: 'botadmin:channelpost' }]]);
+  return true;
+}
+
+async function copyAdminMessageToChannel(token: string, tg: TgApi, message: TelegramMessage, state: AdminState): Promise<void> {
+  const channelId = String(state.channelChatId || '').trim();
+  const destination = normalizeChannelDestination(state.destination);
+  if (!channelId) throw new Error('کانال تنظیم نشده است.');
+  if (!destination) throw new Error('مقصد اپ انتخاب نشده است.');
+  const replyMarkup = state.miniAppButton
+    ? { inline_keyboard: [[{ text: state.buttonText || 'ورود به اپ', url: channelMiniAppUrl(destination) }]] }
+    : undefined;
+  await tg(token, 'copyMessage', {
+    chat_id: channelId,
+    from_chat_id: message.chat.id,
+    message_id: message.message_id,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+}
+
+async function sendChannelStateError(env: Env, token: string, tg: TgApi, message: TelegramMessage, state: AdminState, error: string): Promise<true> {
+  await cleanupAdminInput(token, tg, message);
+  await setAdminState(env, message.from?.id, state);
+  await upsertMessage(env, token, tg, message.chat.id, state.menuMessageId, `❌ ${error}\n\nدوباره مقدار درست را بفرستید.`, [[{ text: 'لغو و بازگشت', callback_data: 'botadmin:channelpost' }]]);
+  return true;
+}
+
+async function getChannelPostSettings(env: Env): Promise<ChannelPostSettings | null> {
+  try {
+    await ensureAdminSettings(env);
+    const row = await env.DB.prepare('SELECT value_json FROM admin_settings WHERE name = ?').bind(CHANNEL_POST_SETTINGS_KEY).first<{ value_json: string }>();
+    const value = JSON.parse(row?.value_json || '{}') as Partial<ChannelPostSettings>;
+    const chatId = String(value.chatId || '').trim();
+    const title = String(value.title || '').trim();
+    if (!chatId || !title) return null;
+    return { chatId, title: title.slice(0, 120), ...(value.username ? { username: String(value.username).replace(/^@/, '').slice(0, 64) } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+async function saveChannelPostSettings(env: Env, settings: ChannelPostSettings): Promise<void> {
+  await ensureAdminSettings(env);
+  await env.DB.prepare(`INSERT INTO admin_settings (name, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(name) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP`)
+    .bind(CHANNEL_POST_SETTINGS_KEY, JSON.stringify(settings))
+    .run();
+}
+
+function channelState(settings: ChannelPostSettings): Pick<AdminState, 'channelChatId' | 'channelTitle' | 'channelUsername'> {
+  return { channelChatId: settings.chatId, channelTitle: settings.title, ...(settings.username ? { channelUsername: settings.username } : {}) };
+}
+
+function channelSettingsFromState(state: AdminState | null): ChannelPostSettings | null {
+  const chatId = String(state?.channelChatId || '').trim();
+  const title = String(state?.channelTitle || '').trim();
+  if (!chatId || !title) return null;
+  return { chatId, title, ...(state?.channelUsername ? { username: state.channelUsername } : {}) };
+}
+
+function normalizeChannelTarget(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  if (/^-100\d{6,20}$/.test(raw)) return raw;
+  const username = raw.match(/^@([A-Za-z][A-Za-z0-9_]{4,31})$/)?.[1]
+    || raw.match(/^(?:https?:\/\/)?t\.me\/([A-Za-z][A-Za-z0-9_]{4,31})\/?$/i)?.[1];
+  return username ? `@${username}` : null;
+}
+
+function normalizeChannelDestination(value: unknown): string | null {
+  const destination = String(value || '').trim().toLowerCase();
+  return CHANNEL_DESTINATION_IDS.has(destination) ? destination : null;
+}
+
+function channelDestinationLabel(destination: string): string {
+  return [...CHANNEL_DESTINATIONS, ...CHANNEL_GAMES].find(([id]) => id === destination)?.[1] || destination;
+}
+
+function channelMiniAppUrl(destination: string): string {
+  return `${VEXA_APP_DEEP_LINK}=${encodeURIComponent(destination)}`;
+}
 
 async function sendBroadcastOptions(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, messageId?: number): Promise<true> {
   await clearAdminState(env, adminId);

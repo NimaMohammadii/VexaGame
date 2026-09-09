@@ -17,9 +17,10 @@ export function registerFriendGameRoutes(app: App): void {
       const userId = await soloUser(c.env, body.initData);
       await ensureTables(c.env);
       let round = await soloRound(c.env, userId);
-      if (!round || !['pending', 'active'].includes(round.status)) return c.json({ ok: true, active: false });
+      if (!round) return c.json({ ok: true, active: false });
       if (round.status === 'pending') round = (await activateSoloRound(c.env, round)).round;
-      const controls = await getUserControls(c.env, userId);
+      const controls = round.status === 'cashed_out' ? await settleSoloPayout(c.env, round) : await getUserControls(c.env, userId);
+      if (!['active', 'cashed_out'].includes(round.status)) return c.json({ ok: true, active: false, tonBalanceNano: controls.tonBalanceNano });
       return c.json(soloState(round, controls.tonBalanceNano));
     } catch (e) { return fail(c, e, 'Could not restore Mines round.'); }
   });
@@ -40,6 +41,7 @@ export function registerFriendGameRoutes(app: App): void {
         const controls = await getUserControls(c.env, userId);
         return c.json({ ...soloState(current, controls.tonBalanceNano), started: false });
       }
+      if (current?.status === 'cashed_out') await settleSoloPayout(c.env, current);
 
       const roundId = id('mines_solo');
       const mineCells = secureHiddenCells(25, mineCount);
@@ -293,7 +295,7 @@ async function invite(env:Env,roomId:string,userId:string,displayName:string){
   const response=await telegram<{ok:boolean;result?:{id?:string};description?:string}>(env.BOT_TOKEN,'savePreparedInlineMessage',{user_id:numeric,result:{type:'article',id:`mines_invite_${roomId}`.slice(0,64),title:'Mines Friend Round',description:'Join a private game in Vexa.',input_message_content:{message_text:fallbackText,disable_web_page_preview:true},reply_markup:{inline_keyboard:[[{text:'🎮 Join Friend Round',url}]]}},allow_user_chats:true,allow_bot_chats:false,allow_group_chats:true,allow_channel_chats:false});
   if(!response.ok||!response.result?.id)throw new Error(response.description||'Telegram could not prepare invite');return{preparedMessageId:response.result.id,inviteUrl:url,fallbackText};
 }
-async function botUsername(env:Env){const key=`telegram:bot-username:${env.BOT_TOKEN.split(':')[0]||'default'}`,cached=await env.BOT_CACHE.get(key).catch(()=>null);if(cached)return cached;const data=await telegram<{ok:boolean;result?:{username?:string};description?:string}>(env.BOT_TOKEN,'getMe',{}),username=String(data.result?.username||'').replace(/^@/,'').replace(/[^0-9A-Za-z_]/g,'');if(!data.ok||!username)throw new Error(data.description||'Telegram bot username is unavailable');await env.BOT_CACHE.put(key,username,{expirationTtl:86400}).catch(()=>undefined);return username;}
+async function botUsername(env:Env){const key=`telegram:bot-username:${env.BOT_TOKEN.split(':')[0]||'default'}`,cached=await env.BOT_CACHE.get(key).catch(()=>null);if(cached)return cached;const data=await telegram<{ok:boolean;result?:{username?:string};description?:string}>(env.BOT_TOKEN,'getMe',{}),username=String(data.result?.username||'').replace(/^@/,'').replace(/[^0-9A-Za-z_]/g,''),result=data.result;if(!data.ok||!username)throw new Error(data.description||'Telegram bot username is unavailable');await env.BOT_CACHE.put(key,username,{expirationTtl:86400}).catch(()=>undefined);return username;}
 async function telegram<T>(token:string,method:string,payload:Record<string,unknown>){const response=await fetch(`https://api.telegram.org/bot${token}/${method}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});return response.json() as Promise<T>;}
 async function limited(env:Env,key:string){try{return await rateLimit(env.RATE_LIMITS,key,20,3600);}catch{return true;}}
 async function expire(env:Env,table:string,roomId:string){await env.DB.prepare(`UPDATE ${table} SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='finished'`).bind(roomId).run();}

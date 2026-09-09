@@ -4,6 +4,7 @@ import { ensureTonBalanceColumn } from './user-controls';
 import { ensureTonTransactionsTable } from './ton-transactions';
 
 export const LOTTERY_WINNER_COUNT = 3;
+export const LOTTERY_WINNER_COOLDOWN_DAYS = 21;
 const PRIZE_PERCENT_TOTAL_BPS = 10_000;
 const LOTTERY_PLATFORM_FEE_BPS = 2_000;
 const LOTTERY_TICKET_PRIZE_BPS = PRIZE_PERCENT_TOTAL_BPS - LOTTERY_PLATFORM_FEE_BPS;
@@ -92,6 +93,7 @@ export async function ensureLotteryPrizeTables(env: Env): Promise<void> {
   )`).run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_lottery_winners_round_rank ON lottery_winners(round_id,rank)').run();
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_lottery_winners_user_round ON lottery_winners(user_id,round_id)').run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_lottery_winners_user_created ON lottery_winners(user_id,created_at)').run();
 
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS lottery_winner_selections (
     round_id TEXT NOT NULL,
@@ -126,6 +128,7 @@ export async function setLotteryWinnerSelection(env: Env, roundIdInput: unknown,
   if (!roundId || !userId || rank < 1 || rank > LOTTERY_WINNER_COUNT) throw new Error('Invalid winner selection');
   const ticket = await env.DB.prepare('SELECT id FROM lottery_tickets WHERE round_id=? AND user_id=? LIMIT 1').bind(roundId, userId).first<{ id: string }>();
   if (!ticket) throw new Error('این کاربر در راند فعلی تیکت ندارد.');
+  if (!(await isEligibleLotteryWinner(env, userId))) throw new Error('این کاربر تا ۳ هفته پس از برد قبلی نمی‌تواند دوباره برنده شود.');
   await env.DB.batch([
     env.DB.prepare('DELETE FROM lottery_winner_selections WHERE round_id=? AND (rank=? OR user_id=?)').bind(roundId, rank, userId),
     env.DB.prepare(`INSERT INTO lottery_winner_selections (round_id,rank,user_id,selected_at)
@@ -149,8 +152,9 @@ export async function searchLotteryTicketHolders(env: Env, roundIdInput: unknown
   const rows = await env.DB.prepare(`SELECT t.user_id,u.username,u.first_name,COUNT(*) AS ticket_count
     FROM lottery_tickets t LEFT JOIN app_users u ON u.telegram_user_id=t.user_id
     WHERE t.round_id=? AND (?='' OR t.user_id=? OR COALESCE(u.username,'') LIKE ? ESCAPE '\\' COLLATE NOCASE OR COALESCE(u.first_name,'') LIKE ? ESCAPE '\\' COLLATE NOCASE)
+    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=t.user_id AND w.created_at>?)
     GROUP BY t.user_id,u.username,u.first_name ORDER BY ticket_count DESC,t.user_id ASC LIMIT ?`)
-    .bind(roundId, query, query, pattern, pattern, limit).all<{ user_id: string; username: string | null; first_name: string | null; ticket_count: number }>();
+    .bind(roundId, query, query, pattern, pattern, lotteryWinnerCooldownCutoff(), limit).all<{ user_id: string; username: string | null; first_name: string | null; ticket_count: number }>();
   return (rows.results || []).map((row) => {
     const username = cleanUsername(row.username);
     return {
@@ -301,8 +305,10 @@ export async function finalizeLotteryWinners(env: Env, roundIdInput: unknown): P
 async function randomCandidateForUser(env: Env, roundId: string, userId: string): Promise<CandidateRow | null> {
   const rows = await env.DB.prepare(`SELECT id,user_id,COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5)) AS code
     FROM lottery_tickets WHERE round_id=? AND user_id=?
-    AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!='' ORDER BY datetime(created_at) ASC,id ASC`)
-    .bind(roundId, userId).all<CandidateRow>();
+    AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''
+    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND w.created_at>?)
+    ORDER BY datetime(created_at) ASC,id ASC`)
+    .bind(roundId, userId, lotteryWinnerCooldownCutoff()).all<CandidateRow>();
   const candidates = rows.results || [];
   if (!candidates.length) return null;
   const row = candidates[secureRandomIndex(candidates.length)];
@@ -313,21 +319,34 @@ async function randomCandidateForUser(env: Env, roundId: string, userId: string)
 async function randomCandidate(env: Env, roundId: string, excludedUsers: string[]): Promise<CandidateRow | null> {
   const exclusion = excludedUsers.length ? ` AND user_id NOT IN (${excludedUsers.map(() => '?').join(',')})` : '';
   const countSql = `SELECT COUNT(*) AS count FROM lottery_tickets
-    WHERE round_id=? AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''${exclusion}`;
-  const countRow = await env.DB.prepare(countSql).bind(roundId, ...excludedUsers).first<{ count: number }>();
+    WHERE round_id=? AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''
+    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND w.created_at>?)${exclusion}`;
+  const cooldownCutoff = lotteryWinnerCooldownCutoff();
+  const countRow = await env.DB.prepare(countSql).bind(roundId, cooldownCutoff, ...excludedUsers).first<{ count: number }>();
   const count = Math.max(0, Math.floor(Number(countRow?.count || 0)));
   if (!count) return null;
 
   const offset = secureRandomIndex(count);
   const rowSql = `SELECT id,user_id,COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5)) AS code
     FROM lottery_tickets
-    WHERE round_id=? AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''${exclusion}
+    WHERE round_id=? AND COALESCE(NULLIF(ticket_code,''),substr(ticket_number,-5))!=''
+    AND NOT EXISTS (SELECT 1 FROM lottery_winners w WHERE w.user_id=lottery_tickets.user_id AND w.created_at>?)${exclusion}
     ORDER BY datetime(created_at) ASC,id ASC LIMIT 1 OFFSET ?`;
-  const row = await env.DB.prepare(rowSql).bind(roundId, ...excludedUsers, offset).first<CandidateRow>();
+  const row = await env.DB.prepare(rowSql).bind(roundId, cooldownCutoff, ...excludedUsers, offset).first<CandidateRow>();
   if (!row) return null;
   const code = String(row.code || '').replace(/[^0-9]/g, '').slice(-5).padStart(5, '0');
   if (!/^\d{5}$/.test(code)) return null;
   return { id: row.id, user_id: row.user_id, code };
+}
+
+async function isEligibleLotteryWinner(env: Env, userId: string): Promise<boolean> {
+  const previous = await env.DB.prepare(`SELECT id FROM lottery_winners
+    WHERE user_id=? AND created_at>? LIMIT 1`).bind(userId, lotteryWinnerCooldownCutoff()).first<{ id: string }>();
+  return !previous?.id;
+}
+
+function lotteryWinnerCooldownCutoff(): string {
+  return new Date(Date.now() - LOTTERY_WINNER_COOLDOWN_DAYS * 24 * 60 * 60_000).toISOString();
 }
 
 async function payPendingLotteryWinners(env: Env, roundId: string): Promise<void> {

@@ -69,7 +69,7 @@ app.post('/app/api/ton-balance/game-delta', zValidator('json', gameTonBalanceSch
     const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
     if (userId !== body.userId) throw new Error('Telegram user mismatch');
     const deltas = body.deltas;
-    if (deltas.some((item) => ['plinko','crash','mines'].includes(String(item.section || '').trim().toLowerCase()))) throw new Error('Plinko, Crash, and Mines balances are settled by secure server endpoints.');
+    if (deltas.some((item) => ['plinko','crash'].includes(String(item.section || '').trim().toLowerCase()))) throw new Error('Plinko and Crash balances are settled by secure server endpoints.');
     return c.json(await applyGameTonBalanceDeltas(c.env, userId, deltas));
   }
   catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Could not update GRAM balance' }, 400); }

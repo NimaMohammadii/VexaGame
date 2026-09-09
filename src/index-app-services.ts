@@ -124,6 +124,8 @@ app.get('/app/api/uploaded-images', async (c) => {
 
 app.get('/app/api/uploaded-image/ton-icon.png', async (c) => getAssetResponse(c.env, 'ton-icon', '/app/api/credit-icon.png'));
 app.get('/app/api/uploaded-image/plinko-ball.png', async (c) => getAssetResponse(c.env, 'plinko-ball', '/app/api/credit-icon.png'));
+app.get('/app/api/uploaded-image/mines-safe.png', async (c) => getAssetResponse(c.env, 'mines-tile/safe', null, { cacheControl: c.req.query('v') ? UPLOADED_IMAGE_CACHE_CONTROL : 'no-store' }));
+app.get('/app/api/uploaded-image/mines-bomb.png', async (c) => getAssetResponse(c.env, 'mines-tile/bomb', null, { cacheControl: c.req.query('v') ? UPLOADED_IMAGE_CACHE_CONTROL : 'no-store' }));
 app.get('/app/api/miniapp-audio', async (c) => getMiniappAudioResponse(c.env, normalizeMiniappAudioTarget(c.req.query('target'))));
 app.get('/app/api/miniapp-audio-file', async (c) => {
   const target = normalizeMiniappAudioTarget(c.req.query('target'));
@@ -179,6 +181,6 @@ async function getAssetResponse(env: Env, key: string, fallbackUrl: string | nul
 function parseByteRange(header: string | undefined, size: number): { start: number; end: number } | null { if (!header || !Number.isFinite(size) || size <= 0) return null; const match = header.match(/^bytes=(\d*)-(\d*)$/); if (!match || (!match[1] && !match[2])) return null; let start = match[1] ? Number(match[1]) : size - Number(match[2]); let end = match[2] ? Number(match[2]) : size - 1; if (!Number.isInteger(start) || !Number.isInteger(end)) return null; start = Math.max(0, start); end = Math.min(size - 1, end); return start <= end ? { start, end } : null; }
 function audioContentTypeFromExtension(extension: string): string { if (extension === 'wav') return 'audio/wav'; if (extension === 'ogg' || extension === 'oga') return 'audio/ogg'; if (extension === 'webm') return 'audio/webm'; if (extension === 'mp4' || extension === 'm4a') return 'audio/mp4'; if (extension === 'aac') return 'audio/aac'; return 'audio/mpeg'; }
 function assetVersion(object: { customMetadata?: Record<string, string> } | null): string { return object?.customMetadata?.version || '1'; }
-async function setGameMenuButton(token: string, url: string): Promise<{ ok: boolean; description?: string }> { const response = await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ menu_button: { type: 'web_app', text: 'Vexa Games', web_app: { url } } }) }); return response.json() as Promise<{ ok: boolean; description?: string }>; }
+async function setGameMenuButton(token: string, url: string): Promise<{ ok: boolean; description?: string }> { const response = await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ menu_button: { type: 'web_app', text: 'Vexa Games', web_app: { url } }) }); return response.json() as Promise<{ ok: boolean; description?: string }>; }
 function escapeHtml(value: string): string { return value.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char] ?? char)); }
 export default app;

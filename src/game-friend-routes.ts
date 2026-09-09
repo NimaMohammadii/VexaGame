@@ -9,6 +9,7 @@ type SoloMineRound = { user_id:string; round_id:string; status:string; amount_na
 
 const SOLO_RTP = 0.92;
 const SOLO_MINE_COUNTS = new Set([3, 5, 7, 10]);
+let minesTablesReady: Promise<void> | null = null;
 
 export function registerFriendGameRoutes(app: App): void {
   app.post('/app/api/mines/solo/state', async (c) => {
@@ -79,7 +80,6 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
-      await assertMinesAccess(c.env, userId);
       const roundId = clean(body.roundId, 'Round not found');
       const cell = clampInt(body.cell, 0, 24, -1);
       if (cell < 0) return c.json({ error: 'Invalid cell' }, 400);
@@ -91,42 +91,50 @@ export function registerFriendGameRoutes(app: App): void {
         const controls = await settleSoloPayout(c.env, round);
         return c.json({ ...soloState(round, controls.tonBalanceNano), newReveal: false });
       }
-      if (round.status !== 'active') {
-        const controls = await getUserControls(c.env, userId);
-        return c.json({ ...soloState(round, controls.tonBalanceNano), newReveal: false });
-      }
+      if (round.status !== 'active') return c.json({ ...soloState(round), newReveal: false });
 
       const mines = parseNums(round.mine_cells_json);
       const revealed = parseNums(round.revealed_cells_json);
-      if (revealed.includes(cell)) {
-        const controls = await getUserControls(c.env, userId);
-        return c.json({ ...soloState(round, controls.tonBalanceNano), result: 'safe', selectedCell: cell, newReveal: false });
-      }
+      if (revealed.includes(cell)) return c.json({ ...soloState(round), result: 'safe', selectedCell: cell, newReveal: false });
 
       const previousJson = round.revealed_cells_json;
       if (mines.includes(cell)) {
-        const result = await c.env.DB.prepare(`UPDATE mines_solo_rounds
+        const updated = await c.env.DB.prepare(`UPDATE mines_solo_rounds
           SET status='lost', updated_at=CURRENT_TIMESTAMP
-          WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?`)
-          .bind(userId, roundId, previousJson).run();
-        const changed = Number(result.meta?.changes || 0) > 0;
-        round = await soloRound(c.env, userId) as SoloMineRound;
-        const controls = await getUserControls(c.env, userId);
-        return c.json({ ...soloState(round, controls.tonBalanceNano), ...(changed ? { result: 'mine', selectedCell: cell } : {}), newReveal: changed });
+          WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?
+          RETURNING *`)
+          .bind(userId, roundId, previousJson).first<SoloMineRound>();
+        if (!updated) {
+          const current = await soloRound(c.env, userId);
+          if (!current) throw new Error('Round not found');
+          return c.json({ ...soloState(current), newReveal: false });
+        }
+        return c.json({ ...soloState(updated), result: 'mine', selectedCell: cell, newReveal: true });
       }
 
       const nextRevealed = [...revealed, cell].sort((a, b) => a - b);
       const multiplier = soloMultiplier(Number(round.mine_count), nextRevealed.length, Number(round.board_size) || 25);
       const cleared = nextRevealed.length >= (Number(round.board_size) || 25) - Number(round.mine_count);
       const payoutNano = cleared ? soloPayout(Number(round.amount_nano), multiplier) : 0;
-      const result = await c.env.DB.prepare(`UPDATE mines_solo_rounds
+      const updated = await c.env.DB.prepare(`UPDATE mines_solo_rounds
         SET revealed_cells_json=?, multiplier=?, status=?, payout_nano=?, updated_at=CURRENT_TIMESTAMP
-        WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?`)
-        .bind(JSON.stringify(nextRevealed), multiplier, cleared ? 'cashed_out' : 'active', payoutNano, userId, roundId, previousJson).run();
-      round = await soloRound(c.env, userId) as SoloMineRound;
-      const controls = round.status === 'cashed_out' ? await settleSoloPayout(c.env, round) : await getUserControls(c.env, userId);
-      const changed = Number(result.meta?.changes || 0) > 0;
-      return c.json({ ...soloState(round, controls.tonBalanceNano), ...(changed ? { result: 'safe', selectedCell: cell } : {}), newReveal: changed });
+        WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?
+        RETURNING *`)
+        .bind(JSON.stringify(nextRevealed), multiplier, cleared ? 'cashed_out' : 'active', payoutNano, userId, roundId, previousJson).first<SoloMineRound>();
+      if (!updated) {
+        const current = await soloRound(c.env, userId);
+        if (!current) throw new Error('Round not found');
+        if (current.status === 'cashed_out') {
+          const controls = await settleSoloPayout(c.env, current);
+          return c.json({ ...soloState(current, controls.tonBalanceNano), newReveal: false });
+        }
+        return c.json({ ...soloState(current), newReveal: false });
+      }
+      if (updated.status === 'cashed_out') {
+        const controls = await settleSoloPayout(c.env, updated);
+        return c.json({ ...soloState(updated, controls.tonBalanceNano), result: 'safe', selectedCell: cell, newReveal: true });
+      }
+      return c.json({ ...soloState(updated), result: 'safe', selectedCell: cell, newReveal: true });
     } catch (e) { return fail(c, e, 'Could not select tile.'); }
   });
 
@@ -134,7 +142,6 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
-      await assertMinesAccess(c.env, userId);
       const roundId = clean(body.roundId, 'Round not found');
       await ensureTables(c.env);
       let round = await soloRound(c.env, userId);
@@ -147,13 +154,14 @@ export function registerFriendGameRoutes(app: App): void {
         const multiplier = soloMultiplier(Number(round.mine_count), revealed.length, Number(round.board_size) || 25);
         const payoutNano = soloPayout(Number(round.amount_nano), multiplier);
         const previousJson = round.revealed_cells_json;
-        await c.env.DB.prepare(`UPDATE mines_solo_rounds
+        const updated = await c.env.DB.prepare(`UPDATE mines_solo_rounds
           SET status='cashed_out', multiplier=?, payout_nano=?, updated_at=CURRENT_TIMESTAMP
-          WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?`)
-          .bind(multiplier, payoutNano, userId, roundId, previousJson).run();
-        round = await soloRound(c.env, userId) as SoloMineRound;
+          WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?
+          RETURNING *`)
+          .bind(multiplier, payoutNano, userId, roundId, previousJson).first<SoloMineRound>();
+        round = updated || await soloRound(c.env, userId) as SoloMineRound;
       }
-      if (round.status !== 'cashed_out') return c.json({ error: 'Round is not active' }, 409);
+      if (!round || round.status !== 'cashed_out') return c.json({ error: 'Round is not active' }, 409);
       const controls = await settleSoloPayout(c.env, round);
       return c.json(soloState(round, controls.tonBalanceNano));
     } catch (e) { return fail(c, e, 'Could not collect Mines reward.'); }
@@ -266,18 +274,23 @@ export function registerFriendGameRoutes(app: App): void {
 }
 
 async function ensureTables(env:Env){
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_friend_rooms (id TEXT PRIMARY KEY,host_user_id TEXT NOT NULL,host_name TEXT,guest_user_id TEXT,guest_name TEXT,status TEXT NOT NULL DEFAULT 'waiting',current_turn_user_id TEXT,hidden_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',mine_count INTEGER NOT NULL DEFAULT 3,board_size INTEGER NOT NULL DEFAULT 25,round_index INTEGER NOT NULL DEFAULT 1,finished_reason TEXT,host_ready INTEGER,guest_ready INTEGER,host_has_points INTEGER,guest_has_points INTEGER,host_funded INTEGER NOT NULL DEFAULT 0,guest_funded INTEGER NOT NULL DEFAULT 0,settled INTEGER NOT NULL DEFAULT 0,amount_nano INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL)").run();
-  await env.DB.prepare('ALTER TABLE mines_friend_rooms ADD COLUMN host_funded INTEGER NOT NULL DEFAULT 0').run().catch(()=>undefined);
-  await env.DB.prepare('ALTER TABLE mines_friend_rooms ADD COLUMN guest_funded INTEGER NOT NULL DEFAULT 0').run().catch(()=>undefined);
-  await env.DB.prepare('ALTER TABLE mines_friend_rooms ADD COLUMN settled INTEGER NOT NULL DEFAULT 0').run().catch(()=>undefined);
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_solo_rounds (user_id TEXT PRIMARY KEY,round_id TEXT NOT NULL UNIQUE,status TEXT NOT NULL DEFAULT 'pending',amount_nano INTEGER NOT NULL,mine_count INTEGER NOT NULL,board_size INTEGER NOT NULL DEFAULT 25,mine_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',multiplier REAL NOT NULL DEFAULT 1,payout_nano INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_mines_solo_round_id ON mines_solo_rounds(round_id)').run();
+  if(!minesTablesReady){
+    minesTablesReady=(async()=>{
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_friend_rooms (id TEXT PRIMARY KEY,host_user_id TEXT NOT NULL,host_name TEXT,guest_user_id TEXT,guest_name TEXT,status TEXT NOT NULL DEFAULT 'waiting',current_turn_user_id TEXT,hidden_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',mine_count INTEGER NOT NULL DEFAULT 3,board_size INTEGER NOT NULL DEFAULT 25,round_index INTEGER NOT NULL DEFAULT 1,finished_reason TEXT,host_ready INTEGER,guest_ready INTEGER,host_has_points INTEGER,guest_has_points INTEGER,host_funded INTEGER NOT NULL DEFAULT 0,guest_funded INTEGER NOT NULL DEFAULT 0,settled INTEGER NOT NULL DEFAULT 0,amount_nano INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL)").run();
+      await env.DB.prepare('ALTER TABLE mines_friend_rooms ADD COLUMN host_funded INTEGER NOT NULL DEFAULT 0').run().catch(()=>undefined);
+      await env.DB.prepare('ALTER TABLE mines_friend_rooms ADD COLUMN guest_funded INTEGER NOT NULL DEFAULT 0').run().catch(()=>undefined);
+      await env.DB.prepare('ALTER TABLE mines_friend_rooms ADD COLUMN settled INTEGER NOT NULL DEFAULT 0').run().catch(()=>undefined);
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS mines_solo_rounds (user_id TEXT PRIMARY KEY,round_id TEXT NOT NULL UNIQUE,status TEXT NOT NULL DEFAULT 'pending',amount_nano INTEGER NOT NULL,mine_count INTEGER NOT NULL,board_size INTEGER NOT NULL DEFAULT 25,mine_cells_json TEXT NOT NULL DEFAULT '[]',revealed_cells_json TEXT NOT NULL DEFAULT '[]',multiplier REAL NOT NULL DEFAULT 1,payout_nano INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+      await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_mines_solo_round_id ON mines_solo_rounds(round_id)').run();
+    })().catch((error)=>{minesTablesReady=null;throw error;});
+  }
+  await minesTablesReady;
 }
 
 async function soloUser(env:Env,initData:unknown){return validateTelegramInitData(String(initData||''),gameBotToken(env));}
 async function friendUser(c:any,claimed:unknown){const userId=await validateTelegramInitData(String(c.req.header('x-telegram-init-data')||''),gameBotToken(c.env));const claim=String(claimed??'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,80);if(claim&&claim!==userId)throw new Error('Telegram user mismatch');await assertMinesAccess(c.env,userId);return userId;}
 async function assertMinesAccess(env:Env,userId:string){const controls=await getUserControls(env,userId);if(controls.banned||controls.blockedSections.includes('mines'))throw new Error('Mines is blocked for this account');}
-async function soloRound(env:Env,userId:string){return env.DB.prepare('SELECT * FROM mines_solo_rounds WHERE user_id=?').bind(userId).first<SoloMineRound>();}
+async function soloRound(env:Env,userId:string){return env.DB.prepare('SELECT * FROM mines_solo_rounds WHERE user_id=? LIMIT 1').bind(userId).first<SoloMineRound>();}
 async function activateSoloRound(env:Env,round:SoloMineRound){
   if(round.status!=='pending')return{round,controls:await getUserControls(env,round.user_id)};
   let controls;
@@ -287,19 +300,22 @@ async function activateSoloRound(env:Env,round:SoloMineRound){
     await env.DB.prepare("UPDATE mines_solo_rounds SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='pending'").bind(round.user_id,round.round_id).run().catch(()=>undefined);
     throw error;
   }
-  await env.DB.prepare("UPDATE mines_solo_rounds SET status='active',updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='pending'").bind(round.user_id,round.round_id).run();
-  const active=await soloRound(env,round.user_id);if(!active)throw new Error('Round not found');
-  return{round:active,controls};
+  const active=await env.DB.prepare("UPDATE mines_solo_rounds SET status='active',updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='pending' RETURNING *").bind(round.user_id,round.round_id).first<SoloMineRound>();
+  if(active)return{round:active,controls};
+  const current=await soloRound(env,round.user_id);if(!current)throw new Error('Round not found');
+  return{round:current,controls};
 }
 async function settleSoloPayout(env:Env,round:SoloMineRound){
   const payout=Math.floor(Number(round.payout_nano)||0);
   if(round.status!=='cashed_out'||!Number.isSafeInteger(payout)||payout<=0)return getUserControls(env,round.user_id);
   return applyGameTonBalanceDelta(env,round.user_id,payout,{kind:'game',title:'Mines reward',referenceId:round.round_id,referenceType:'mines_solo_payout',roundId:round.round_id,metadata:{game:'mines',mineCount:Number(round.mine_count),multiplier:Number(round.multiplier)||1}});
 }
-function soloState(round:SoloMineRound,tonBalanceNano:number){
+function soloState(round:SoloMineRound,tonBalanceNano?:number){
   const revealed=parseNums(round.revealed_cells_json),mines=parseNums(round.mine_cells_json),mineCount=Number(round.mine_count)||3,boardSize=Number(round.board_size)||25,status=String(round.status||'');
   const finished=status==='lost'||status==='cashed_out';
-  return{ok:true,active:status==='active',roundId:round.round_id,status,amountNano:Math.max(1,Number(round.amount_nano)||1),mineCount,boardSize,revealedCells:revealed,revealedCount:revealed.length,multiplier:Math.max(1,Number(round.multiplier)||1),canCollect:status==='active'&&revealed.length>=minSafePicksForCollect(mineCount),payoutNano:Math.max(0,Number(round.payout_nano)||0),tonBalanceNano:Math.max(0,Number(tonBalanceNano)||0),bombs:finished?mines:[]};
+  const payload:Record<string,unknown>={ok:true,active:status==='active',roundId:round.round_id,status,amountNano:Math.max(1,Number(round.amount_nano)||1),mineCount,boardSize,revealedCells:revealed,revealedCount:revealed.length,multiplier:Math.max(1,Number(round.multiplier)||1),canCollect:status==='active'&&revealed.length>=minSafePicksForCollect(mineCount),payoutNano:Math.max(0,Number(round.payout_nano)||0),bombs:finished?mines:[]};
+  if(Number.isFinite(Number(tonBalanceNano)))payload.tonBalanceNano=Math.max(0,Number(tonBalanceNano)||0);
+  return payload;
 }
 function minSafePicksForCollect(mineCount:number){return mineCount<=5?2:1;}
 function soloMineCount(value:unknown){const n=Math.floor(Number(value));return SOLO_MINE_COUNTS.has(n)?n:0;}

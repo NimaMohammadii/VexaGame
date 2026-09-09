@@ -57,6 +57,7 @@ export const PREDICT_ZONE_SECTION = `<section id="predictzone" class="view predi
         <label class="predict-zone-bet-input-wrap"><input class="predict-zone-bet-input" data-predict-bet-input type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /><span class="predict-zone-bet-estimate" data-predict-bet-estimate></span><span class="predict-zone-bet-side"><span class="predict-zone-bet-token">GRAM</span><span class="predict-zone-bet-usd" data-predict-bet-usd>≈ $0.00</span></span></label>
         <div class="predict-zone-bet-presets"><button type="button" data-predict-bet-preset="1">1</button><button type="button" data-predict-bet-preset="5">5</button><button type="button" data-predict-bet-preset="10">10</button><button type="button" data-predict-bet-preset="25">25</button></div>
         <button type="button" class="predict-zone-bet-submit" data-predict-bet-submit>Place prediction</button>
+        <div class="predict-zone-bet-status" data-predict-bet-status role="status" aria-live="polite"></div>
       </div>
     </article>
     <div class="predict-zone-limit-notice" data-predict-limit-notice role="status" aria-live="assertive" aria-hidden="true">

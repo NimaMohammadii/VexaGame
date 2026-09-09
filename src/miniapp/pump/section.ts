@@ -72,36 +72,45 @@ export const PUMP_SECTION = String.raw`
 
   <script>
   (function(){
-    var NANO=1000000000, state='idle', betNano=0, multiplier=1, pumps=0, burstAt=2, scene3d=null;
+    var NANO=1000000000, state='idle', betNano=0, multiplier=1, pumps=0, roundId='', busy=false, scene3d=null;
     function q(id){return document.getElementById(id);}
     function readBalanceNano(){return window.VexaTonBalance&&typeof window.VexaTonBalance.read==='function'?Math.max(0,Math.floor(Number(window.VexaTonBalance.read())||0)):0;}
-    function addBalanceNano(delta){if(window.VexaTonBalance&&typeof window.VexaTonBalance.add==='function')window.VexaTonBalance.add(Math.floor(Number(delta)||0));}
+    function syncBalance(value){var n=Number(value);if(window.VexaTonBalance&&Number.isFinite(n)&&n>=0)window.VexaTonBalance.write(Math.floor(n),0);}
+    function telegramInitData(){var tg=window.Telegram&&window.Telegram.WebApp;return tg?String(tg.initData||''):'';}
+    function requestPump(path,body){var initData=telegramInitData();if(!initData)return Promise.reject(new Error('Open the Mini App inside Telegram'));var payload=Object.assign({initData:initData},body||{});return fetch('/app/api/pump/'+path,{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(payload)}).then(function(response){return response.json().catch(function(){return null;}).then(function(data){if(!response.ok)throw new Error(data&&data.error?data.error:'Pump action failed');return data;});});}
     function toNano(value){var n=Number(String(value||'').replace(',','.'))||0;return Math.max(0,Math.floor(n*NANO));}
     function toTon(nano){var n=Math.max(0,Math.floor(Number(nano)||0))/NANO;return n.toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');}
     function formatMultiplier(value){return(Math.round((Number(value)||1)*100)/100).toFixed(2)+'x';}
-    function hiddenBurstPoint(){
-      var forced=window.VexaGameChance&&typeof window.VexaGameChance.decideWin==='function'?window.VexaGameChance.decideWin():null;
-      if(forced===true)return 24;if(forced===false)return 1.01;
-      var roll=Math.random(),point=1.18+Math.pow(roll,1.9)*6.2;if(Math.random()<.055)point+=4+Math.random()*8;
-      return Math.min(24,Math.round(point*100)/100);
-    }
     function currentBetNano(){var n=toNano(q('pumpBet')&&q('pumpBet').value);return n<1?NANO:n;}
     function setBetNano(nano){var input=q('pumpBet');if(input)input.value=toTon(Math.max(1,Math.floor(Number(nano)||NANO)));}
     function normalizeBet(){var balance=readBalanceNano(),amount=currentBetNano();if(balance>=NANO&&amount>balance)amount=balance;setBetNano(amount);return amount;}
+    function applyRound(data){
+      if(!data)return;
+      if(data.roundId)roundId=String(data.roundId);
+      if(Number.isFinite(Number(data.amountNano))&&Number(data.amountNano)>0){betNano=Math.floor(Number(data.amountNano));setBetNano(betNano);}
+      multiplier=Math.max(1,Number(data.multiplier)||1);pumps=Math.max(0,Math.floor(Number(data.pumps)||0));syncBalance(data.tonBalanceNano);
+      var status=String(data.status||'');state=status==='active'?'playing':status==='popped'?'popped':status==='cashed'?'cashed':'idle';
+    }
     function render(){
       var controls=q('pumpControls'),action=q('pumpAction'),cashout=q('pumpCashout'),input=q('pumpBet'),half=q('pumpHalf'),double=q('pumpDouble'),stage=q('pumpStage'),playing=state==='playing';
       if(controls)controls.classList.toggle('is-playing',playing);
-      if(action){action.textContent=playing?'Pump':'Start';action.classList.toggle('is-playing',playing);}
-      if(cashout){cashout.disabled=!playing||pumps<1;cashout.textContent='Cash Out  '+formatMultiplier(multiplier);}
-      if(input)input.disabled=playing;if(half)half.disabled=playing;if(double)double.disabled=playing;
+      if(action){action.textContent=playing?'Pump':'Start';action.classList.toggle('is-playing',playing);action.disabled=busy;}
+      if(cashout){cashout.disabled=busy||!playing||pumps<1;cashout.textContent='Cash Out  '+formatMultiplier(multiplier);}
+      if(input)input.disabled=busy||playing;if(half)half.disabled=busy||playing;if(double)double.disabled=busy||playing;
       if(stage)stage.classList.toggle('is-burst',state==='popped');
       if(scene3d)scene3d.setState(multiplier,pumps,state);
     }
-    function startRound(){var balance=readBalanceNano();betNano=normalizeBet();if(balance<betNano)return;state='playing';multiplier=1;pumps=0;burstAt=hiddenBurstPoint();addBalanceNano(-betNano);render();}
-    function resetSoon(delay){setTimeout(function(){state='idle';multiplier=1;pumps=0;render();},delay);}
-    function pumpOnce(){if(state!=='playing'){startRound();return;}pumps+=1;multiplier=Math.round((multiplier+.09+multiplier*.085+pumps*.012)*100)/100;if(multiplier>=burstAt){state='popped';render();resetSoon(1250);return;}render();}
-    function cashOut(){if(state!=='playing'||pumps<1)return;addBalanceNano(Math.floor(betNano*multiplier));state='cashed';render();resetSoon(1050);}
-    function multiplyBet(value){if(state==='playing')return;var balance=readBalanceNano(),current=currentBetNano(),next=value<1?Math.max(NANO,Math.floor(current/2)):current*2;if(balance>=NANO)next=Math.min(balance,next);setBetNano(next);}
+    function resetSoon(delay){setTimeout(function(){state='idle';roundId='';betNano=0;multiplier=1;pumps=0;render();},delay);}
+    function startRound(){if(busy)return;var balance=readBalanceNano(),amount=normalizeBet();if(balance<amount)return;busy=true;render();requestPump('start',{amountNano:amount}).then(function(data){applyRound(data);render();}).catch(function(){state='idle';render();}).finally(function(){busy=false;render();});}
+    function pumpOnce(){
+      if(busy)return;if(state!=='playing'){startRound();return;}if(!roundId)return;
+      busy=true;render();requestPump('pump',{roundId:roundId}).then(function(data){applyRound(data);render();if(state==='popped')resetSoon(1250);}).catch(function(){render();}).finally(function(){busy=false;render();});
+    }
+    function cashOut(){
+      if(busy||state!=='playing'||pumps<1||!roundId)return;
+      busy=true;render();requestPump('cashout',{roundId:roundId}).then(function(data){applyRound(data);state='cashed';render();resetSoon(1050);}).catch(function(){render();}).finally(function(){busy=false;render();});
+    }
+    function multiplyBet(value){if(state==='playing'||busy)return;var balance=readBalanceNano(),current=currentBetNano(),next=value<1?Math.max(NANO,Math.floor(current/2)):current*2;if(balance>=NANO)next=Math.min(balance,next);setBetNano(next);}
     function bind(){
       var action=q('pumpAction'),cashout=q('pumpCashout'),half=q('pumpHalf'),double=q('pumpDouble'),input=q('pumpBet');
       if(action&&!action.dataset.pumpBound){action.dataset.pumpBound='1';action.addEventListener('click',pumpOnce);}

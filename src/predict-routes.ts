@@ -5,6 +5,7 @@ import { publishPredictOpsState, publishPredictRoundState, type PredictOpsRealti
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, publicUserControls, setUserSectionBlocked, type UserSectionBlock } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
 import { getSectionAccess, isMiniAppAdmin } from './section-access';
+import { getStarsGramRate } from './stars-deposits';
 import { ensurePredictProviderTables, executePolymarketBitcoinBet, fetchPolymarketBitcoinStartPrice, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
@@ -13,7 +14,6 @@ const CACHE_PREDICT_IMAGE_MANIFEST = 'public, max-age=300, stale-while-revalidat
 const PREDICT_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const TRADE_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const ASTER_FUTURES_REST_BASE = 'https://fapi.asterdex.com';
-const BINANCE_SPOT_REST_BASE = 'https://data-api.binance.vision';
 const ROUND_MS = 5 * 60 * 1000;
 const MONTH_BET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_MS = 0;
@@ -557,11 +557,9 @@ async function fetchPrice(market: TradeMarket): Promise<number> {
   return cleanPrice(data.markPrice);
 }
 async function fetchGramUsdPrice(): Promise<number> {
-  const res = await fetch(`${BINANCE_SPOT_REST_BASE}/api/v3/ticker/price?symbol=GRAMUSDT`, { cf: { cacheTtl: 1, cacheEverything: false } } as RequestInit);
-  if (!res.ok) throw new Error(`Binance GRAM/USD price request failed: HTTP ${res.status}`);
-  const data = await res.json() as { price?: unknown };
-  const price = Number(data.price);
-  if (!Number.isFinite(price) || price <= 0) throw new Error('Binance returned an invalid GRAM/USD price');
+  const rate = await getStarsGramRate();
+  const price = Number(rate.gramUsd);
+  if (!Number.isFinite(price) || price <= 0) throw new Error('Gram/USD price is unavailable');
   return price;
 }
 async function fetchMonthlyBoundaryPrice(market: TradeMarket, boundaryMs: number, boundary: 'start' | 'end'): Promise<number> {

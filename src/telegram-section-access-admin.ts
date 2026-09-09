@@ -151,6 +151,7 @@ export async function sendAdminHome(env: Env, token: string, chatId: number, mes
         { text: '🌍 تنظیمات رجین', callback_data: 'botadmin:regionsettings' },
         { text: '📣 پیام همگانی', callback_data: 'botadmin:askbroadcast' },
       ],
+      [{ text: '📨 ارسال پیام به کانال', callback_data: 'botadmin:channelpost' }],
       [
         { text: '🔐 قفل بخش‌ها', callback_data: 'botadmin:access:list' },
         { text: '👥 Online Counts', callback_data: 'botadmin:online:list' },

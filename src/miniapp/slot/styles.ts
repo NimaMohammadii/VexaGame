@@ -488,10 +488,10 @@ body:has(#slot.active) header.top{
 }
 #slot .slot-asset-button:disabled{opacity:.48!important;cursor:default!important;filter:saturate(.55)!important}
 
-/* Slot keeps its uploaded control assets available for testing; this is the Crash control layout. */
-#slot .slot-simple-controls{width:min(92vw,390px)!important;margin:42px auto 0!important;display:grid!important;gap:10px!important;justify-items:stretch!important}
+/* Exact material from Home's Lottery ticket card, applied to Slot's existing controls. */
+#slot .slot-simple-controls{width:min(82vw,320px)!important;margin:42px auto 0!important;display:grid!important;gap:10px!important;justify-items:stretch!important}
 #slot .slot-simple-bet-row{grid-template-columns:.58fr 1.84fr .58fr!important;gap:7px!important;align-items:center!important}
-#slot .slot-asset-button,#slot .slot-asset-input{height:38px!important;border-radius:28px!important;background:#080808!important;color:#fff!important;box-shadow:0 12px 30px rgba(31,1,10,.32),0 0 18px rgba(69,5,26,.15),inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(156,38,70,.48),inset 1px 1px 1px -.5px rgba(140,29,61,.30),inset -1px -1px 1px -.5px rgba(124,22,53,.24),inset 0 0 6px 6px rgba(255,255,255,.055),inset 0 0 2px 2px rgba(255,255,255,.035)!important;overflow:hidden!important}
+#slot .slot-asset-button,#slot .slot-asset-input{height:38px!important;border-radius:28px!important;background:radial-gradient(34px 34px at 0 0,rgba(186,53,87,.16),rgba(104,18,44,0) 76%),radial-gradient(36px 36px at 100% 100%,rgba(172,46,79,.15),rgba(94,16,39,0) 78%),radial-gradient(118% 76% at 10% -16%,rgba(255,255,255,.12),rgba(255,255,255,0) 58%),#000!important;color:#fff!important;box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(156,38,70,.48),inset 1px 1px 1px -.5px rgba(140,29,61,.30),inset -1px -1px 1px -.5px rgba(124,22,53,.24),inset 0 0 6px 6px rgba(255,255,255,.055),inset 0 0 2px 2px rgba(255,255,255,.035)!important;backdrop-filter:blur(22px) saturate(1.4) brightness(1.05)!important;-webkit-backdrop-filter:blur(22px) saturate(1.4) brightness(1.05)!important;overflow:hidden!important}
 #slot .slot-asset-button img,#slot .slot-asset-input img{display:none!important}
 #slot .slot-asset-step{width:100%!important;height:38px!important;border-radius:28px!important;transform:none!important}
 #slot #slotBetMinus,#slot #slotBetPlus{--slot-step-x:0px!important}

@@ -112,13 +112,13 @@ export class MinesSoloRoundRoom {
     }
 
     if (request.method === 'POST' && url.pathname === '/reserve-collect') {
-      const body = await request.json().catch(() => null) as { roundId?: unknown; minSafePicks?: unknown } | null;
+      const body = await request.json().catch(() => null) as { roundId?: unknown } | null;
       const roundId = cleanId(body?.roundId);
-      const minSafePicks = Math.max(1, Math.floor(Number(body?.minSafePicks) || 1));
       const current = await this.state.storage.get<StoredRound>(ROUND_KEY).catch(() => null);
       if (!current || current.roundId !== roundId) return Response.json({ error: 'Round not found' }, { status: 404 });
       if (current.status === 'lost') return Response.json({ error: 'Round already ended' }, { status: 409 });
       if (current.status === 'cashed_out' || current.status === 'collecting') return Response.json(toRuntimeState(current));
+      const minSafePicks = current.mineCount <= 5 ? 2 : 1;
       if (current.revealedCells.length < minSafePicks) {
         return Response.json({ error: 'Open more safe tiles before collecting' }, { status: 409 });
       }
@@ -181,8 +181,8 @@ export async function revealMinesSoloRuntime(env: Env, userId: string, roundId: 
   return runtimeRequest(env, userId, '/reveal', { roundId, cell });
 }
 
-export async function reserveMinesSoloCollect(env: Env, userId: string, roundId: string, minSafePicks: number): Promise<MinesSoloRuntimeState> {
-  return runtimeRequest(env, userId, '/reserve-collect', { roundId, minSafePicks });
+export async function reserveMinesSoloCollect(env: Env, userId: string, roundId: string, _minSafePicks: number): Promise<MinesSoloRuntimeState> {
+  return runtimeRequest(env, userId, '/reserve-collect', { roundId });
 }
 
 export async function rollbackMinesSoloCollect(env: Env, userId: string, roundId: string): Promise<void> {

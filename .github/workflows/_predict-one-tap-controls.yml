@@ -1,0 +1,72 @@
+name: Apply Predict one-tap controls once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply Predict one-tap controls patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Patch authoritative Predict UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, zlib
+          exec(zlib.decompress(base64.b64decode("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" )).decode("utf-8"))
+          PY
+          git diff --check -- src/miniapp/predict-zone.ts
+          test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
+
+      - name: Validate generated Predict browser script
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const src = fs.readFileSync('src/miniapp/predict-zone.ts', 'utf8');
+          const marker = 'export const PREDICT_ZONE_SCRIPT = `';
+          const start = src.indexOf(marker);
+          if (start < 0) throw new Error('PREDICT_ZONE_SCRIPT marker missing');
+          const bodyStart = start + marker.length;
+          const end = src.indexOf('\n`;', bodyStart);
+          if (end < 0) throw new Error('PREDICT_ZONE_SCRIPT end missing');
+          const raw = src.slice(bodyStart, end);
+          const cooked = Function('PREDICT_ERROR_TEXTS', 'return `' + raw + '`;')({ en: {} });
+          new Function(cooked);
+          if (src.includes('data-predict-bet-submit') || src.includes('data-predict-bet-input') || src.includes('function openBet(') || src.includes('function closeBet(')) {
+            throw new Error('Legacy Predict bet form path still present');
+          }
+          const section = src.split('export const PREDICT_ZONE_STYLES', 1)[0];
+          const presetCount = (section.match(/data-predict-bet-preset="/g) || []).length;
+          if (presetCount !== 3) throw new Error('Expected exactly three amount buttons, got ' + presetCount);
+          if (!src.includes("function submitBet(amountValue)") || !src.includes("'/app/api/predict-bet'")) {
+            throw new Error('Direct submit path or existing backend route missing');
+          }
+          console.log('Predict browser script parse + one-tap invariants: OK');
+          NODE
+
+      - name: Commit only Predict UI and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/_predict-one-tap-controls.yml
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --check
+          git commit -m "Simplify Predict to one-tap amount betting"
+          git push origin HEAD:main

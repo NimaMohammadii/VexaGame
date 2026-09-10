@@ -26,6 +26,7 @@ import type { TonWithdrawal } from './ton-withdrawals';
 export { SectionLockEvents } from './section-lock-events';
 export { LiveActivityRoom } from './live-activity';
 export { LotteryScheduler } from './lottery';
+export { MinesSoloRoundRoom } from './mines-solo-runtime';
 
 export { PlinkoLiveRoom } from './plinko-live';
 

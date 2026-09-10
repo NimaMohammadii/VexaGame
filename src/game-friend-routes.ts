@@ -9,6 +9,12 @@ type SoloMineRound = { user_id:string; round_id:string; status:string; amount_na
 
 const SOLO_RTP = 0.92;
 const SOLO_MINE_COUNTS = new Set([3, 5, 7, 10]);
+const SOLO_MULTIPLIER_CURVES:Record<number,readonly number[]> = {
+  3:[1.05,1.09,1.15,1.22,1.37],
+  5:[1.15,1.21,1.36,1.45],
+  7:[1.28,1.49,1.89,2.30,2.77,3.80],
+  10:[1.35,1.50,1.70,1.95,2.30,2.75,3.35,4.15,5.25,6.80,9.20,13.00,20.00,38.00,95.00],
+};
 let minesTablesReady: Promise<void> | null = null;
 
 export function registerFriendGameRoutes(app: App): void {
@@ -328,7 +334,8 @@ async function settleSoloPayout(env:Env,round:SoloMineRound){
 function soloState(round:SoloMineRound,tonBalanceNano?:number){
   const revealed=parseNums(round.revealed_cells_json),mines=parseNums(round.mine_cells_json),mineCount=Number(round.mine_count)||3,boardSize=Number(round.board_size)||25,status=String(round.status||'');
   const finished=status==='lost'||status==='cashed_out';
-  const payload:Record<string,unknown>={ok:true,active:status==='active',roundId:round.round_id,status,amountNano:Math.max(1,Number(round.amount_nano)||1),mineCount,boardSize,revealedCells:revealed,revealedCount:revealed.length,multiplier:Math.max(1,Number(round.multiplier)||1),canCollect:status==='active'&&revealed.length>=minSafePicksForCollect(mineCount),payoutNano:Math.max(0,Number(round.payout_nano)||0),bombs:finished?mines:[]};
+  const multiplier=status==='active'?soloMultiplier(mineCount,revealed.length,boardSize):Math.max(1,Number(round.multiplier)||1);
+  const payload:Record<string,unknown>={ok:true,active:status==='active',roundId:round.round_id,status,amountNano:Math.max(1,Number(round.amount_nano)||1),mineCount,boardSize,revealedCells:revealed,revealedCount:revealed.length,multiplier,canCollect:status==='active'&&revealed.length>=minSafePicksForCollect(mineCount),payoutNano:Math.max(0,Number(round.payout_nano)||0),bombs:finished?mines:[]};
   if(Number.isFinite(Number(tonBalanceNano)))payload.tonBalanceNano=Math.max(0,Number(tonBalanceNano)||0);
   return payload;
 }
@@ -336,10 +343,17 @@ function minSafePicksForCollect(mineCount:number){return mineCount<=5?2:1;}
 function soloMineCount(value:unknown){const n=Math.floor(Number(value));return SOLO_MINE_COUNTS.has(n)?n:0;}
 function soloAmount(value:unknown,mineCount:number){const amount=Math.floor(Number(value));if(!Number.isSafeInteger(amount)||amount<=0)return 0;const maxMultiplier=soloMultiplier(mineCount,25-mineCount,25),maxAmount=Math.floor(Number.MAX_SAFE_INTEGER/maxMultiplier);return amount<=maxAmount?amount:0;}
 function soloPayout(amount:number,multiplier:number){const payout=Math.floor(amount*multiplier);if(!Number.isSafeInteger(payout)||payout<=0)throw new Error('Invalid Mines payout');return payout;}
+function probabilityMultiplier(mineCount:number,picks:number,size:number){
+  let probability=1;for(let i=0;i<picks;i++)probability*=((size-mineCount-i)/(size-i));
+  return probability>0?Math.max(1,SOLO_RTP/probability):1;
+}
 function soloMultiplier(mineCount:number,picks:number,size:number){
   const safePicks=Math.max(0,Math.min(Math.floor(Number(picks)||0),size-mineCount));if(!safePicks)return 1;
-  let probability=1;for(let i=0;i<safePicks;i++)probability*=((size-mineCount-i)/(size-i));
-  return probability>0?Math.max(1,SOLO_RTP/probability):1;
+  const curve=SOLO_MULTIPLIER_CURVES[mineCount];if(!curve||!curve.length)return probabilityMultiplier(mineCount,safePicks,size);
+  if(safePicks<=curve.length)return curve[safePicks-1];
+  const anchorPicks=curve.length,anchor=curve[anchorPicks-1],baseAtAnchor=probabilityMultiplier(mineCount,anchorPicks,size),baseAtPicks=probabilityMultiplier(mineCount,safePicks,size);
+  if(baseAtAnchor<=0)return anchor;
+  return Math.max(anchor,Math.round((anchor*(baseAtPicks/baseAtAnchor))*100)/100);
 }
 function friendAmount(value:unknown){const amount=Math.floor(Number(value));return Number.isSafeInteger(amount)&&amount>0&&amount<=Math.floor(Number.MAX_SAFE_INTEGER/2)?amount:0;}
 async function mineRoom(env:Env,id:string){await ensureTables(env);return env.DB.prepare('SELECT * FROM mines_friend_rooms WHERE id=?').bind(id).first<MineRoom>();}

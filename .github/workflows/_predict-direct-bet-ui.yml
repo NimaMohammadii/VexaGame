@@ -1,0 +1,197 @@
+name: Predict direct bet UI patch
+
+on:
+  push:
+    branches: [predict-direct-bet-ui]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Prepare Predict direct bet UI patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Rewrite existing Predict bet controls only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p=Path('src/miniapp/predict-zone.ts')
+          s=p.read_text(encoding='utf-8')
+
+          def rep(old,new,label):
+              global s
+              count=s.count(old)
+              if count!=1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              s=s.replace(old,new,1)
+
+          old_markup='''      <div class="predict-zone-actions">\n        <button type="button" class="predict-zone-choice predict-zone-choice-up" data-predict-choice="up"><span class="predict-zone-choice-symbol" aria-hidden="true">↑</span><span>Up</span></button>\n        <button type="button" class="predict-zone-choice predict-zone-choice-down" data-predict-choice="down"><span class="predict-zone-choice-symbol" aria-hidden="true">↓</span><span>Down</span></button>\n      </div>\n      <div class="predict-zone-bet-stage" data-predict-bet-stage aria-hidden="true">\n        <label class="predict-zone-bet-input-wrap"><input class="predict-zone-bet-input" data-predict-bet-input type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" /><span class="predict-zone-bet-estimate" data-predict-bet-estimate></span><span class="predict-zone-bet-side"><span class="predict-zone-bet-token">GRAM</span><span class="predict-zone-bet-usd" data-predict-bet-usd>≈ $0.00</span></span></label>\n        <div class="predict-zone-bet-presets"><button type="button" data-predict-bet-preset="1">1</button><button type="button" data-predict-bet-preset="5">5</button><button type="button" data-predict-bet-preset="10">10</button><button type="button" data-predict-bet-preset="25">25</button></div>\n        <button type="button" class="predict-zone-bet-submit" data-predict-bet-submit>Place prediction</button>\n        <div class="predict-zone-bet-status" data-predict-bet-status role="status" aria-live="polite"></div>\n      </div>'''
+          new_markup='''      <div class="predict-zone-bet-status" data-predict-bet-status role="status" aria-live="polite"></div>\n      <div class="predict-zone-bet-presets" data-predict-bet-presets>\n        <span class="predict-zone-bet-preset-slot"><button type="button" data-predict-bet-preset="1">1</button><input data-predict-bet-preset-input="0" type="number" min="0.01" step="0.01" inputmode="decimal" value="1" aria-label="Edit first prediction amount" /></span>\n        <span class="predict-zone-bet-preset-slot"><button type="button" data-predict-bet-preset="5">5</button><input data-predict-bet-preset-input="1" type="number" min="0.01" step="0.01" inputmode="decimal" value="5" aria-label="Edit second prediction amount" /></span>\n        <span class="predict-zone-bet-preset-slot"><button type="button" data-predict-bet-preset="10">10</button><input data-predict-bet-preset-input="2" type="number" min="0.01" step="0.01" inputmode="decimal" value="10" aria-label="Edit third prediction amount" /></span>\n        <button type="button" class="predict-zone-bet-edit" data-predict-bet-edit>Edit</button>\n      </div>\n      <div class="predict-zone-actions">\n        <button type="button" class="predict-zone-choice predict-zone-choice-up" data-predict-choice="up" aria-pressed="false"><span class="predict-zone-choice-symbol" aria-hidden="true">↑</span><span>Up</span></button>\n        <button type="button" class="predict-zone-choice predict-zone-choice-down" data-predict-choice="down" aria-pressed="false"><span class="predict-zone-choice-symbol" aria-hidden="true">↓</span><span>Down</span></button>\n      </div>'''
+          rep(old_markup,new_markup,'bet markup')
+
+          lines=s.splitlines()
+          out=[]
+          seen={}
+          def mark(key): seen[key]=seen.get(key,0)+1
+          for line in lines:
+              if line.startswith('.predict-zone-glass-card{'):
+                  line=line.replace('height:432px!important;min-height:0!important;','height:auto!important;min-height:486px!important;')
+                  mark('card')
+              elif line.startswith('.predict-zone-decision-head{'):
+                  line=line.replace('.predict-zone-choice{position:relative!important;overflow:hidden!important;height:42px!important;padding:0 14px!important;border:0!important;border-radius:28px!important;', '.predict-zone-choice{position:relative!important;overflow:hidden!important;height:44px!important;padding:0 14px!important;border:0!important;border-radius:16px!important;')
+                  out.append(line)
+                  out.append('.predict-zone-choice.selected{filter:brightness(1.14) saturate(1.04)!important;box-shadow:0 12px 30px rgba(31,1,10,.28),inset 0 0 0 1px rgba(255,255,255,.18),inset 0 1px 0 rgba(255,255,255,.12)!important}')
+                  mark('choice')
+                  continue
+              elif line.startswith('.predict-zone-bet-estimate:not('):
+                  mark('estimate_css')
+                  continue
+              elif line.startswith('.predict-zone-bet-presets button:not('):
+                  out.append('.predict-zone-bet-presets button{font-family:inherit!important;font-weight:800!important;letter-spacing:-.01em!important;font-variant-numeric:tabular-nums!important}')
+                  mark('preset_font')
+                  continue
+              elif line.startswith('.predict-zone-bet-stage{') or line.startswith('.predict-zone-bet-input-wrap{') or line.startswith('.predict-zone-bet-input{'):
+                  mark('old_bet_css')
+                  continue
+              elif line.startswith('.predict-zone-bet-presets{'):
+                  out.extend([
+                    '.predict-zone-bet-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 58px;gap:7px;margin:0 0 9px;align-items:stretch}',
+                    '.predict-zone-bet-preset-slot{position:relative;display:block;min-width:0;height:42px}.predict-zone-bet-preset-slot>button,.predict-zone-bet-preset-slot>input,.predict-zone-bet-edit{width:100%!important;height:42px!important;box-sizing:border-box!important;border:0!important;outline:0!important;border-radius:15px!important;color:#fff!important;font-family:ui-rounded,"SF Pro Rounded","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;font-size:12px!important;font-weight:800!important;text-align:center!important;font-variant-numeric:tabular-nums!important;-webkit-tap-highlight-color:transparent!important;transition:transform .16s ease,opacity .16s ease,background .16s ease,filter .16s ease!important}',
+                    '.predict-zone-bet-preset-slot>button{padding:0 7px!important;background:radial-gradient(34px 34px at 0 0,rgba(186,53,87,.14) 0%,rgba(146,35,66,.06) 42%,rgba(104,18,44,0) 76%),radial-gradient(118% 76% at 10% -16%,rgba(255,255,255,.11) 0%,rgba(255,255,255,.03) 30%,rgba(255,255,255,0) 58%),rgba(24,7,13,.64)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),inset 0 -1px 0 rgba(255,255,255,.04)!important}.predict-zone-bet-preset-slot>button:active,.predict-zone-bet-edit:active{transform:scale(.95)!important}.predict-zone-bet-preset-slot>button:disabled{opacity:.36!important;transform:none!important}',
+                    '.predict-zone-bet-preset-slot>input{display:none;padding:0 5px!important;background:rgba(255,255,255,.07)!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)!important;appearance:textfield}.predict-zone-bet-preset-slot>input::-webkit-outer-spin-button,.predict-zone-bet-preset-slot>input::-webkit-inner-spin-button{appearance:none;margin:0}.predict-zone-bet-presets.is-editing .predict-zone-bet-preset-slot>button{display:none!important}.predict-zone-bet-presets.is-editing .predict-zone-bet-preset-slot>input{display:block!important}',
+                    '.predict-zone-bet-edit{padding:0 8px!important;background:rgba(255,255,255,.045)!important;color:rgba(255,255,255,.55)!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)!important;font-size:10.5px!important;font-weight:760!important}.predict-zone-bet-edit:disabled{opacity:.35!important}.predict-zone-bet-presets.is-editing .predict-zone-bet-edit{color:rgba(255,255,255,.82)!important;background:rgba(255,255,255,.07)!important}',
+                    '.predict-zone-bet-status{display:block;min-height:0;margin:0 4px 7px;text-align:center;color:rgba(255,255,255,.42);font-size:10px;font-weight:760;line-height:1.35}.predict-zone-bet-status:empty{display:none}.predict-zone-bet-status.bad{color:rgba(255,160,160,.9)}.predict-zone-bet-status.good{color:rgba(185,255,210,.9)}'
+                  ])
+                  mark('preset_css')
+                  continue
+              elif line.startswith('.predict-zone-glass-card.bet-transition') or line.startswith('.predict-zone-glass-card.bet-mode') or line.startswith('html body:has(#predictzone.predict-zone-keyboard-open.active)'):
+                  mark('old_mode_css')
+                  continue
+              elif line.startswith('@media(max-width:380px){'):
+                  line=line.replace('.predict-zone-glass-card{height:408px!important;min-height:0!important;', '.predict-zone-glass-card{height:auto!important;min-height:448px!important;')
+                  line=line.replace('.predict-zone-actions{max-height:40px}', '.predict-zone-actions{max-height:42px}')
+                  line=line.replace('.predict-zone-choice{height:40px!important;font-size:12.5px!important}', '.predict-zone-choice{height:42px!important;font-size:12.5px!important}')
+                  mark('media')
+              elif line.startswith('@media(prefers-reduced-motion:reduce){'):
+                  line=line.replace(',.predict-zone-bet-stage,.predict-zone-bet-presets button,.predict-zone-bet-submit', ',.predict-zone-bet-presets button,.predict-zone-bet-preset-slot>input,.predict-zone-bet-edit')
+                  mark('reduced_motion')
+              out.append(line)
+          s='\n'.join(out)+'\n'
+          if seen.get('card')!=1 or seen.get('choice')!=1 or seen.get('estimate_css')!=1 or seen.get('preset_font')!=1 or seen.get('preset_css')!=1 or seen.get('media')!=1 or seen.get('reduced_motion')!=1:
+              raise SystemExit('CSS anchors mismatch: '+repr(seen))
+          if seen.get('old_bet_css')!=3 or seen.get('old_mode_css')!=3:
+              raise SystemExit('old CSS removal mismatch: '+repr(seen))
+
+          rep("balanceNano=0,balanceKnown=false,gramUsd=0,side='up',busy=false", "balanceNano=0,balanceKnown=false,gramUsd=0,side='',busy=false", 'initial side')
+          rep("    var betStage=root.querySelector('[data-predict-bet-stage]'),betInput=root.querySelector('[data-predict-bet-input]'),betUsd=root.querySelector('[data-predict-bet-usd]'),betEstimate=root.querySelector('[data-predict-bet-estimate]'),betStatus=root.querySelector('[data-predict-bet-status]'),betSubmit=root.querySelector('[data-predict-bet-submit]'),eventSummary=root.querySelector('[data-predict-event-summary]'),eventSource=root.querySelector('[data-predict-event-source]'),eventYes=root.querySelector('[data-predict-event-yes]'),eventNo=root.querySelector('[data-predict-event-no]'),startLabel=root.querySelector('.predict-zone-live-meta>div:first-child span'),liveLabel=root.querySelector('.predict-zone-live-cell span'),limitNotice=root.querySelector('[data-predict-limit-notice]'),limitTitle=root.querySelector('[data-predict-limit-title]'),limitMessage=root.querySelector('[data-predict-limit-message]');", "    var betStatus=root.querySelector('[data-predict-bet-status]'),presetRow=root.querySelector('[data-predict-bet-presets]'),presetEdit=root.querySelector('[data-predict-bet-edit]'),eventSummary=root.querySelector('[data-predict-event-summary]'),eventSource=root.querySelector('[data-predict-event-source]'),eventYes=root.querySelector('[data-predict-event-yes]'),eventNo=root.querySelector('[data-predict-event-no]'),startLabel=root.querySelector('.predict-zone-live-meta>div:first-child span'),liveLabel=root.querySelector('.predict-zone-live-cell span'),limitNotice=root.querySelector('[data-predict-limit-notice]'),limitTitle=root.querySelector('[data-predict-limit-title]'),limitMessage=root.querySelector('[data-predict-limit-message]');", 'bet refs')
+          rep("    var betOpen=false,betCloseTimer=0,keyboardCloseTimer=0,betAnimationTimer=0,limitNoticeTimer=0,countdownAnimations=[]", "    var presetEditing=false,presetValues=[1,5,10],limitNoticeTimer=0,countdownAnimations=[]", 'bet state')
+          rep("PREDICT_IMAGE_META_TTL=300000,imageSources={},imageObjectUrls={};", "PREDICT_IMAGE_META_TTL=300000,PREDICT_PRESET_KEY='vexaPredictBetPresets:v1',imageSources={},imageObjectUrls={};", 'preset key')
+          rep("    function setChoiceLabels(events){root.querySelectorAll('[data-predict-choice]').forEach(function(btn){var isFirst=btn.getAttribute('data-predict-choice')==='up'||btn.getAttribute('data-predict-choice')==='yes',label=btn.querySelector('span:last-child');btn.setAttribute('data-predict-choice',events?(isFirst?'yes':'no'):(isFirst?'up':'down'));if(label)label.textContent=events?(isFirst?'Yes':'No'):(isFirst?'Up':'Down')});if(!events)renderPolymarketChoicePrices()}", "    function syncChoiceSelection(){root.querySelectorAll('[data-predict-choice]').forEach(function(btn){var selected=!!side&&btn.getAttribute('data-predict-choice')===side;btn.classList.toggle('selected',selected);btn.setAttribute('aria-pressed',selected?'true':'false')})}\n    function setChoiceLabels(events){root.querySelectorAll('[data-predict-choice]').forEach(function(btn){var isFirst=btn.getAttribute('data-predict-choice')==='up'||btn.getAttribute('data-predict-choice')==='yes',label=btn.querySelector('span:last-child');btn.setAttribute('data-predict-choice',events?(isFirst?'yes':'no'):(isFirst?'up':'down'));if(label)label.textContent=events?(isFirst?'Yes':'No'):(isFirst?'Up':'Down')});syncChoiceSelection();if(!events)renderPolymarketChoicePrices()}", 'choice selection')
+          rep("    function formatEstimate(v){return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:8})}\n    function formatPresetWin(v){var n=Number(v);if(!isFinite(n)||n<=0)return'—';return n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}\n", '', 'old formatters')
+          rep("    function syncBetAvailability(){var reason=currentBetBlockReason(),visible=visibleBetBlockReason(reason);root.querySelectorAll('button[data-predict-choice]').forEach(function(btn){btn.disabled=!!reason&&reason!=='Add GRAM to predict'});if(visible&&trendLabel)trendLabel.textContent=visible}", "    function syncBetAvailability(){var reason=currentBetBlockReason(),visible=visibleBetBlockReason(reason);root.querySelectorAll('button[data-predict-choice]').forEach(function(btn){btn.disabled=busy||(!!reason&&reason!=='Add GRAM to predict')});root.querySelectorAll('button[data-predict-bet-preset]').forEach(function(btn){btn.disabled=busy||!!reason||!side});if(presetEdit)presetEdit.disabled=busy;syncChoiceSelection();if(visible&&trendLabel)trendLabel.textContent=visible}", 'availability')
+
+          rep("    function resetPresetLabels(){root.querySelectorAll('[data-predict-bet-preset]').forEach(function(btn){btn.textContent=String(btn.getAttribute('data-predict-bet-preset')||'')})}", "    function formatPresetAmount(value){var n=Number(value);if(!isFinite(n)||n<=0)return'';return String(Number(n.toFixed(4)))}\n    function readPresetValues(){try{var saved=JSON.parse(localStorage.getItem(PREDICT_PRESET_KEY)||'null');if(Array.isArray(saved)&&saved.length===3){var next=saved.map(Number);if(next.every(function(v){return isFinite(v)&&v>0}))return next}}catch(e){}return[1,5,10]}\n    function savePresetValues(){try{localStorage.setItem(PREDICT_PRESET_KEY,JSON.stringify(presetValues))}catch(e){}}\n    function resetPresetLabels(){root.querySelectorAll('[data-predict-bet-preset]').forEach(function(btn,index){var amount=presetValues[index]||[1,5,10][index],value=formatPresetAmount(amount);if(btn.getAttribute('data-predict-bet-preset')!==value)btn.setAttribute('data-predict-bet-preset',value);if(btn.textContent!==value)btn.textContent=value});if(!presetEditing)root.querySelectorAll('[data-predict-bet-preset-input]').forEach(function(input,index){input.value=formatPresetAmount(presetValues[index]||[1,5,10][index])})}\n    function setPresetEditing(open){var next=!!open;if(!presetRow)return;if(next){presetEditing=true;resetPresetLabels();presetRow.classList.add('is-editing');if(presetEdit)presetEdit.textContent='Done';var first=root.querySelector('[data-predict-bet-preset-input=\"0\"]');if(first){try{first.focus({preventScroll:false});first.select()}catch(e){try{first.focus()}catch(_){}}}return}var values=[],valid=true;root.querySelectorAll('[data-predict-bet-preset-input]').forEach(function(input){var n=Number(input.value);if(!isFinite(n)||n<=0)valid=false;values.push(n)});if(!valid){setStatus(predictText('validAmount'),'bad');return}presetValues=values.map(function(v){return Number(Number(v).toFixed(4))});savePresetValues();presetEditing=false;presetRow.classList.remove('is-editing');if(presetEdit)presetEdit.textContent='Edit';var active=document.activeElement;if(active&&active.matches&&active.matches('[data-predict-bet-preset-input]'))try{active.blur()}catch(e){}setStatus('','');resetPresetLabels();syncBetAvailability()}\n    function cancelPresetEditing(){if(!presetEditing||!presetRow)return;presetEditing=false;presetRow.classList.remove('is-editing');if(presetEdit)presetEdit.textContent='Edit';var active=document.activeElement;if(active&&active.matches&&active.matches('[data-predict-bet-preset-input]'))try{active.blur()}catch(e){}resetPresetLabels()}", 'preset controls')
+
+          lines=s.splitlines()
+          out=[]
+          removed={}
+          for line in lines:
+              if line.startswith('    function polymarketQuoteFor('): removed['poly']=removed.get('poly',0)+1; continue
+              if line.startswith('    function renderPresetQuotes('): removed['preset_quote']=removed.get('preset_quote',0)+1; continue
+              if line.startswith('    function renderBetEstimateQuote('): removed['estimate_quote']=removed.get('estimate_quote',0)+1; continue
+              if line.startswith('    function estimate('): removed['estimate']=removed.get('estimate',0)+1; continue
+              if line.startswith('    function updateEstimate('):
+                  out.append("    function updateEstimate(){var liveGramUsd=readGramUsd();if(liveGramUsd>0)gramUsd=liveGramUsd;resetPresetLabels()}")
+                  removed['update_estimate']=removed.get('update_estimate',0)+1
+                  continue
+              if line.startswith('    function finishBetClose(') or line.startswith('    function runBetTransition(') or line.startswith('    function setKeyboardOpen(') or line.startswith('    function focusBetInput(') or line.startswith('    function closeBet('):
+                  removed['old_bet_fn']=removed.get('old_bet_fn',0)+1
+                  continue
+              if line.startswith('    function openBet('):
+                  out.append("    function selectSide(nextSide){var blocked=currentBetBlockReason();if(blocked){if(blocked==='Add GRAM to predict')openCreditWallet(predictText('insufficient'));if(trendLabel)trendLabel.textContent=visibleBetBlockReason(blocked)||'Waiting for price';return}side=eventMode?(nextSide==='no'?'no':'yes'):(nextSide==='down'?'down':'up');setStatus('','');syncChoiceSelection();updateEstimate();syncBetAvailability()}")
+                  removed['open_bet']=removed.get('open_bet',0)+1
+                  continue
+              if line.startswith('    function submitBet(){'):
+                  out.append("    function submitBet(amount){if(busy)return;amount=Number(amount||0);var id=uid(),initData=telegramInitData(),blocked=currentBetBlockReason();if(blocked){if(blocked==='Add GRAM to predict')openCreditWallet(predictText('insufficient'));setStatus(visibleBetBlockReason(blocked)||predictText('generic'),'bad');return}if(!side){setStatus(predictText('chooseSide'),'bad');return}if(!id||!initData){setStatus(predictText('openTelegram'),'bad');return}if(!amount||amount<=0){setStatus(predictText('validAmount'),'bad');return}if(Math.floor(amount*1000000000)>balanceNano){setStatus(predictText('insufficient'),'bad');openCreditWallet(predictText('insufficient'));return}busy=true;syncBetAvailability();setStatus('Checking balance...','');fetch(eventMode?'/app/api/prediction-events/bet':'/app/api/predict-bet',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(eventMode?{userId:id,initData:initData,eventId:currentEvent&&currentEvent.id,pick:side,stakeTon:amount}:{userId:id,initData:initData,market:market,side:side,stakeTon:amount,tonUsdSnapshot:readGramUsd()||gramUsd})}).then(function(r){return r.json().then(function(j){return{ok:r.ok,json:j}})}).then(function(x){if(!x.ok||!x.json||x.json.ok===false)throw new Error((x.json&&x.json.error)||'Could not place prediction');updateBalance(x.json);side='';syncChoiceSelection();updateEstimate();setStatus('Prediction placed.','good');if(eventMode&&x.json.event){renderEvent(x.json.event)}else if(x.json.round&&x.json.round.round){currentRound=x.json.round.round;roundLockDeadline=Date.now()+Math.max(0,Number(currentRound.lockRemainingMs||0));syncQuoteFeed(currentRound);renderHistory(currentRound);renderRoundMeta(currentRound);if(market!=='bitcoin')renderMarketPeriod(currentRound);syncBetAvailability();syncTrend()}}).catch(function(e){var rawMessage=e&&e.message?String(e.message):'Could not place prediction.',message=friendlyPredictError(rawMessage),regionError=isPredictRegionError(rawMessage);if(String(rawMessage).toLowerCase().indexOf('insufficient balance')!==-1)openCreditWallet(message);if(isBetLimitMessage(rawMessage))showBetLimitNotice(rawMessage,message);if(regionError){setStatus('','');setRegionSheet(true,message)}else setStatus(message,'bad')}).finally(function(){busy=false;syncBetAvailability()})}")
+                  removed['submit']=removed.get('submit',0)+1
+                  continue
+              if line.startswith('    function stopQuoteFeed('):
+                  line=line.replace(";resetPresetLabels();if(betEstimate&&market==='bitcoin'&&priceProvider==='polymarket')betEstimate.textContent=''", ';resetPresetLabels()')
+              if line.startswith('    function selectEventCategory('):
+                  line=line.replace('market=category;eventMode=true;currentEvent=null', "market=category;eventMode=true;side='';syncChoiceSelection();currentEvent=null")
+              if line.startswith('    function selectMarket('):
+                  line=line.replace('market=id;eventMode=false;currentEvent=null', "market=id;eventMode=false;side='';syncChoiceSelection();currentEvent=null")
+              if line.startswith('    function applyMarketAccess('):
+                  line=line.replace('stopClock();closeBet(true);currentRound=null','stopClock();cancelPresetEditing();currentRound=null')
+              if line.startswith('    function suspend('):
+                  line=line.replace('freezeChartTimeline();stopClock();pauseQuoteFeed();stopFeed();setKeyboardOpen(false);closeBet(true)','freezeChartTimeline();stopClock();pauseQuoteFeed();stopFeed();cancelPresetEditing()')
+              if line.startswith("    root.addEventListener('input',function(e){if(e.target===betInput)") or line.startswith("    root.addEventListener('focusin',function(e){if(e.target===betInput)") or line.startswith("    root.addEventListener('focusout',function(e){if(e.target!==betInput)"):
+                  removed['old_handlers']=removed.get('old_handlers',0)+1
+                  continue
+              if line.startswith("    root.addEventListener('click',function(e){var target=e.target;if(!target)return;var preset="):
+                  out.append("    root.addEventListener('keydown',function(e){var input=e.target&&e.target.closest&&e.target.closest('[data-predict-bet-preset-input]');if(input&&e.key==='Enter'){e.preventDefault();setPresetEditing(false)}},true);")
+                  out.append("    root.addEventListener('click',function(e){var target=e.target;if(!target)return;var edit=target.closest&&target.closest('[data-predict-bet-edit]');if(edit){e.preventDefault();setPresetEditing(!presetEditing);return}var choice=target.closest&&target.closest('[data-predict-choice]');if(choice){e.preventDefault();selectSide(choice.getAttribute('data-predict-choice'));return}var preset=target.closest&&target.closest('[data-predict-bet-preset]');if(preset){e.preventDefault();submitBet(preset.getAttribute('data-predict-bet-preset'));return}},true);")
+                  removed['click_handler']=removed.get('click_handler',0)+1
+                  continue
+              if line.startswith("    document.addEventListener('click',function(e){"):
+                  line=line.replace("if(historyBackdrop&&target===historyBackdrop){e.preventDefault();setHistoryDrawer(false);return}if(betOpen&&card&&target&&!card.contains(target))closeBet()", "if(historyBackdrop&&target===historyBackdrop){e.preventDefault();setHistoryDrawer(false);return}")
+              if line.startswith('    window.VexaPredictBack=function(){'):
+                  line="    window.VexaPredictBack=function(){if(regionPanel&&regionPanel.classList.contains('is-open')){setRegionSheet(false);return true}if(historyDrawer&&historyDrawer.classList.contains('is-open')){setHistoryDrawer(false);return true}if(presetEditing){cancelPresetEditing();return true}return false};"
+              if line=='    setupHistoryDrawer();':
+                  out.append('    presetValues=readPresetValues();resetPresetLabels();syncChoiceSelection();')
+              out.append(line)
+          s='\n'.join(out)+'\n'
+          expected={'poly':1,'preset_quote':1,'estimate_quote':1,'estimate':1,'update_estimate':1,'old_bet_fn':5,'open_bet':1,'submit':1,'old_handlers':3,'click_handler':1}
+          for k,v in expected.items():
+              if removed.get(k)!=v: raise SystemExit(f'JS anchor mismatch {k}: {removed.get(k)} != {v}')
+
+          old_tokens=['data-predict-bet-stage','data-predict-bet-input type=','data-predict-bet-usd','data-predict-bet-estimate','data-predict-bet-submit','predict-zone-bet-stage','predict-zone-bet-input-wrap','predict-zone-bet-side','predict-zone-bet-token','predict-zone-bet-win-icon','predict-zone-bet-usd','predict-zone-bet-submit','bet-mode','bet-transition','predict-zone-keyboard-open','function openBet(','function closeBet(','function focusBetInput(','function setKeyboardOpen(','function finishBetClose(','function runBetTransition(','betOpen','betCloseTimer','keyboardCloseTimer','betAnimationTimer','betSubmit','betInput','betEstimate','betUsd','betStage','polymarketQuoteFor(','renderBetEstimateQuote(','formatEstimate(','formatPresetWin(','renderPresetQuotes(']
+          leftovers=[t for t in old_tokens if t in s]
+          if leftovers: raise SystemExit('old bet path remains: '+', '.join(leftovers))
+          if s.count('data-predict-bet-preset="')!=3: raise SystemExit('expected exactly 3 preset buttons')
+          if s.count('function submitBet(amount)')!=1: raise SystemExit('direct submit path is not singular')
+          if s.count('function syncBetAvailability()')!=1: raise SystemExit('availability helper is not singular')
+          if s.count('function setPresetEditing(open)')!=1: raise SystemExit('preset editor path is not singular')
+          p.write_text(s,encoding='utf-8')
+          PY
+          git diff --check -- src/miniapp/predict-zone.ts
+          test "$(git diff --name-only)" = "src/miniapp/predict-zone.ts"
+      - name: Verify generated Predict browser script parses
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('src/miniapp/predict-zone.ts','utf8');
+          const marker='export const PREDICT_ZONE_SCRIPT = `';
+          const start=src.indexOf(marker);
+          if(start<0) throw new Error('Predict script marker missing');
+          const bodyStart=start+marker.length;
+          const end=src.indexOf('\n`;',bodyStart);
+          if(end<0) throw new Error('Predict script end missing');
+          let raw=src.slice(bodyStart,end);
+          const token='${JSON.stringify(PREDICT_ERROR_TEXTS)}';
+          if((raw.split(token).length-1)!==1) throw new Error('Unexpected Predict template interpolation count');
+          raw=raw.replace(token,'{}');
+          const cooked=Function('return `'+raw+'`;')();
+          new Function(cooked);
+          console.log('Predict generated script parse: OK');
+          NODE
+      - name: Commit final feature change only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/_predict-direct-bet-ui.yml
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --check
+          git commit -m "Replace Predict bet panel with direct stake controls"
+          git push origin HEAD:predict-direct-bet-ui

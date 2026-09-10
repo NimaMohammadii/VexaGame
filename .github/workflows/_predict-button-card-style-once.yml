@@ -1,0 +1,159 @@
+name: Apply Predict button card styling once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply Predict region-card button styling'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Update only authoritative Predict controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/miniapp/predict-zone.ts')
+          text = path.read_text(encoding='utf-8')
+          lines = text.splitlines()
+
+          region_lines = [line for line in lines if line.startswith('.predict-region-copy{')]
+          action_lines = [line for line in lines if line.startswith('.predict-zone-decision-head{')]
+          quick_lines = [line for line in lines if line.startswith('.predict-zone-quick-bets{')]
+          quote_lines = [line for line in lines if line.startswith('    function renderPresetQuotes(){')]
+          if len(region_lines) != 1 or len(action_lines) != 1 or len(quick_lines) != 1 or len(quote_lines) != 1:
+              raise SystemExit(f'Predict anchors mismatch: region={len(region_lines)} action={len(action_lines)} quick={len(quick_lines)} quote={len(quote_lines)}')
+
+          region_body = region_lines[0].split('{', 1)[1].split('}', 1)[0]
+          required_region = [
+              'border:0!important',
+              'outline:0!important',
+              'border-radius:28px!important',
+              'background:rgba(0,0,0,.22)!important',
+              'box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(255,255,255,.12),inset 1px 1px 1px -.5px rgba(255,255,255,.08),inset -1px -1px 1px -.5px rgba(255,255,255,.06),inset 0 0 6px 6px rgba(255,255,255,.04),inset 0 0 2px 2px rgba(255,255,255,.025)!important',
+              'backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important',
+              '-webkit-backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important',
+          ]
+          for token in required_region:
+              if token not in region_body:
+                  raise SystemExit('Region card material changed; refusing to guess: ' + token)
+          material = ';'.join(required_region)
+
+          action_css = (
+              '.predict-zone-decision-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 4px 8px;color:rgba(255,255,255,.40);font-size:11px;font-weight:800;max-height:26px;opacity:1;overflow:hidden}'
+              '.predict-zone-decision-head strong{color:rgba(255,255,255,.68);font-size:11px;font-weight:900;white-space:nowrap}'
+              '.predict-zone-actions{display:grid!important;grid-template-columns:1fr 1fr!important;gap:9px!important;margin:0 0 8px!important}'
+              '.predict-zone-choice{position:relative!important;overflow:hidden!important;height:48px!important;padding:0 14px!important;'
+              + material + ';color:#fff!important;font-size:13px!important;font-weight:950!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;transform:translateZ(0)!important;touch-action:manipulation!important;-webkit-tap-highlight-color:transparent!important;transition:transform .18s ease,opacity .18s ease!important}'
+              '.predict-zone-choice>span:last-child{font-family:ui-rounded,"SF Pro Rounded","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;font-weight:700!important;letter-spacing:-.02em!important;font-variant-numeric:tabular-nums!important}'
+              '.predict-zone-choice-symbol{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;font-size:18px;font-weight:950;line-height:1;transition:transform .18s ease!important}'
+              '.predict-zone-choice-up .predict-zone-choice-symbol{color:#d7e9dd}'
+              '.predict-zone-choice-down .predict-zone-choice-symbol{color:#e7c9d2}'
+              '.predict-zone-choice.selected .predict-zone-choice-symbol{transform:scale(1.12)}'
+              '.predict-zone-choice:active{transform:scale(.97)!important}'
+              '.predict-zone-actions button.predict-zone-choice:disabled{opacity:.42!important;cursor:not-allowed!important;transform:none!important}'
+          )
+
+          quick_css = (
+              '.predict-zone-quick-bets{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important;gap:7px!important;margin:0!important}'
+              '.predict-zone-bet-preset,.predict-zone-preset-edit{position:relative!important;overflow:hidden!important;height:38px!important;min-width:0!important;padding:0 8px!important;'
+              + material + ';color:#fff!important;font-family:ui-rounded,"SF Pro Rounded","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;font-size:12px!important;font-weight:760!important;letter-spacing:-.02em!important;font-variant-numeric:tabular-nums!important;display:flex!important;align-items:center!important;justify-content:center!important;white-space:nowrap!important;transform:translateZ(0)!important;touch-action:manipulation!important;-webkit-tap-highlight-color:transparent!important;transition:transform .16s ease,opacity .16s ease!important}'
+              '.predict-zone-bet-preset:active,.predict-zone-preset-edit:active{transform:scale(.96)!important}'
+              '.predict-zone-bet-preset:disabled{opacity:.38!important}'
+              '.predict-zone-preset-edit{font-size:10.5px!important;font-weight:800!important;color:rgba(255,255,255,.58)!important}'
+              '.predict-zone-preset-edit.is-editing{color:rgba(255,255,255,.92)!important}'
+              '.predict-zone-bet-preset [data-predict-preset-value]{display:inline-block;min-width:1.5em;outline:0!important}'
+              '.predict-zone-preset-editing .predict-zone-bet-preset{opacity:.92!important}'
+              '.predict-zone-preset-editing .predict-zone-bet-preset [data-predict-preset-value]{cursor:text;user-select:text;-webkit-user-select:text}'
+              '.predict-zone-bet-status{display:block;min-height:0;margin:6px 0 0;text-align:center;color:rgba(255,255,255,.42);font-size:10px;font-weight:760}'
+              '.predict-zone-bet-status:empty{display:none}'
+              '.predict-zone-bet-status.bad{color:rgba(255,160,160,.9)}'
+              '.predict-zone-bet-status.good{color:rgba(185,255,210,.9)}'
+          )
+
+          old_quote = quote_lines[0]
+          if "rawAmount+'→'+(quote?'—':'…')" not in old_quote or "rawAmount+'→</span>" not in old_quote:
+              raise SystemExit('Preset quote format no longer matches inspected source; refusing to guess')
+          new_quote = old_quote.replace("rawAmount+'→'+(quote?'—':'…')", "rawAmount+' - → - '+(quote?'—':'…')", 1)
+          new_quote = new_quote.replace("rawAmount+'→</span>", "rawAmount+' - → - </span>", 1)
+
+          out = []
+          replaced_action = replaced_quick = replaced_quote = 0
+          for line in lines:
+              if line.startswith('.predict-zone-decision-head{'):
+                  out.append(action_css)
+                  replaced_action += 1
+              elif line.startswith('.predict-zone-quick-bets{'):
+                  out.append(quick_css)
+                  replaced_quick += 1
+              elif line.startswith('    function renderPresetQuotes(){'):
+                  out.append(new_quote)
+                  replaced_quote += 1
+              else:
+                  out.append(line)
+
+          if (replaced_action, replaced_quick, replaced_quote) != (1, 1, 1):
+              raise SystemExit(f'Unexpected replacement counts: action={replaced_action} quick={replaced_quick} quote={replaced_quote}')
+
+          text = '\n'.join(out) + ('\n' if path.read_text(encoding='utf-8').endswith('\n') else '')
+
+          if text.count('grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important') != 1:
+              raise SystemExit('Edit width validation failed')
+          if text.count("rawAmount+' - → - '+(quote?'—':'…')") != 1 or text.count("rawAmount+' - → - </span>") != 1:
+              raise SystemExit('Preset separator validation failed')
+          if "rawAmount+'→'" in text:
+              raise SystemExit('Old compact preset arrow format remains')
+          if text.count('function renderPresetQuotes()') != 1 or text.count('function submitBet(amount)') != 1:
+              raise SystemExit('Predict submit/quote path is not singular')
+          if text.count("fetch(eventMode?'/app/api/prediction-events/bet':'/app/api/predict-bet'") != 1:
+              raise SystemExit('Existing Predict backend path changed or duplicated')
+          if 'data-predict-bet-stage' in text or 'data-predict-bet-submit' in text or 'function openBet(' in text:
+              raise SystemExit('Legacy bet path unexpectedly present')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check -- src/miniapp/predict-zone.ts
+          test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
+
+      - name: Validate emitted Predict browser script
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const src = fs.readFileSync('src/miniapp/predict-zone.ts', 'utf8');
+          const marker = 'export const PREDICT_ZONE_SCRIPT = `';
+          const start = src.indexOf(marker);
+          if (start < 0) throw new Error('PREDICT_ZONE_SCRIPT marker missing');
+          const bodyStart = start + marker.length;
+          const end = src.indexOf('\n`;', bodyStart);
+          if (end < 0) throw new Error('PREDICT_ZONE_SCRIPT end missing');
+          const raw = src.slice(bodyStart, end);
+          const cooked = Function('PREDICT_ERROR_TEXTS', 'return `' + raw + '`;')({en:{}});
+          new Function(cooked);
+          if (!src.includes("rawAmount+' - → - '+(quote?'—':'…')")) throw new Error('Requested amount-arrow spacing missing');
+          console.log('Predict control styling and browser script validation OK');
+          NODE
+
+      - name: Commit only Predict owner and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm -f .github/workflows/_predict-button-card-style-once.yml
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --check
+          git commit -m "Match Predict controls to region card style"
+          git push origin HEAD:main

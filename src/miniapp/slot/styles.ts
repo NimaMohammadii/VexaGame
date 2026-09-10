@@ -91,7 +91,7 @@ body:has(#slot.active) header.top{
   opacity:.72!important;
 }
 #slot .slot-rewards-card{left:16px!important;width:38px!important;min-width:38px!important;padding:0!important}
-#slot .slot-live-menu-button{right:16px!important;z-index:30!important;pointer-events:auto!important;font-size:12px!important;font-weight:950!important;line-height:1!important;letter-spacing:-.02em!important}
+#slot .slot-live-menu-button{right:16px!important;font-size:12px!important;font-weight:950!important;line-height:1!important;letter-spacing:-.02em!important}
 #slot .slot-rewards-card:active,#slot .slot-live-menu-button:active{transform:translate3d(0,1px,0) scale(.94)!important;filter:brightness(1.14) saturate(1.08)!important;transition-duration:.11s!important}
 #slot .slot-rewards-card svg{filter:drop-shadow(0 5px 8px rgba(0,0,0,.5))}
 #slot .slot-rewards-panel{
@@ -557,7 +557,7 @@ body:has(#slot.active) header.top{
 #slot .slot-live-menu-button{cursor:pointer!important;-webkit-tap-highlight-color:transparent!important}
 #slot .slot-live-drawer-backdrop{position:fixed!important;inset:0!important;z-index:99994!important;display:none!important;background:transparent!important}
 #slot .slot-live-drawer-backdrop.is-open{display:block!important}
-.slot-live-drawer{
+#slot .slot-live-drawer{
   position:fixed!important;
   left:0!important;
   top:calc(120px + env(safe-area-inset-top))!important;
@@ -581,17 +581,17 @@ body:has(#slot.active) header.top{
   transform:translate3d(-104%,0,0)!important;
   transition:transform .36s cubic-bezier(.18,.88,.24,1)!important;
 }
-body.slot-live-drawer-open .slot-live-drawer.is-open{transform:translate3d(0,0,0)!important}
-.slot-live-drawer-head{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;margin:0!important;padding:0!important;color:#fff!important;font-size:16px!important;font-weight:950!important}
-.slot-live-drawer-head .slot-live-title{display:block!important;min-width:0!important;color:#fff!important;font-size:16px!important;font-weight:950!important}
-.slot-live-drawer-head .slot-live-title svg{display:none!important}
+#slot.slot-live-drawer-open .slot-live-drawer.is-open{transform:translate3d(0,0,0)!important}
+#slot .slot-live-drawer-head{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;margin:0!important;padding:0!important;color:#fff!important;font-size:16px!important;font-weight:950!important}
+#slot .slot-live-drawer-head .slot-live-title{display:block!important;min-width:0!important;color:#fff!important;font-size:16px!important;font-weight:950!important}
+#slot .slot-live-drawer-head .slot-live-title svg{display:none!important}
 .slot-live-toggle{width:32px!important;height:32px!important;padding:0!important;border:0!important;border-radius:13px!important;background:rgba(255,255,255,.07)!important;color:#fff!important;font-size:18px!important;display:grid!important;place-items:center!important}
-.slot-live-drawer .slot-live-list{min-height:0!important;height:auto!important;max-height:none!important;display:grid!important;align-content:start!important;gap:8px!important;overflow-y:auto!important;overflow-x:hidden!important;padding:0!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;scrollbar-width:none!important}
-.slot-live-drawer .slot-live-list::-webkit-scrollbar{display:none!important}
-.slot-live-drawer .slot-live-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;gap:8px!important;min-height:48px!important;height:auto!important;padding:7px 8px!important;border:0!important;border-radius:18px!important;background:rgba(0,0,0,.22)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),inset 0 -1px 0 rgba(255,255,255,.04)!important;color:#fff!important;box-sizing:border-box!important}
-.slot-live-drawer .slot-live-user{min-width:0!important;font-size:11px!important;font-weight:900!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;color:rgba(255,255,255,.92)!important}
-.slot-live-drawer .slot-live-result{gap:2px!important;font-size:12px!important;color:rgba(255,255,255,.84)!important}
-.slot-live-drawer .slot-live-symbol{width:16px!important;height:16px!important;font-size:13px!important}
+#slot .slot-live-drawer .slot-live-list{min-height:0!important;height:auto!important;max-height:none!important;display:grid!important;align-content:start!important;gap:8px!important;overflow-y:auto!important;overflow-x:hidden!important;padding:0!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;scrollbar-width:none!important}
+#slot .slot-live-drawer .slot-live-list::-webkit-scrollbar{display:none!important}
+#slot .slot-live-drawer .slot-live-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;gap:8px!important;min-height:48px!important;height:auto!important;padding:7px 8px!important;border:0!important;border-radius:18px!important;background:rgba(0,0,0,.22)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),inset 0 -1px 0 rgba(255,255,255,.04)!important;color:#fff!important;box-sizing:border-box!important}
+#slot .slot-live-drawer .slot-live-user{min-width:0!important;font-size:11px!important;font-weight:900!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;color:rgba(255,255,255,.92)!important}
+#slot .slot-live-drawer .slot-live-result{gap:2px!important;font-size:12px!important;color:rgba(255,255,255,.84)!important}
+#slot .slot-live-drawer .slot-live-symbol{width:16px!important;height:16px!important;font-size:13px!important}
 @keyframes slotWinPulse{0%{transform:scale(1)}42%{transform:scale(1.018)}100%{transform:scale(1)}}
 @keyframes slotLiveRowIn{0%{opacity:0;transform:translate3d(0,-12px,0) scale(.985);filter:blur(5px)}58%{opacity:1;transform:translate3d(0,2px,0) scale(1.006);filter:blur(0)}100%{opacity:1;transform:translate3d(0,0,0) scale(1);filter:blur(0)}}
 @keyframes slotLiveSymbolPop{0%{opacity:0;transform:translateY(5px) scale(.72) rotate(-7deg)}70%{opacity:1;transform:translateY(-1px) scale(1.08) rotate(2deg)}100%{opacity:1;transform:translateY(0) scale(1) rotate(0)}}

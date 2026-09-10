@@ -2,6 +2,16 @@ import type { Hono } from 'hono';
 import type { Env } from './types';
 import { applyGameTonBalanceDelta, debitUserTonBalanceIfEnough, getUserControls } from './user-controls';
 import { gameBotToken, id, rateLimit, validateTelegramInitData } from './utils';
+import {
+  MinesSoloRuntimeError,
+  finishMinesSoloRuntime,
+  getMinesSoloRuntime,
+  initMinesSoloRuntime,
+  reserveMinesSoloCollect,
+  revealMinesSoloRuntime,
+  rollbackMinesSoloCollect,
+  type MinesSoloRuntimeState,
+} from './mines-solo-runtime';
 
 type App = Hono<{ Bindings: Env }>;
 type MineRoom = { id:string; host_user_id:string; host_name:string|null; guest_user_id:string|null; guest_name:string|null; status:string; current_turn_user_id:string|null; hidden_cells_json:string; revealed_cells_json:string; mine_count:number; board_size:number; round_index:number; finished_reason:string|null; host_ready:number|null; guest_ready:number|null; host_has_points:number|null; guest_has_points:number|null; host_funded:number|null; guest_funded:number|null; settled:number|null; amount_nano:number|null; created_at:string; updated_at:string; expires_at:string };
@@ -33,9 +43,26 @@ export function registerFriendGameRoutes(app: App): void {
         controls = activated.controls;
       } else if (round.status === 'cashed_out') {
         controls = await settleSoloPayout(c.env, round);
+        await finishMinesSoloRuntime(c.env, userId, round.round_id, 'cashed_out', Number(round.payout_nano)||0).catch(()=>undefined);
+      } else if (round.status === 'lost') {
+        await finishMinesSoloRuntime(c.env, userId, round.round_id, 'lost').catch(()=>undefined);
       }
-      if (!['active', 'cashed_out'].includes(round.status)) return c.json({ ok: true, active: false, tonBalanceNano: controls.tonBalanceNano });
-      return c.json(soloState(round, controls.tonBalanceNano));
+      if (round.status !== 'active') return c.json({ ok: true, active: false, tonBalanceNano: controls.tonBalanceNano });
+
+      let runtime = await runtimeForRound(c.env, userId, round);
+      if (runtime.status === 'collecting') {
+        await rollbackMinesSoloCollect(c.env, userId, runtime.roundId);
+        runtime = await getMinesSoloRuntime(c.env, userId);
+      }
+      if (runtime.status === 'lost') {
+        await persistSoloRuntimeLoss(c.env, runtime);
+        return c.json(soloRuntimeState(runtime, controls.tonBalanceNano));
+      }
+      if (runtime.status === 'cashed_out') {
+        const settled = await settleSoloRuntimeCollect(c.env, runtime);
+        return c.json(soloState(settled.round, settled.controls.tonBalanceNano));
+      }
+      return c.json(soloRuntimeState(runtime, controls.tonBalanceNano));
     } catch (e) { return fail(c, e, 'Could not restore Mines round.'); }
   });
 
@@ -51,13 +78,26 @@ export function registerFriendGameRoutes(app: App): void {
       await ensureTables(c.env);
 
       let current = await soloRound(c.env, userId);
-      if (current && ['pending', 'active'].includes(current.status)) {
-        if (current.status === 'pending') {
-          const activated = await activateSoloRound(c.env, current);
-          current = activated.round;
-          return c.json({ ...soloState(current, activated.controls.tonBalanceNano), started: false });
+      if (current?.status === 'pending') {
+        const activated = await activateSoloRound(c.env, current);
+        current = activated.round;
+      }
+      if (current?.status === 'active') {
+        let runtime = await runtimeForRound(c.env, userId, current);
+        if (runtime.status === 'lost') {
+          await persistSoloRuntimeLoss(c.env, runtime);
+          current = await soloRound(c.env, userId);
+        } else if (runtime.status === 'cashed_out') {
+          const settled = await settleSoloRuntimeCollect(c.env, runtime);
+          current = settled.round;
+        } else {
+          if (runtime.status === 'collecting') {
+            await rollbackMinesSoloCollect(c.env, userId, runtime.roundId);
+            runtime = await getMinesSoloRuntime(c.env, userId);
+          }
+          const controls = await getUserControls(c.env, userId);
+          return c.json({ ...soloRuntimeState(runtime, controls.tonBalanceNano), started: false });
         }
-        return c.json({ ...soloState(current, accessControls.tonBalanceNano), started: false });
       }
       if (current?.status === 'cashed_out') await settleSoloPayout(c.env, current);
 
@@ -93,7 +133,9 @@ export function registerFriendGameRoutes(app: App): void {
       } else {
         controls = await getUserControls(c.env, userId);
       }
-      return c.json({ ...soloState(current, controls.tonBalanceNano), started: createdHere });
+      if (current.status !== 'active') throw new Error('Could not activate Mines round');
+      const runtime = await runtimeForRound(c.env, userId, current);
+      return c.json({ ...soloRuntimeState(runtime, controls.tonBalanceNano), started: createdHere });
     } catch (e) { return fail(c, e, 'Could not start Mines round.'); }
   });
 
@@ -104,58 +146,22 @@ export function registerFriendGameRoutes(app: App): void {
       const roundId = clean(body.roundId, 'Round not found');
       const cell = clampInt(body.cell, 0, 24, -1);
       if (cell < 0) return c.json({ error: 'Invalid cell' }, 400);
-      await ensureTables(c.env);
-      let round = await soloRound(c.env, userId);
-      if (!round || round.round_id !== roundId) return c.json({ error: 'Round not found' }, 404);
-      if (round.status === 'pending') round = (await activateSoloRound(c.env, round)).round;
-      if (round.status === 'cashed_out') {
-        const controls = await settleSoloPayout(c.env, round);
-        return c.json({ ...soloState(round, controls.tonBalanceNano), newReveal: false });
-      }
-      if (round.status !== 'active') return c.json({ ...soloState(round), newReveal: false });
 
-      const mines = parseNums(round.mine_cells_json);
-      const revealed = parseNums(round.revealed_cells_json);
-      if (revealed.includes(cell)) return c.json({ ...soloState(round), result: 'safe', selectedCell: cell, newReveal: false });
-
-      const previousJson = round.revealed_cells_json;
-      if (mines.includes(cell)) {
-        const updated = await c.env.DB.prepare(`UPDATE mines_solo_rounds
-          SET status='lost', updated_at=CURRENT_TIMESTAMP
-          WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?
-          RETURNING *`)
-          .bind(userId, roundId, previousJson).first<SoloMineRound>();
-        if (!updated) {
-          const current = await soloRound(c.env, userId);
-          if (!current) throw new Error('Round not found');
-          return c.json({ ...soloState(current), newReveal: false });
-        }
-        return c.json({ ...soloState(updated), result: 'mine', selectedCell: cell, newReveal: true });
+      let runtime: MinesSoloRuntimeState;
+      try {
+        runtime = await revealMinesSoloRuntime(c.env, userId, roundId, cell);
+      } catch (error) {
+        if (!runtimeMissing(error)) throw error;
+        await hydrateSoloRuntime(c.env, userId, roundId);
+        runtime = await revealMinesSoloRuntime(c.env, userId, roundId, cell);
       }
 
-      const nextRevealed = [...revealed, cell].sort((a, b) => a - b);
-      const multiplier = soloMultiplier(Number(round.mine_count), nextRevealed.length, Number(round.board_size) || 25);
-      const cleared = nextRevealed.length >= (Number(round.board_size) || 25) - Number(round.mine_count);
-      const payoutNano = cleared ? soloPayout(Number(round.amount_nano), multiplier) : 0;
-      const updated = await c.env.DB.prepare(`UPDATE mines_solo_rounds
-        SET revealed_cells_json=?, multiplier=?, status=?, payout_nano=?, updated_at=CURRENT_TIMESTAMP
-        WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?
-        RETURNING *`)
-        .bind(JSON.stringify(nextRevealed), multiplier, cleared ? 'cashed_out' : 'active', payoutNano, userId, roundId, previousJson).first<SoloMineRound>();
-      if (!updated) {
-        const current = await soloRound(c.env, userId);
-        if (!current) throw new Error('Round not found');
-        if (current.status === 'cashed_out') {
-          const controls = await settleSoloPayout(c.env, current);
-          return c.json({ ...soloState(current, controls.tonBalanceNano), newReveal: false });
-        }
-        return c.json({ ...soloState(current), newReveal: false });
+      if (runtime.cleared && runtime.status === 'active' && runtime.newReveal !== false) {
+        const reserved = await reserveMinesSoloCollect(c.env, userId, roundId, minSafePicksForCollect(runtime.mineCount));
+        const settled = await settleSoloRuntimeCollect(c.env, reserved);
+        return c.json({ ...soloState(settled.round, settled.controls.tonBalanceNano), result: 'safe', selectedCell: cell, newReveal: true });
       }
-      if (updated.status === 'cashed_out') {
-        const controls = await settleSoloPayout(c.env, updated);
-        return c.json({ ...soloState(updated, controls.tonBalanceNano), result: 'safe', selectedCell: cell, newReveal: true });
-      }
-      return c.json({ ...soloState(updated), result: 'safe', selectedCell: cell, newReveal: true });
+      return c.json(soloRuntimeState(runtime));
     } catch (e) { return fail(c, e, 'Could not select tile.'); }
   });
 
@@ -164,27 +170,20 @@ export function registerFriendGameRoutes(app: App): void {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
       const roundId = clean(body.roundId, 'Round not found');
-      await ensureTables(c.env);
-      let round = await soloRound(c.env, userId);
-      if (!round || round.round_id !== roundId) return c.json({ error: 'Round not found' }, 404);
-      if (round.status === 'pending') round = (await activateSoloRound(c.env, round)).round;
-      if (round.status === 'lost') return c.json({ error: 'Round already ended' }, 409);
-      if (round.status === 'active') {
-        const revealed = parseNums(round.revealed_cells_json);
-        if (revealed.length < minSafePicksForCollect(Number(round.mine_count))) return c.json({ error: 'Open more safe tiles before collecting' }, 409);
-        const multiplier = soloMultiplier(Number(round.mine_count), revealed.length, Number(round.board_size) || 25);
-        const payoutNano = soloPayout(Number(round.amount_nano), multiplier);
-        const previousJson = round.revealed_cells_json;
-        const updated = await c.env.DB.prepare(`UPDATE mines_solo_rounds
-          SET status='cashed_out', multiplier=?, payout_nano=?, updated_at=CURRENT_TIMESTAMP
-          WHERE user_id=? AND round_id=? AND status='active' AND revealed_cells_json=?
-          RETURNING *`)
-          .bind(multiplier, payoutNano, userId, roundId, previousJson).first<SoloMineRound>();
-        round = updated || await soloRound(c.env, userId) as SoloMineRound;
+      let runtime: MinesSoloRuntimeState;
+      try {
+        runtime = await reserveMinesSoloCollect(c.env, userId, roundId, 1);
+      } catch (error) {
+        if (!runtimeMissing(error)) throw error;
+        const hydrated = await hydrateSoloRuntime(c.env, userId, roundId);
+        runtime = await reserveMinesSoloCollect(c.env, userId, roundId, minSafePicksForCollect(hydrated.mineCount));
       }
-      if (!round || round.status !== 'cashed_out') return c.json({ error: 'Round is not active' }, 409);
-      const controls = await settleSoloPayout(c.env, round);
-      return c.json(soloState(round, controls.tonBalanceNano));
+      if (runtime.revealedCount < minSafePicksForCollect(runtime.mineCount)) {
+        if (runtime.status === 'collecting') await rollbackMinesSoloCollect(c.env, userId, roundId).catch(()=>undefined);
+        return c.json({ error: 'Open more safe tiles before collecting' }, 409);
+      }
+      const settled = await settleSoloRuntimeCollect(c.env, runtime);
+      return c.json(soloState(settled.round, settled.controls.tonBalanceNano));
     } catch (e) { return fail(c, e, 'Could not collect Mines reward.'); }
   });
 
@@ -339,6 +338,53 @@ function soloState(round:SoloMineRound,tonBalanceNano?:number){
   if(Number.isFinite(Number(tonBalanceNano)))payload.tonBalanceNano=Math.max(0,Number(tonBalanceNano)||0);
   return payload;
 }
+function soloRuntimeState(runtime:MinesSoloRuntimeState,tonBalanceNano?:number){
+  const status=runtime.status==='collecting'?'active':runtime.status;
+  const payload:Record<string,unknown>={ok:true,active:status==='active',roundId:runtime.roundId,status,amountNano:runtime.amountNano,mineCount:runtime.mineCount,boardSize:runtime.boardSize,revealedCells:runtime.revealedCells,revealedCount:runtime.revealedCount,multiplier:runtime.multiplier,canCollect:status==='active'&&runtime.revealedCount>=minSafePicksForCollect(runtime.mineCount),payoutNano:runtime.payoutNano,bombs:runtime.bombs};
+  if(runtime.result)payload.result=runtime.result;
+  if(Number.isInteger(runtime.selectedCell))payload.selectedCell=runtime.selectedCell;
+  if(typeof runtime.newReveal==='boolean')payload.newReveal=runtime.newReveal;
+  if(Number.isFinite(Number(tonBalanceNano)))payload.tonBalanceNano=Math.max(0,Number(tonBalanceNano)||0);
+  return payload;
+}
+function soloRuntimeSeed(round:SoloMineRound){
+  const mineCount=Number(round.mine_count)||3,boardSize=Number(round.board_size)||25;
+  return{userId:round.user_id,roundId:round.round_id,amountNano:Number(round.amount_nano),mineCount,boardSize,mines:parseNums(round.mine_cells_json),revealedCells:parseNums(round.revealed_cells_json),multipliers:Array.from({length:Math.max(0,boardSize-mineCount)},(_,index)=>soloMultiplier(mineCount,index+1,boardSize)),status:round.status==='lost'?'lost' as const:round.status==='cashed_out'?'cashed_out' as const:'active' as const,payoutNano:Number(round.payout_nano)||0};
+}
+async function runtimeForRound(env:Env,userId:string,round:SoloMineRound){
+  try{const runtime=await getMinesSoloRuntime(env,userId);if(runtime.roundId===round.round_id)return runtime;}catch(error){if(!runtimeMissing(error))throw error;}
+  return initMinesSoloRuntime(env,soloRuntimeSeed(round));
+}
+async function hydrateSoloRuntime(env:Env,userId:string,roundId:string){
+  await ensureTables(env);
+  let round=await soloRound(env,userId);
+  if(!round||round.round_id!==roundId)throw new Error('Round not found');
+  if(round.status==='pending')round=(await activateSoloRound(env,round)).round;
+  if(!['active','lost','cashed_out'].includes(round.status))throw new Error('Round already ended');
+  return runtimeForRound(env,userId,round);
+}
+async function persistSoloRuntimeLoss(env:Env,runtime:MinesSoloRuntimeState){
+  await env.DB.prepare(`UPDATE mines_solo_rounds SET status='lost',revealed_cells_json=?,multiplier=?,payout_nano=0,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='active'`)
+    .bind(JSON.stringify(runtime.revealedCells),runtime.multiplier,runtime.userId,runtime.roundId).run();
+  await finishMinesSoloRuntime(env,runtime.userId,runtime.roundId,'lost').catch(()=>undefined);
+}
+async function settleSoloRuntimeCollect(env:Env,runtime:MinesSoloRuntimeState){
+  if(runtime.status==='lost')throw new MinesSoloRuntimeError('Round already ended',409);
+  const payout=runtime.status==='cashed_out'&&runtime.payoutNano>0?runtime.payoutNano:soloPayout(runtime.amountNano,runtime.multiplier);
+  let round:SoloMineRound|null=null;
+  try{
+    round=await env.DB.prepare(`UPDATE mines_solo_rounds SET status='cashed_out',revealed_cells_json=?,multiplier=?,payout_nano=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND round_id=? AND status='active' RETURNING *`)
+      .bind(JSON.stringify(runtime.revealedCells),runtime.multiplier,payout,runtime.userId,runtime.roundId).first<SoloMineRound>();
+  }catch(error){if(runtime.status==='collecting')await rollbackMinesSoloCollect(env,runtime.userId,runtime.roundId).catch(()=>undefined);throw error;}
+  if(!round)round=await soloRound(env,runtime.userId);
+  if(!round||round.round_id!==runtime.roundId){if(runtime.status==='collecting')await rollbackMinesSoloCollect(env,runtime.userId,runtime.roundId).catch(()=>undefined);throw new Error('Round not found');}
+  if(round.status==='lost'){await finishMinesSoloRuntime(env,runtime.userId,runtime.roundId,'lost').catch(()=>undefined);throw new MinesSoloRuntimeError('Round already ended',409);}
+  if(round.status!=='cashed_out'){if(runtime.status==='collecting')await rollbackMinesSoloCollect(env,runtime.userId,runtime.roundId).catch(()=>undefined);throw new Error('Round is not active');}
+  await finishMinesSoloRuntime(env,runtime.userId,runtime.roundId,'cashed_out',Number(round.payout_nano)||payout).catch(()=>undefined);
+  const controls=await settleSoloPayout(env,round);
+  return{round,controls};
+}
+function runtimeMissing(error:unknown){return error instanceof MinesSoloRuntimeError&&error.status===404;}
 function minSafePicksForCollect(mineCount:number){return mineCount<=5?2:1;}
 function soloMineCount(value:unknown){const n=Math.floor(Number(value));return SOLO_MINE_COUNTS.has(n)?n:0;}
 function soloAmount(value:unknown,mineCount:number){const amount=Math.floor(Number(value));if(!Number.isSafeInteger(amount)||amount<=0)return 0;const maxMultiplier=soloMultiplier(mineCount,25-mineCount,25),maxAmount=Math.floor(Number.MAX_SAFE_INTEGER/maxMultiplier);return amount<=maxAmount?amount:0;}
@@ -441,4 +487,4 @@ function secureHiddenCells(size:number,count:number){
 }
 function parseNums(value:string){try{const parsed=JSON.parse(value);return Array.isArray(parsed)?Array.from(new Set(parsed.map(Number).filter((n)=>Number.isInteger(n)&&n>=0&&n<25))).sort((a,b)=>a-b):[];}catch{return[];}}
 function parseRevealed(value:string):Array<{cell:number;byUserId:string;result:'safe'|'hidden'}>{try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map((item)=>({cell:Number(item.cell),byUserId:String(item.byUserId||''),result:item.result==='hidden'?'hidden' as const:'safe' as const})).filter((item)=>Number.isInteger(item.cell)&&item.cell>=0&&item.cell<25):[];}catch{return[];}}
-function fail(c:any,error:unknown,fallback:string){const message=error instanceof Error?error.message:fallback;const status=message==='Room not found'||message==='Round not found'?404:/blocked|not in this room|Only the host/i.test(message)?403:/Telegram user mismatch|init data|authentication/i.test(message)?401:400;return c.json({error:message},status);}
+function fail(c:any,error:unknown,fallback:string){const message=error instanceof Error?error.message:fallback;const runtimeStatus=error instanceof MinesSoloRuntimeError?error.status:0;const status=runtimeStatus||message==='Room not found'||message==='Round not found'?404:/blocked|not in this room|Only the host/i.test(message)?403:/Telegram user mismatch|init data|authentication/i.test(message)?401:/already ended|not active|Open more safe/i.test(message)?409:400;return c.json({error:message},status);}

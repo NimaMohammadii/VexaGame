@@ -488,17 +488,55 @@ body:has(#slot.active) header.top{
 }
 #slot .slot-asset-button:disabled{opacity:.48!important;cursor:default!important;filter:saturate(.55)!important}
 
-/* Exact material from Home's Lottery ticket card, applied to Slot's existing controls. */
-#slot .slot-simple-controls{width:min(82vw,320px)!important;margin:42px auto 0!important;display:grid!important;gap:10px!important;justify-items:stretch!important}
+/* Home Get Ticket card material, with its inset lines made slightly clearer for Slot controls. */
+#slot .slot-simple-controls{
+  width:min(90vw,370px)!important;
+  margin:-150px auto 0!important;
+  padding:10px 12px!important;
+  display:grid!important;
+  gap:10px!important;
+  justify-items:stretch!important;
+  overflow:hidden!important;
+  border:0!important;
+  border-radius:28px!important;
+  background:transparent!important;
+  box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.18),inset -3px -3px .5px -3.5px rgba(156,38,70,.62),inset 1px 1px 1px -.5px rgba(140,29,61,.40),inset -1px -1px 1px -.5px rgba(124,22,53,.34),inset 0 0 0 1px rgba(166,39,72,.30),inset 0 0 6px 6px rgba(255,255,255,.075),inset 0 0 2px 2px rgba(255,255,255,.05)!important;
+  backdrop-filter:blur(22px) saturate(1.40) brightness(1.05) contrast(1.04)!important;
+  -webkit-backdrop-filter:blur(22px) saturate(1.40) brightness(1.05) contrast(1.04)!important;
+  isolation:isolate!important;
+  transform:translateZ(0)!important;
+}
+#slot .slot-simple-controls::before{
+  content:''!important;
+  position:absolute!important;
+  inset:0!important;
+  z-index:0!important;
+  display:block!important;
+  pointer-events:none!important;
+  border-radius:inherit!important;
+  background:radial-gradient(34px 34px at 0 0,rgba(186,53,87,.16) 0%,rgba(146,35,66,.07) 42%,rgba(104,18,44,0) 76%),radial-gradient(118% 76% at 10% -16%,rgba(255,255,255,.12) 0%,rgba(255,255,255,.032) 30%,rgba(255,255,255,0) 58%),radial-gradient(96% 72% at 102% 108%,rgba(255,255,255,.052) 0%,rgba(255,255,255,.010) 34%,rgba(255,255,255,0) 62%)!important;
+  box-shadow:inset 0 1px 0 rgba(112,18,49,.12)!important;
+}
+#slot .slot-simple-controls::after{content:none!important;display:none!important}
+#slot .slot-simple-controls>*{position:relative!important;z-index:1!important}
 #slot .slot-simple-bet-row{grid-template-columns:.58fr 1.84fr .58fr!important;gap:7px!important;align-items:center!important}
-#slot .slot-asset-button,#slot .slot-asset-input{height:38px!important;border-radius:28px!important;background:radial-gradient(34px 34px at 0 0,rgba(186,53,87,.16),rgba(104,18,44,0) 76%),radial-gradient(36px 36px at 100% 100%,rgba(172,46,79,.15),rgba(94,16,39,0) 78%),radial-gradient(118% 76% at 10% -16%,rgba(255,255,255,.12),rgba(255,255,255,0) 58%),#000!important;color:#fff!important;box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(156,38,70,.48),inset 1px 1px 1px -.5px rgba(140,29,61,.30),inset -1px -1px 1px -.5px rgba(124,22,53,.24),inset 0 0 6px 6px rgba(255,255,255,.055),inset 0 0 2px 2px rgba(255,255,255,.035)!important;backdrop-filter:blur(22px) saturate(1.4) brightness(1.05)!important;-webkit-backdrop-filter:blur(22px) saturate(1.4) brightness(1.05)!important;overflow:hidden!important}
+#slot .slot-asset-button,#slot .slot-asset-input,#slot .slot-asset-spin{
+  height:38px!important;
+  border-radius:28px!important;
+  background:radial-gradient(34px 34px at 0 0,rgba(186,53,87,.16) 0%,rgba(146,35,66,.07) 42%,rgba(104,18,44,0) 76%),radial-gradient(36px 36px at 100% 100%,rgba(172,46,79,.15) 0%,rgba(126,24,55,.06) 42%,rgba(94,16,39,0) 78%),radial-gradient(118% 76% at 10% -16%,rgba(255,255,255,.12) 0%,rgba(255,255,255,.032) 30%,rgba(255,255,255,0) 58%),radial-gradient(96% 72% at 102% 108%,rgba(255,255,255,.052) 0%,rgba(255,255,255,.010) 34%,rgba(255,255,255,0) 62%),radial-gradient(92% 106% at 84% 116%,rgba(91,12,40,.28) 0%,rgba(50,4,20,.12) 38%,rgba(0,0,0,0) 72%),#000!important;
+  color:#fff!important;
+  box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.18),inset -3px -3px .5px -3.5px rgba(156,38,70,.62),inset 1px 1px 1px -.5px rgba(140,29,61,.40),inset -1px -1px 1px -.5px rgba(124,22,53,.34),inset 0 0 0 1px rgba(166,39,72,.30),inset 0 0 6px 6px rgba(255,255,255,.075),inset 0 0 2px 2px rgba(255,255,255,.05),inset 0 1px 0 rgba(112,18,49,.12),inset 0 -1px 0 rgba(88,12,37,.22)!important;
+  backdrop-filter:blur(22px) saturate(1.40) brightness(1.05) contrast(1.04)!important;
+  -webkit-backdrop-filter:blur(22px) saturate(1.40) brightness(1.05) contrast(1.04)!important;
+  overflow:hidden!important;
+}
 #slot .slot-asset-button img,#slot .slot-asset-input img{display:none!important}
 #slot .slot-asset-step{width:100%!important;height:38px!important;border-radius:28px!important;transform:none!important}
 #slot #slotBetMinus,#slot #slotBetPlus{--slot-step-x:0px!important}
 #slot .slot-asset-button>span{position:static!important;visibility:visible!important;color:#fff!important;font-size:12px!important;font-weight:950!important;text-shadow:none!important}
-#slot .slot-asset-input{width:100%!important;height:38px!important;padding:0 12px!important;display:flex!important;align-items:center!important;justify-content:center!important}
+#slot .slot-asset-input{width:100%!important;padding:0 12px!important;display:flex!important;align-items:center!important;justify-content:center!important}
 #slot .slot-asset-input input{position:static!important;width:100%!important;height:38px!important;color:#fff!important;background:transparent!important;text-align:center!important;font-size:20px!important;font-weight:950!important;text-shadow:none!important}
-#slot .slot-asset-spin{width:100%!important;height:48px!important;margin:0!important;border-radius:28px!important;background:#080808!important}
+#slot .slot-asset-spin{width:100%!important;height:48px!important;margin:0!important}
 #slot .slot-asset-spin .slot-spin-label{position:static!important;visibility:visible!important;transform:none!important;color:#fff!important;font-family:inherit!important;font-size:14px!important;font-weight:950!important;letter-spacing:0!important;text-shadow:none!important}
 #slot .slot-asset-spin:active,#slot .slot-asset-step:active{transform:translate3d(0,1px,0) scale(.94)!important;filter:brightness(1.14) saturate(1.08)!important}
 #slot .slot-asset-button:disabled{opacity:.62!important;filter:none!important}
@@ -604,12 +642,9 @@ body:has(#slot.active) header.top{
 @media(max-width:380px){
   #slot .slot-cabinet{width:min(94vw,356px)!important;margin:10px auto 0!important}
   #slot .slot-symbol{height:calc((min(94vw,356px) * .460 * 900 / 845) / 3)!important}
-  #slot .slot-simple-controls{width:min(92vw,348px)!important;margin-top:-64px!important}
-  #slot .slot-simple-bet-row{grid-template-columns:58px minmax(0,1fr) 58px!important;gap:6px!important}
-  #slot .slot-asset-step{width:58px!important;height:58px!important}
-  #slot .slot-asset-input{height:58px!important}
+  #slot .slot-simple-controls{width:min(92vw,348px)!important;margin-top:-150px!important}
+  #slot .slot-simple-bet-row{gap:6px!important}
   #slot .slot-asset-input input{font-size:20px!important}
-  #slot .slot-asset-spin{width:min(78vw,286px)!important;height:77px!important}
   #slot .slot-live{margin-top:30px!important;width:min(94%,370px)!important}
   #slot .slot-live-row{min-height:46px!important;height:46px!important;border-radius:19px!important;padding:5px 11px!important}
 }

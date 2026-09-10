@@ -24,7 +24,7 @@ button:not(.tab):not(.section-keyboard-dismiss):not(:where(.home-ticket-step,.ho
 }
 .voice-menu button{box-shadow:none!important;background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 .voice-menu button.active{background:rgba(255,255,255,.92)!important}
-input:not(.predict-zone-bet-input),select,textarea,.section-code-input,.bet-amount,.crash-amount input{
+input:not(.predict-zone-bet-input):not(.predict-zone-preset-input),select,textarea,.section-code-input,.bet-amount,.crash-amount input{
   border:0!important;
   background:rgba(255,255,255,.035)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.10)!important;

@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 417331)
-... 620747 bytes omitted ...
-
 export const SLOT_SECTION = `
 <section id="slot" class="view slot-view" style="overflow-x:hidden;max-width:100vw">
   <style>

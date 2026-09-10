@@ -1,0 +1,123 @@
+name: Apply Predict region sheet once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply Predict region sheet patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Replace Predict region error with Home-style bottom sheet
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/miniapp/predict-zone.ts')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          lines = text.splitlines()
+          out = []
+          replaced_support_css = 0
+          removed_old_region_css = 0
+          region_css = r'''.predict-region-backdrop{position:fixed!important;inset:0!important;z-index:99994!important;background:rgba(0,0,0,.24)!important;opacity:0!important;visibility:hidden!important;backdrop-filter:blur(2px)!important;-webkit-backdrop-filter:blur(2px)!important;transition:opacity .24s ease,visibility 0s linear .24s!important}.predict-region-backdrop.is-open{opacity:1!important;visibility:visible!important;transition:opacity .24s ease!important}
+.predict-region-panel{position:fixed!important;left:0!important;right:0!important;bottom:0!important;z-index:99995!important;max-height:min(72dvh,620px)!important;padding:10px 16px calc(18px + env(safe-area-inset-bottom))!important;border-radius:34px 34px 0 0!important;background:rgba(13,13,13,.92)!important;color:#fff!important;box-shadow:0 -18px 54px rgba(0,0,0,.36),inset 0 1px 0 rgba(255,255,255,.12)!important;backdrop-filter:blur(18px) saturate(1.12)!important;-webkit-backdrop-filter:blur(18px) saturate(1.12)!important;transform:translate3d(0,105%,0)!important;transition:transform .34s cubic-bezier(.2,.9,.26,1)!important;display:grid!important;grid-template-rows:auto auto auto auto!important;gap:12px!important;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Rounded","Inter","Segoe UI",sans-serif!important;letter-spacing:-.018em!important}.predict-region-panel.is-open{transform:translate3d(0,0,0)!important}.predict-region-grab{width:36px!important;height:4px!important;margin:0 auto 2px!important;border-radius:999px!important;background:rgba(255,255,255,.20)!important}.predict-region-head{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important}.predict-region-title{display:flex!important;align-items:center!important;gap:9px!important;min-width:0!important}.predict-region-title svg{width:22px!important;height:22px!important;color:rgba(255,255,255,.74)!important;flex:0 0 auto!important;stroke:currentColor!important}.predict-region-head strong{font-family:inherit!important;font-size:18px!important;font-weight:800!important;letter-spacing:-.035em!important;line-height:1!important}.predict-region-close{width:34px!important;height:34px!important;min-width:34px!important;border-radius:999px!important;border:0!important;background:rgba(255,255,255,.045)!important;color:#fff!important;display:grid!important;place-items:center!important;padding:0!important;box-sizing:border-box!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.085),inset 0 -1px 0 rgba(255,255,255,.055),0 16px 34px rgba(0,0,0,.28)!important;backdrop-filter:blur(10px) saturate(1.12)!important;-webkit-backdrop-filter:blur(10px) saturate(1.12)!important;font-family:inherit!important;-webkit-tap-highlight-color:transparent!important;transition:transform .18s ease,background .18s ease!important}.predict-region-close:active{transform:scale(.92)!important}.predict-region-close svg{width:18px!important;height:18px!important;display:block!important;stroke:currentColor!important}
+.predict-region-copy{position:relative!important;overflow:hidden!important;display:grid!important;gap:5px!important;padding:13px 14px!important;border:0!important;outline:0!important;border-radius:28px!important;background:rgba(0,0,0,.22)!important;box-sizing:border-box!important;box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(255,255,255,.12),inset 1px 1px 1px -.5px rgba(255,255,255,.08),inset -1px -1px 1px -.5px rgba(255,255,255,.06),inset 0 0 6px 6px rgba(255,255,255,.04),inset 0 0 2px 2px rgba(255,255,255,.025)!important;backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important;-webkit-backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important}.predict-region-copy strong{display:block!important;color:#fff!important;font-size:13px!important;font-weight:800!important;line-height:1.35!important;letter-spacing:-.018em!important}.predict-region-copy span{display:block!important;color:rgba(255,255,255,.48)!important;font-size:10.5px!important;font-weight:650!important;line-height:1.42!important}
+.predict-region-support{position:relative!important;overflow:hidden!important;width:100%!important;height:40px!important;padding:0 14px!important;border:0!important;outline:0!important;border-radius:28px!important;background:rgba(255,255,255,.055)!important;color:#fff!important;font-family:inherit!important;font-size:12px!important;font-weight:800!important;letter-spacing:-.018em!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -1px 0 rgba(255,255,255,.055)!important;backdrop-filter:blur(12px) saturate(1.08)!important;-webkit-backdrop-filter:blur(12px) saturate(1.08)!important;transform:translateZ(0)!important;touch-action:manipulation!important;-webkit-tap-highlight-color:transparent!important;transition:transform .18s ease,background .18s ease!important}.predict-region-support:active{transform:scale(.97)!important;background:rgba(255,255,255,.075)!important}'''
+
+          for line in lines:
+              if line.startswith('.predict-zone-bet-status.has-support{'):
+                  if replaced_support_css:
+                      raise SystemExit('duplicate old support CSS')
+                  out.extend(region_css.splitlines())
+                  replaced_support_css += 1
+                  continue
+              if line.startswith('.predict-zone-glass-card.bet-mode.region-error'):
+                  removed_old_region_css += 1
+                  continue
+              out.append(line)
+          if replaced_support_css != 1 or removed_old_region_css != 1:
+              raise SystemExit(f'CSS anchors mismatch: support={replaced_support_css}, old-region={removed_old_region_css}')
+          text = '\n'.join(out) + ('\n' if text.endswith('\n') else '')
+
+          replace_once(
+              "    var historyButton=null,historyBackdrop=null,historyDrawer=null,historyClose=null;",
+              "    var historyButton=null,historyBackdrop=null,historyDrawer=null,historyClose=null,regionBackdrop=null,regionPanel=null,regionClose=null,regionMessage=null,regionNote=null,regionSupportButton=null;",
+              'region refs',
+          )
+
+          old_status = "    function setStatus(text,type,options){if(!betStatus)return;var support=!!(options&&options.support);betStatus.textContent='';betStatus.classList.toggle('bad',type==='bad');betStatus.classList.toggle('good',type==='good');betStatus.classList.toggle('has-support',support);betStatus.setAttribute('dir','auto');if(card)card.classList.toggle('region-error',support);if(text){var message=document.createElement('span');message.className='predict-zone-bet-status-message';message.textContent=String(text);betStatus.appendChild(message)}if(support){var note=document.createElement('span');note.className='predict-zone-support-note';note.textContent=predictText('regionSupport');var button=document.createElement('button');button.type='button';button.className='predict-zone-support-button';button.setAttribute('data-predict-support','1');button.textContent=predictText('contactSupport');betStatus.appendChild(note);betStatus.appendChild(button)}}"
+          new_status = r'''    function setStatus(text,type){if(!betStatus)return;betStatus.textContent='';betStatus.classList.toggle('bad',type==='bad');betStatus.classList.toggle('good',type==='good');betStatus.setAttribute('dir','auto');if(text){var message=document.createElement('span');message.className='predict-zone-bet-status-message';message.textContent=String(text);betStatus.appendChild(message)}}
+    function ensureRegionSheet(){if(regionPanel)return;regionBackdrop=document.createElement('div');regionBackdrop.className='predict-region-backdrop';regionBackdrop.setAttribute('data-predict-region-backdrop','1');regionPanel=document.createElement('section');regionPanel.className='predict-region-panel';regionPanel.setAttribute('data-predict-region-panel','1');regionPanel.setAttribute('role','dialog');regionPanel.setAttribute('aria-modal','true');regionPanel.setAttribute('aria-label','Predict');regionPanel.setAttribute('aria-hidden','true');regionPanel.innerHTML='<div class="predict-region-grab" aria-hidden="true"></div><header class="predict-region-head"><div class="predict-region-title"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke-width="1.7"/><path d="M3.8 12h16.4M12 3.5c2.1 2.25 3.2 5.08 3.2 8.5S14.1 18.25 12 20.5M12 3.5C9.9 5.75 8.8 8.58 8.8 12s1.1 6.25 3.2 8.5" stroke-width="1.7" stroke-linecap="round"/></svg><strong>Predict</strong></div><button class="predict-region-close" type="button" data-predict-region-close="1" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></header><div class="predict-region-copy" dir="auto"><strong data-predict-region-message></strong><span data-predict-region-note></span></div><button class="predict-region-support" type="button" data-predict-support="1"></button>';regionClose=regionPanel.querySelector('[data-predict-region-close]');regionMessage=regionPanel.querySelector('[data-predict-region-message]');regionNote=regionPanel.querySelector('[data-predict-region-note]');regionSupportButton=regionPanel.querySelector('[data-predict-support]');document.body.appendChild(regionBackdrop);document.body.appendChild(regionPanel)}
+    function setRegionSheet(open,message){if(open)ensureRegionSheet();if(!regionPanel||!regionBackdrop)return;var next=!!open;if(message&&regionMessage)regionMessage.textContent=String(message);if(regionNote)regionNote.textContent=predictText('regionSupport');if(regionSupportButton)regionSupportButton.textContent=predictText('contactSupport');regionPanel.classList.toggle('is-open',next);regionPanel.setAttribute('aria-hidden',next?'false':'true');regionBackdrop.classList.toggle('is-open',next)}
+    function openPredictSupport(){var supportUrl='https://t.me/vexaplace',tg=window.Telegram&&window.Telegram.WebApp;try{if(tg&&typeof tg.openTelegramLink==='function'){tg.openTelegramLink(supportUrl);return}}catch(_){}window.location.href=supportUrl}'''
+          replace_once(old_status, new_status, 'status/region sheet')
+
+          replace_once(
+              "setStatus(message,'bad',{support:regionError})",
+              "if(regionError){setStatus('','');setRegionSheet(true,message)}else setStatus(message,'bad')",
+              'region error presentation',
+          )
+
+          old_root_click = "    root.addEventListener('click',function(e){var target=e.target;if(!target)return;var support=target.closest&&target.closest('[data-predict-support]');if(support){e.preventDefault();var supportUrl='https://t.me/vexaplace',tg=window.Telegram&&window.Telegram.WebApp;try{if(tg&&typeof tg.openTelegramLink==='function'){tg.openTelegramLink(supportUrl);return}}catch(_){}window.location.href=supportUrl;return}var preset=target.closest&&target.closest('[data-predict-bet-preset]');if(preset&&betInput){e.preventDefault();betInput.value=preset.getAttribute('data-predict-bet-preset')||'';updateEstimate();return}var choice=target.closest&&target.closest('[data-predict-choice]');if(choice){e.preventDefault();openBet(choice.getAttribute('data-predict-choice'));return}var submit=target.closest&&target.closest('[data-predict-bet-submit]');if(submit&&betOpen){e.preventDefault();submitBet()}},true);"
+          new_root_click = "    root.addEventListener('click',function(e){var target=e.target;if(!target)return;var preset=target.closest&&target.closest('[data-predict-bet-preset]');if(preset&&betInput){e.preventDefault();betInput.value=preset.getAttribute('data-predict-bet-preset')||'';updateEstimate();return}var choice=target.closest&&target.closest('[data-predict-choice]');if(choice){e.preventDefault();openBet(choice.getAttribute('data-predict-choice'));return}var submit=target.closest&&target.closest('[data-predict-bet-submit]');if(submit&&betOpen){e.preventDefault();submitBet()}},true);"
+          replace_once(old_root_click, new_root_click, 'root click handler')
+
+          old_doc_click = "    document.addEventListener('click',function(e){var target=e.target;if(historyClose&&target&&target.closest&&target.closest('[data-predict-history-close]')){e.preventDefault();setHistoryDrawer(false);return}if(historyBackdrop&&target===historyBackdrop){e.preventDefault();setHistoryDrawer(false);return}if(betOpen&&card&&target&&!card.contains(target))closeBet()},true);"
+          new_doc_click = "    document.addEventListener('click',function(e){var target=e.target;if(regionClose&&target&&target.closest&&target.closest('[data-predict-region-close]')){e.preventDefault();setRegionSheet(false);return}if(regionBackdrop&&target===regionBackdrop){e.preventDefault();setRegionSheet(false);return}var support=target&&target.closest&&target.closest('[data-predict-support]');if(support){e.preventDefault();openPredictSupport();return}if(historyClose&&target&&target.closest&&target.closest('[data-predict-history-close]')){e.preventDefault();setHistoryDrawer(false);return}if(historyBackdrop&&target===historyBackdrop){e.preventDefault();setHistoryDrawer(false);return}if(betOpen&&card&&target&&!card.contains(target))closeBet()},true);"
+          replace_once(old_doc_click, new_doc_click, 'document click handler')
+
+          replace_once(
+              "    function suspend(){if(runtimeSuspended)return;runtimeSuspended=true;setHistoryDrawer(false);clearRoundRetry();",
+              "    function suspend(){if(runtimeSuspended)return;runtimeSuspended=true;setHistoryDrawer(false);if(regionPanel&&regionPanel.classList.contains('is-open'))setRegionSheet(false);clearRoundRetry();",
+              'suspend sheet cleanup',
+          )
+
+          replace_once(
+              "    window.VexaPredictBack=function(){if(historyDrawer&&historyDrawer.classList.contains('is-open')){setHistoryDrawer(false);return true}if(betOpen){closeBet();return true}return false};",
+              "    window.VexaPredictBack=function(){if(regionPanel&&regionPanel.classList.contains('is-open')){setRegionSheet(false);return true}if(historyDrawer&&historyDrawer.classList.contains('is-open')){setHistoryDrawer(false);return true}if(betOpen){closeBet();return true}return false};",
+              'back handler',
+          )
+
+          if 'predict-zone-bet-status has-support' in text or '.predict-zone-bet-status.has-support' in text or 'region-error' in text or "{support:regionError}" in text:
+              raise SystemExit('old inline region-error UI still present')
+          if text.count('function ensureRegionSheet()') != 1 or text.count('className=\'predict-region-panel\'') != 1:
+              raise SystemExit('region sheet path is not singular')
+          if text.count("https://t.me/vexaplace") != 1:
+              raise SystemExit('support URL path is not singular')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check -- src/miniapp/predict-zone.ts
+          git diff --name-only
+          test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
+      - name: Commit Predict region sheet and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/_predict-region-sheet-once.yml
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --check
+          git commit -m "Use Home-style sheet for Predict region errors"
+          git push origin HEAD:main

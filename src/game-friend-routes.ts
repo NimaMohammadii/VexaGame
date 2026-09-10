@@ -16,12 +16,18 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
-      await assertMinesAccess(c.env, userId);
+      const accessControls = await assertMinesAccess(c.env, userId);
       await ensureTables(c.env);
       let round = await soloRound(c.env, userId);
       if (!round) return c.json({ ok: true, active: false });
-      if (round.status === 'pending') round = (await activateSoloRound(c.env, round)).round;
-      const controls = round.status === 'cashed_out' ? await settleSoloPayout(c.env, round) : await getUserControls(c.env, userId);
+      let controls = accessControls;
+      if (round.status === 'pending') {
+        const activated = await activateSoloRound(c.env, round);
+        round = activated.round;
+        controls = activated.controls;
+      } else if (round.status === 'cashed_out') {
+        controls = await settleSoloPayout(c.env, round);
+      }
       if (!['active', 'cashed_out'].includes(round.status)) return c.json({ ok: true, active: false, tonBalanceNano: controls.tonBalanceNano });
       return c.json(soloState(round, controls.tonBalanceNano));
     } catch (e) { return fail(c, e, 'Could not restore Mines round.'); }
@@ -31,7 +37,7 @@ export function registerFriendGameRoutes(app: App): void {
     try {
       const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
       const userId = await soloUser(c.env, body.initData);
-      await assertMinesAccess(c.env, userId);
+      const accessControls = await assertMinesAccess(c.env, userId);
       const mineCount = soloMineCount(body.mineCount);
       if (!mineCount) return c.json({ error: 'Invalid mine count' }, 400);
       const amountNano = soloAmount(body.amountNano, mineCount);
@@ -40,9 +46,12 @@ export function registerFriendGameRoutes(app: App): void {
 
       let current = await soloRound(c.env, userId);
       if (current && ['pending', 'active'].includes(current.status)) {
-        if (current.status === 'pending') current = (await activateSoloRound(c.env, current)).round;
-        const controls = await getUserControls(c.env, userId);
-        return c.json({ ...soloState(current, controls.tonBalanceNano), started: false });
+        if (current.status === 'pending') {
+          const activated = await activateSoloRound(c.env, current);
+          current = activated.round;
+          return c.json({ ...soloState(current, activated.controls.tonBalanceNano), started: false });
+        }
+        return c.json({ ...soloState(current, accessControls.tonBalanceNano), started: false });
       }
       if (current?.status === 'cashed_out') await settleSoloPayout(c.env, current);
 
@@ -70,8 +79,14 @@ export function registerFriendGameRoutes(app: App): void {
       current = await soloRound(c.env, userId);
       if (!current) throw new Error('Could not create Mines round');
       const createdHere = current.round_id === roundId;
-      if (current.status === 'pending') current = (await activateSoloRound(c.env, current)).round;
-      const controls = await getUserControls(c.env, userId);
+      let controls = accessControls;
+      if (current.status === 'pending') {
+        const activated = await activateSoloRound(c.env, current);
+        current = activated.round;
+        controls = activated.controls;
+      } else {
+        controls = await getUserControls(c.env, userId);
+      }
       return c.json({ ...soloState(current, controls.tonBalanceNano), started: createdHere });
     } catch (e) { return fail(c, e, 'Could not start Mines round.'); }
   });
@@ -289,7 +304,7 @@ async function ensureTables(env:Env){
 
 async function soloUser(env:Env,initData:unknown){return validateTelegramInitData(String(initData||''),gameBotToken(env));}
 async function friendUser(c:any,claimed:unknown){const userId=await validateTelegramInitData(String(c.req.header('x-telegram-init-data')||''),gameBotToken(c.env));const claim=String(claimed??'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,80);if(claim&&claim!==userId)throw new Error('Telegram user mismatch');await assertMinesAccess(c.env,userId);return userId;}
-async function assertMinesAccess(env:Env,userId:string){const controls=await getUserControls(env,userId);if(controls.banned||controls.blockedSections.includes('mines'))throw new Error('Mines is blocked for this account');}
+async function assertMinesAccess(env:Env,userId:string){const controls=await getUserControls(env,userId);if(controls.banned||controls.blockedSections.includes('mines'))throw new Error('Mines is blocked for this account');return controls;}
 async function soloRound(env:Env,userId:string){return env.DB.prepare('SELECT * FROM mines_solo_rounds WHERE user_id=? LIMIT 1').bind(userId).first<SoloMineRound>();}
 async function activateSoloRound(env:Env,round:SoloMineRound){
   if(round.status!=='pending')return{round,controls:await getUserControls(env,round.user_id)};

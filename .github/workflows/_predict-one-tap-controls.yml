@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v5'
+    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v6'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 8
+          fetch-depth: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -38,6 +38,12 @@ jobs:
               raise SystemExit('validated patch payload not found')
           code = zlib.decompress(base64.b64decode(match.group(1))).decode('utf-8')
           lines = code.splitlines()
+
+          rename_hits = [i for i, line in enumerate(lines) if "text = text.replace('updateEstimate()', 'renderPresetQuotes()')" in line]
+          if len(rename_hits) != 1:
+              raise SystemExit(f'global updateEstimate rename count: {len(rename_hits)}')
+          del lines[rename_hits[0]]
+
           hits = [i for i, line in enumerate(lines) if 'old update estimate' in line]
           if len(hits) != 1:
               raise SystemExit(f'updateEstimate repair anchor count: {len(hits)}')
@@ -60,6 +66,7 @@ jobs:
               indent + "    raise SystemExit('updateEstimate end missing')",
               indent + "text = text[:_vexa_update_start] + '    function updateEstimate(){renderPresetQuotes()}' + chr(10) + text[_vexa_update_end + 1:]",
           ]
+
           code = 'import re\n' + '\n'.join(lines) + '\n'
           exec(compile(code, '<predict-one-tap-patch>', 'exec'), {})
           PY
@@ -82,7 +89,7 @@ jobs:
           const raw = src.slice(bodyStart, end);
           const cooked = Function('PREDICT_ERROR_TEXTS', 'return `' + raw + '`;')({ en: {} });
           new Function(cooked);
-          const legacy = ['data-predict-bet-stage','data-predict-bet-input','data-predict-bet-submit','Place prediction','function openBet(','function closeBet(','betOpen'];
+          const legacy = ['data-predict-bet-stage','data-predict-bet-input','data-predict-bet-submit','Place prediction','function openBet(','function closeBet(','betOpen','betStage','betInput','betUsd','betEstimate','betSubmit','bet-mode','bet-transition'];
           for (const token of legacy) if (src.includes(token)) throw new Error('Legacy Predict bet path remains: ' + token);
           const section = src.split('export const PREDICT_ZONE_STYLES', 1)[0];
           const presets = (section.match(/data-predict-bet-preset="/g) || []).length;
@@ -90,6 +97,7 @@ jobs:
           if ((section.match(/data-predict-bet-edit/g) || []).length !== 1) throw new Error('Expected exactly one Edit button');
           if (!src.includes("'/app/api/predict-bet'") || !src.includes("'/app/api/prediction-events/bet'")) throw new Error('Existing Predict backend route missing');
           if ((src.match(/function syncBetAvailability\(\)/g) || []).length !== 1) throw new Error('syncBetAvailability must remain singular');
+          if ((src.match(/function submitBet\(amount\)/g) || []).length !== 1) throw new Error('direct submit path must remain singular');
           console.log('Predict one-tap controls: parse and architecture checks OK');
           NODE
 

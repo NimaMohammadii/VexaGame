@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v4'
+    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v5'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 7
+          fetch-depth: 8
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -52,9 +52,13 @@ jobs:
               raise SystemExit('could not isolate old updateEstimate replace block')
           indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
           lines[start:end+1] = [
-              indent + "text, _vexa_update_count = re.subn(r'    function updateEstimate\(\)\{[^\n]*\}\n', '    function updateEstimate(){renderPresetQuotes()}\\n', text, count=1)",
-              indent + "if _vexa_update_count != 1:",
-              indent + "    raise SystemExit('updateEstimate regex: expected 1 match, found %s' % _vexa_update_count)",
+              indent + "_vexa_update_start = text.find('    function updateEstimate(){')",
+              indent + "if _vexa_update_start < 0:",
+              indent + "    raise SystemExit('updateEstimate start missing')",
+              indent + "_vexa_update_end = text.find(chr(10), _vexa_update_start)",
+              indent + "if _vexa_update_end < 0:",
+              indent + "    raise SystemExit('updateEstimate end missing')",
+              indent + "text = text[:_vexa_update_start] + '    function updateEstimate(){renderPresetQuotes()}' + chr(10) + text[_vexa_update_end + 1:]",
           ]
           code = 'import re\n' + '\n'.join(lines) + '\n'
           exec(compile(code, '<predict-one-tap-patch>', 'exec'), {})

@@ -488,37 +488,22 @@ body:has(#slot.active) header.top{
 }
 #slot .slot-asset-button:disabled{opacity:.48!important;cursor:default!important;filter:saturate(.55)!important}
 
-/* Home Get Ticket card material, with its inset lines made slightly clearer for Slot controls. */
+/* Slot control layout. Buttons retain the Get Ticket material. */
 #slot .slot-simple-controls{
-  width:min(90vw,370px)!important;
-  margin:-150px auto 0!important;
-  padding:10px 12px!important;
+  width:min(76vw,288px)!important;
+  margin:-66px auto 0!important;
+  padding:0!important;
   display:grid!important;
   gap:10px!important;
   justify-items:stretch!important;
-  overflow:hidden!important;
+  overflow:visible!important;
   border:0!important;
-  border-radius:28px!important;
-  background:transparent!important;
-  box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.18),inset -3px -3px .5px -3.5px rgba(156,38,70,.62),inset 1px 1px 1px -.5px rgba(140,29,61,.40),inset -1px -1px 1px -.5px rgba(124,22,53,.34),inset 0 0 0 1px rgba(166,39,72,.30),inset 0 0 6px 6px rgba(255,255,255,.075),inset 0 0 2px 2px rgba(255,255,255,.05)!important;
-  backdrop-filter:blur(22px) saturate(1.40) brightness(1.05) contrast(1.04)!important;
-  -webkit-backdrop-filter:blur(22px) saturate(1.40) brightness(1.05) contrast(1.04)!important;
-  isolation:isolate!important;
-  transform:translateZ(0)!important;
+  border-radius:0!important;
+  background:none!important;
+  box-shadow:none!important;
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
 }
-#slot .slot-simple-controls::before{
-  content:''!important;
-  position:absolute!important;
-  inset:0!important;
-  z-index:0!important;
-  display:block!important;
-  pointer-events:none!important;
-  border-radius:inherit!important;
-  background:radial-gradient(34px 34px at 0 0,rgba(186,53,87,.16) 0%,rgba(146,35,66,.07) 42%,rgba(104,18,44,0) 76%),radial-gradient(118% 76% at 10% -16%,rgba(255,255,255,.12) 0%,rgba(255,255,255,.032) 30%,rgba(255,255,255,0) 58%),radial-gradient(96% 72% at 102% 108%,rgba(255,255,255,.052) 0%,rgba(255,255,255,.010) 34%,rgba(255,255,255,0) 62%)!important;
-  box-shadow:inset 0 1px 0 rgba(112,18,49,.12)!important;
-}
-#slot .slot-simple-controls::after{content:none!important;display:none!important}
-#slot .slot-simple-controls>*{position:relative!important;z-index:1!important}
 #slot .slot-simple-bet-row{grid-template-columns:.58fr 1.84fr .58fr!important;gap:7px!important;align-items:center!important}
 #slot .slot-asset-button,#slot .slot-asset-input,#slot .slot-asset-spin{
   height:38px!important;
@@ -642,7 +627,7 @@ body:has(#slot.active) header.top{
 @media(max-width:380px){
   #slot .slot-cabinet{width:min(94vw,356px)!important;margin:10px auto 0!important}
   #slot .slot-symbol{height:calc((min(94vw,356px) * .460 * 900 / 845) / 3)!important}
-  #slot .slot-simple-controls{width:min(92vw,348px)!important;margin-top:-150px!important}
+  #slot .slot-simple-controls{width:min(80vw,300px)!important;margin-top:-66px!important}
   #slot .slot-simple-bet-row{gap:6px!important}
   #slot .slot-asset-input input{font-size:20px!important}
   #slot .slot-live{margin-top:30px!important;width:min(94%,370px)!important}

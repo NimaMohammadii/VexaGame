@@ -118,8 +118,7 @@ export class MinesSoloRoundRoom {
       const current = await this.state.storage.get<StoredRound>(ROUND_KEY).catch(() => null);
       if (!current || current.roundId !== roundId) return Response.json({ error: 'Round not found' }, { status: 404 });
       if (current.status === 'lost') return Response.json({ error: 'Round already ended' }, { status: 409 });
-      if (current.status === 'cashed_out') return Response.json(toRuntimeState(current));
-      if (current.status === 'collecting') return Response.json({ error: 'Collect already in progress' }, { status: 409 });
+      if (current.status === 'cashed_out' || current.status === 'collecting') return Response.json(toRuntimeState(current));
       if (current.revealedCells.length < minSafePicks) {
         return Response.json({ error: 'Open more safe tiles before collecting' }, { status: 409 });
       }

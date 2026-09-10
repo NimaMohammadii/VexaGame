@@ -1,0 +1,31 @@
+name: Repair Predict localization workflow once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.head_commit.message == 'Add Predict workflow repair'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Repair one-shot workflow
+        shell: bash
+        run: |
+          sed -i "s/github.event.head_commit.message == 'Apply Predict localized support patch'/github.event.head_commit.message == 'Repair Predict patch workflow'/" .github/workflows/_apply-predict-localization-once.yml
+          sed -i "s/^'''$/          '''/" .github/workflows/_apply-predict-localization-once.yml
+          git diff --check -- .github/workflows/_apply-predict-localization-once.yml
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/workflows/_apply-predict-localization-once.yml
+          git commit -m "Repair Predict patch workflow"
+          git push origin HEAD:main

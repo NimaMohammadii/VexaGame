@@ -86,8 +86,11 @@ app.get('/app/api/predict-round', async (c) => {
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     if (providerState === 'polymarket') {
-      // Previous-market resolution must not delay current-market readiness.
-      c.executionCtx.waitUntil(settleDueRounds(c.env, market, false, snapshot.price).catch((error) => {
+      // A lifecycle signal means Polymarket has resolved the previous market,
+      // so finish its idempotent payout before returning the refreshed balance.
+      const settlement = settleDueRounds(c.env, market, false, snapshot.price);
+      if (c.req.query('settle') === 'resolved') await settlement;
+      else c.executionCtx.waitUntil(settlement.catch((error) => {
         console.error('Predict background settlement failed', messageOf(error));
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);

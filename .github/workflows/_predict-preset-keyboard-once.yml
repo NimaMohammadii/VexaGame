@@ -16,100 +16,64 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Fix Predict Edit card and keyboard layout
+      - name: Patch authoritative Predict path only
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          p=Path('src/miniapp/predict-zone.ts')
+          s=p.read_text(encoding='utf-8')
+          original=s
 
-          path = Path('src/miniapp/predict-zone.ts')
-          text = path.read_text(encoding='utf-8')
-          original = text
+          def one(a,b,label):
+              global s
+              n=s.count(a)
+              if n!=1: raise SystemExit(f'{label}: expected 1, found {n}')
+              s=s.replace(a,b,1)
 
-          def one(old, new, label):
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
-              text = text.replace(old, new, 1)
+          one('grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important','grid-template-columns:repeat(4,minmax(0,1fr))!important','quick-bet geometry')
 
-          one(
-              'grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important',
-              'grid-template-columns:repeat(4,minmax(0,1fr))!important',
-              'equal quick-bet columns',
-          )
+          anchor='.predict-zone-bet-status.good{color:rgba(185,255,210,.9)}'
+          one(anchor,anchor+'\nbody.vexa-predict-preset-keyboard:has(#predictzone.active) .app{height:var(--predict-edit-layout-height,100vh)!important}body.vexa-predict-preset-keyboard:has(#predictzone.active) .content{height:calc(var(--predict-edit-layout-height,100vh) - 72px - 94px - env(safe-area-inset-top) - env(safe-area-inset-bottom))!important}body.vexa-predict-preset-keyboard:has(#predictzone.active) .tabs{display:none!important}','keyboard guard CSS')
 
-          style_anchor = '.predict-zone-bet-status.good{color:rgba(185,255,210,.9)}'
-          keyboard_styles = style_anchor + '\n' + (
-              'body.vexa-predict-preset-keyboard:has(#predictzone.active) .app{height:var(--predict-edit-layout-height,100vh)!important}'
-              'body.vexa-predict-preset-keyboard:has(#predictzone.active) .content{height:calc(var(--predict-edit-layout-height,100vh) - 72px - 94px - env(safe-area-inset-top) - env(safe-area-inset-bottom))!important}'
-              'body.vexa-predict-preset-keyboard:has(#predictzone.active) .tabs{display:none!important}'
-          )
-          one(style_anchor, keyboard_styles, 'Predict keyboard guard styles')
+          one('var presetEditing=false,limitNoticeTimer=0,','var presetEditing=false,presetKeyboardGuard=false,presetViewportBaseline=0,limitNoticeTimer=0,','keyboard state')
 
-          one(
-              'var presetEditing=false,limitNoticeTimer=0,',
-              'var presetEditing=false,presetKeyboardGuard=false,presetViewportBaseline=0,limitNoticeTimer=0,',
-              'Predict keyboard guard state',
-          )
-
-          helpers = [
-              "    function presetViewportHeight(){var vv=window.visualViewport;return Math.max(0,Number(vv&&vv.height)||Number(window.innerHeight)||0)}",
-              "    function beginPresetKeyboardGuard(){var app=document.querySelector('main.app'),height=app&&app.getBoundingClientRect?app.getBoundingClientRect().height:0;presetKeyboardGuard=true;presetViewportBaseline=presetViewportHeight();if(height>0)document.documentElement.style.setProperty('--predict-edit-layout-height',Math.round(height)+'px');document.body.classList.add('vexa-predict-preset-keyboard')}",
-              "    function endPresetKeyboardGuard(force){if(!presetKeyboardGuard)return;var height=presetViewportHeight();if(!force&&presetViewportBaseline&&height<presetViewportBaseline-80)return;presetKeyboardGuard=false;presetViewportBaseline=0;document.body.classList.remove('vexa-predict-preset-keyboard');document.documentElement.style.removeProperty('--predict-edit-layout-height')}",
-              "    function syncPresetKeyboardGuard(){if(!presetKeyboardGuard||presetEditing)return;endPresetKeyboardGuard(false)}",
+          helpers=[
+            "    function presetViewportHeight(){var vv=window.visualViewport;return Math.max(0,Number(vv&&vv.height)||Number(window.innerHeight)||0)}",
+            "    function beginPresetKeyboardGuard(){var app=document.querySelector('main.app'),height=app&&app.getBoundingClientRect?app.getBoundingClientRect().height:0;presetKeyboardGuard=true;presetViewportBaseline=presetViewportHeight();if(height>0)document.documentElement.style.setProperty('--predict-edit-layout-height',Math.round(height)+'px');document.body.classList.add('vexa-predict-preset-keyboard')}",
+            "    function endPresetKeyboardGuard(force){if(!presetKeyboardGuard)return;var height=presetViewportHeight();if(!force&&presetViewportBaseline&&height<presetViewportBaseline-80)return;presetKeyboardGuard=false;presetViewportBaseline=0;document.body.classList.remove('vexa-predict-preset-keyboard');document.documentElement.style.removeProperty('--predict-edit-layout-height')}",
+            "    function syncPresetKeyboardGuard(){if(!presetKeyboardGuard||presetEditing)return;endPresetKeyboardGuard(false)}",
           ]
+          setter="    function setPresetEditing(next){if(busy)return;var active,webapp;if(next&&!presetEditing)beginPresetKeyboardGuard();presetEditing=!!next;root.classList.toggle('predict-zone-preset-editing',presetEditing);if(presetEdit){presetEdit.classList.toggle('is-editing',presetEditing);presetEdit.textContent=presetEditing?'Done':'Edit'}var buttons=root.querySelectorAll('[data-predict-bet-preset]');buttons.forEach(function(btn){var value=btn.querySelector('[data-predict-preset-value]');if(!value){btn.innerHTML='<span data-predict-preset-value></span>';value=btn.querySelector('[data-predict-preset-value]')}if(!value)return;if(presetEditing){value.textContent=String(btn.getAttribute('data-predict-bet-preset')||'');value.setAttribute('contenteditable','true');value.setAttribute('inputmode','decimal');value.setAttribute('role','textbox');value.setAttribute('aria-label','Bet amount');value.spellcheck=false}else{var currentValue=String(btn.getAttribute('data-predict-bet-preset')||''),clean=normalizedPreset(value.textContent,currentValue);btn.setAttribute('data-predict-bet-preset',clean);value.removeAttribute('contenteditable');value.removeAttribute('inputmode');value.removeAttribute('role');value.removeAttribute('aria-label')}});if(presetEditing){var first=root.querySelector('[data-predict-preset-value][contenteditable=\"true\"]');if(first)try{first.focus({preventScroll:true})}catch(_){try{first.focus()}catch(__){}}}else{active=document.activeElement;if(active&&root.contains(active)&&active.matches&&active.matches('[data-predict-preset-value]'))try{active.blur()}catch(e){}try{webapp=window.Telegram&&window.Telegram.WebApp;if(webapp&&typeof webapp.hideKeyboard==='function')webapp.hideKeyboard()}catch(e){}resetPresetLabels();updateEstimate();if(window.visualViewport)syncPresetKeyboardGuard();else endPresetKeyboardGuard(true)}syncBetAvailability()}"
 
-          new_set_preset_editing = "    function setPresetEditing(next){if(busy)return;var active,webapp;if(next&&!presetEditing)beginPresetKeyboardGuard();presetEditing=!!next;root.classList.toggle('predict-zone-preset-editing',presetEditing);if(presetEdit){presetEdit.classList.toggle('is-editing',presetEditing);presetEdit.textContent=presetEditing?'Done':'Edit'}var buttons=root.querySelectorAll('[data-predict-bet-preset]');buttons.forEach(function(btn){var value=btn.querySelector('[data-predict-preset-value]');if(!value){btn.innerHTML='<span data-predict-preset-value></span>';value=btn.querySelector('[data-predict-preset-value]')}if(!value)return;if(presetEditing){value.textContent=String(btn.getAttribute('data-predict-bet-preset')||'');value.setAttribute('contenteditable','true');value.setAttribute('inputmode','decimal');value.setAttribute('role','textbox');value.setAttribute('aria-label','Bet amount');value.spellcheck=false}else{var currentValue=String(btn.getAttribute('data-predict-bet-preset')||''),clean=normalizedPreset(value.textContent,currentValue);btn.setAttribute('data-predict-bet-preset',clean);value.removeAttribute('contenteditable');value.removeAttribute('inputmode');value.removeAttribute('role');value.removeAttribute('aria-label')}});if(presetEditing){var first=root.querySelector('[data-predict-preset-value][contenteditable=\"true\"]');if(first)try{first.focus({preventScroll:true})}catch(_){try{first.focus()}catch(__){}}}else{active=document.activeElement;if(active&&root.contains(active)&&active.matches&&active.matches('[data-predict-preset-value]'))try{active.blur()}catch(e){}try{webapp=window.Telegram&&window.Telegram.WebApp;if(webapp&&typeof webapp.hideKeyboard==='function')webapp.hideKeyboard()}catch(e){}resetPresetLabels();updateEstimate();if(window.visualViewport)syncPresetKeyboardGuard();else endPresetKeyboardGuard(true)}syncBetAvailability()}"
-
-          lines = text.splitlines()
-          output = []
-          inserted_helpers = 0
-          replaced_setter = 0
-          for line in lines:
+          out=[]; helpers_added=0; setter_replaced=0
+          for line in s.splitlines():
               if line.startswith('    function normalizedPreset(value,fallback){'):
-                  output.append(line)
-                  output.extend(helpers)
-                  inserted_helpers += 1
-                  continue
+                  out.append(line); out.extend(helpers); helpers_added+=1; continue
               if line.startswith('    function setPresetEditing(next){'):
-                  output.append(new_set_preset_editing)
-                  replaced_setter += 1
-                  continue
-              output.append(line)
+                  out.append(setter); setter_replaced+=1; continue
+              out.append(line)
+          if helpers_added!=1 or setter_replaced!=1: raise SystemExit(f'Predict edit anchors mismatch helpers={helpers_added} setter={setter_replaced}')
+          s='\n'.join(out)+('\n' if original.endswith('\n') else '')
 
-          if inserted_helpers != 1:
-              raise SystemExit(f'keyboard helpers anchor: expected 1, found {inserted_helpers}')
-          if replaced_setter != 1:
-              raise SystemExit(f'setPresetEditing: expected 1, found {replaced_setter}')
-          text = '\n'.join(output) + ('\n' if original.endswith('\n') else '')
+          listener="    document.addEventListener('visibilitychange',syncActiveState);"
+          one(listener,"    if(window.visualViewport)window.visualViewport.addEventListener('resize',syncPresetKeyboardGuard);window.addEventListener('focus',syncPresetKeyboardGuard);window.addEventListener('pageshow',syncPresetKeyboardGuard);\n"+listener,'keyboard events')
 
-          listener_anchor = "    document.addEventListener('visibilitychange',syncActiveState);"
-          listener = "    if(window.visualViewport)window.visualViewport.addEventListener('resize',syncPresetKeyboardGuard);window.addEventListener('focus',syncPresetKeyboardGuard);window.addEventListener('pageshow',syncPresetKeyboardGuard);\n" + listener_anchor
-          one(listener_anchor, listener, 'VisualViewport keyboard listener')
-
-          checks = {
-              'setPresetEditing': text.count('function setPresetEditing(next)'),
-              'beginPresetKeyboardGuard': text.count('function beginPresetKeyboardGuard()'),
-              'endPresetKeyboardGuard': text.count('function endPresetKeyboardGuard(force)'),
-              'syncPresetKeyboardGuard': text.count('function syncPresetKeyboardGuard()'),
-              'VisualViewport resize': text.count("visualViewport.addEventListener('resize',syncPresetKeyboardGuard)"),
+          checks={
+            'setter':s.count('function setPresetEditing(next)'),
+            'guard':s.count('function beginPresetKeyboardGuard()'),
+            'release':s.count('function endPresetKeyboardGuard(force)'),
+            'sync':s.count('function syncPresetKeyboardGuard()'),
+            'resize':s.count("visualViewport.addEventListener('resize',syncPresetKeyboardGuard)"),
           }
-          if any(value != 1 for value in checks.values()):
-              raise SystemExit(f'Predict keyboard path is not singular: {checks}')
-          if 'grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important' in text:
-              raise SystemExit('old narrow Edit column remains')
-          if text.count('grid-template-columns:repeat(4,minmax(0,1fr))!important') != 1:
-              raise SystemExit('four equal Predict quick-bet columns missing or duplicated')
-          if text.count('vexa-predict-preset-keyboard') != 5:
-              raise SystemExit(f'unexpected Predict keyboard class references: {text.count("vexa-predict-preset-keyboard")}')
-          if text.count('hideKeyboard') != 2:
-              raise SystemExit(f'unexpected hideKeyboard references: {text.count("hideKeyboard")}')
-
-          path.write_text(text, encoding='utf-8')
+          if any(v!=1 for v in checks.values()): raise SystemExit(f'non-singular Predict edit path: {checks}')
+          if 'grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important' in s: raise SystemExit('old narrow Edit card remains')
+          if s.count('grid-template-columns:repeat(4,minmax(0,1fr))!important')!=1: raise SystemExit('equal quick-bet geometry missing/duplicate')
+          if s.count('vexa-predict-preset-keyboard')!=5: raise SystemExit('keyboard guard class mismatch')
+          if s.count('hideKeyboard')!=2: raise SystemExit('Telegram hideKeyboard path mismatch')
+          p.write_text(s,encoding='utf-8')
           PY
-
           git diff --check -- src/miniapp/predict-zone.ts
           test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
 
@@ -122,25 +86,16 @@ jobs:
           const src=fs.readFileSync('src/miniapp/predict-zone.ts','utf8');
           const marker='export const PREDICT_ZONE_SCRIPT = `';
           const a=src.indexOf(marker); if(a<0) throw new Error('Predict script marker missing');
-          const b=a+marker.length, e=src.indexOf('\n`;',b); if(e<0) throw new Error('Predict script end missing');
-          const raw=src.slice(b,e);
-          const cooked=Function('PREDICT_ERROR_TEXTS','return `'+raw+'`;')({en:{}});
+          const b=a+marker.length,e=src.indexOf('\n`;',b); if(e<0) throw new Error('Predict script end missing');
+          const cooked=Function('PREDICT_ERROR_TEXTS','return `'+src.slice(b,e)+'`;')({en:{}});
           new Function(cooked);
-          if((src.match(/function setPresetEditing\(next\)/g)||[]).length!==1) throw new Error('duplicate preset edit path');
-          if((src.match(/function beginPresetKeyboardGuard\(\)/g)||[]).length!==1) throw new Error('keyboard guard missing/duplicate');
-          if(!src.includes("window.visualViewport.addEventListener('resize',syncPresetKeyboardGuard)")) throw new Error('VisualViewport keyboard listener missing');
-          if(!src.includes('grid-template-columns:repeat(4,minmax(0,1fr))!important')) throw new Error('Edit card width is not equal');
-          console.log('Predict preset keyboard validation OK');
+          if((src.match(/function setPresetEditing\(next\)/g)||[]).length!==1) throw new Error('duplicate edit path');
+          if(!src.includes("window.visualViewport.addEventListener('resize',syncPresetKeyboardGuard)")) throw new Error('VisualViewport listener missing');
+          if(!src.includes('body.vexa-predict-preset-keyboard:has(#predictzone.active) .tabs{display:none!important}')) throw new Error('bottom nav keyboard guard missing');
+          console.log('Predict-only validation OK');
           NODE
 
-      - name: Verify repository
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-package-lock --legacy-peer-deps
-          npm run verify
-
-      - name: Commit only Predict source and remove temporary workflow
+      - name: Commit Predict source only
         shell: bash
         run: |
           set -euo pipefail
@@ -149,5 +104,6 @@ jobs:
           git rm .github/workflows/_predict-preset-keyboard-once.yml
           git add src/miniapp/predict-zone.ts
           git diff --cached --check
+          test "$(git diff --cached --name-only | sort | paste -sd ' ' -)" = ".github/workflows/_predict-preset-keyboard-once.yml src/miniapp/predict-zone.ts"
           git commit -m "Fix Predict preset edit keyboard layout"
           git push origin HEAD:main

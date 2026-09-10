@@ -86,14 +86,14 @@ export const SLOT_SECTION = `
 
   </div>
 
-  <div class="slot-live open" id="slotLive">
+  <div class="slot-live" id="slotLive">
     <div class="slot-live-head">
       <span class="slot-live-title">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.2 11.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M3.4 18.4c.6-3 2.3-4.6 4.8-4.6s4.2 1.6 4.8 4.6"/><path d="M16.3 10.2a2.6 2.6 0 1 0 0-5.2"/><path d="M15.4 13.6c2.4.2 3.9 1.7 4.4 4.3"/></svg>
         <span>Live Bets</span>
       </span>
       <div class="slot-live-head-actions">
-        <button id="slotLiveToggle" class="slot-live-toggle" type="button" aria-label="Toggle live slot results" aria-expanded="true">
+        <button id="slotLiveToggle" class="slot-live-toggle" type="button" aria-label="Close live slot results" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>
         </button>
       </div>

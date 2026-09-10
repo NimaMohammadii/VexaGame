@@ -63,9 +63,9 @@ body:has(#slot.active) header.top{
 
 #slot .slot-rewards-card,
 #slot .slot-live-menu-button{
-  position:fixed!important;
-  z-index:99993!important;
-  top:calc(14px + env(safe-area-inset-top))!important;
+  position:absolute!important;
+  z-index:18!important;
+  top:14px!important;
   width:auto!important;
   height:38px!important;
   min-width:88px!important;
@@ -531,7 +531,11 @@ body:has(#slot.active) header.top{
   overflow:hidden!important;
 }
 #slot .slot-asset-button img,#slot .slot-asset-input img{display:none!important}
-#slot .slot-asset-step{width:100%!important;height:38px!important;border-radius:28px!important;transform:none!important}
+#slot .slot-asset-step{width:100%!important;height:38px!important;border-radius:28px!important;transform:none!important;font-size:0!important;line-height:0!important;color:transparent!important}
+#slot .slot-asset-step>span{font-size:0!important;color:transparent!important}
+#slot .slot-asset-step:before,#slot .slot-asset-step:after{content:''!important;position:absolute!important;left:50%!important;top:50%!important;width:16px!important;height:2.6px!important;border-radius:999px!important;background:#fff!important;box-shadow:none!important;transform:translate(-50%,-50%)!important;pointer-events:none!important}
+#slot #slotBetMinus:after{display:none!important}
+#slot #slotBetPlus:after{display:block!important;width:2.6px!important;height:16px!important}
 #slot #slotBetMinus,#slot #slotBetPlus{--slot-step-x:0px!important}
 #slot .slot-asset-button>span{position:static!important;visibility:visible!important;color:#fff!important;font-size:12px!important;font-weight:950!important;text-shadow:none!important}
 #slot .slot-asset-input{width:100%!important;padding:0 12px!important;display:flex!important;align-items:center!important;justify-content:center!important}

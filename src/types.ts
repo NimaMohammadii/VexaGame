@@ -6,6 +6,7 @@ export type Env = {
   LOTTERY_SCHEDULER: DurableObjectNamespace;
   GHOST_RUN_LIVE: DurableObjectNamespace;
   CRASH_LIVE: DurableObjectNamespace;
+  MINES_SOLO_ROUND: DurableObjectNamespace;
   RATE_LIMITS: KVNamespace;
   ASSETS: R2Bucket;
   BOT_TOKEN: string;

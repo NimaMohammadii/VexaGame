@@ -85,19 +85,25 @@ app.get('/app/api/predict-round', async (c) => {
     const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
-    await settleDueRounds(c.env, market, false, snapshot.price);
+    if (providerState === 'polymarket') {
+      // Previous-market resolution must not delay current-market readiness.
+      c.executionCtx.waitUntil(settleDueRounds(c.env, market, false, snapshot.price).catch((error) => {
+        console.error('Predict background settlement failed', messageOf(error));
+      }));
+    } else await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history };
-    await reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined);
+    c.executionCtx.waitUntil(reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined));
     return c.json(response, 200, { 'cache-control': CACHE_NONE });
   } catch (error) {
     if (market === 'bitcoin' && error instanceof PredictRoundStartingError) {
-      const now = Date.now();
       const ends = Date.parse(error.endsAt);
       const controls = userId ? await publicUserControls(c.env, userId).catch(() => null) : null;
+      const now = Date.now();
       return c.json({
         ok: true,
         starting: true,
+        serverTime: now,
         retryAfterMs: error.retryAfterMs,
         userControls: controls,
         history: [],
@@ -270,7 +276,6 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
   const userBets = cleanedUserId ? await userBetsJson(env, roundId, cleanedUserId) : [];
   const recentUserBets = cleanedUserId ? await recentUserBetsJson(env, String(round.market || ''), cleanedUserId) : [];
   const userControls = cleanedUserId ? await publicUserControls(env, cleanedUserId) : null;
-  const now = Date.now();
   const ends = Date.parse(String(round.ends_at || ''));
   const lockAt = betLockAtMs(round);
   const provider = String(round.market || '') === 'bitcoin' ? await getPredictRoundProvider(env, roundId) : 'vexa';
@@ -287,7 +292,8 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
     takerFeeRate: 0.07,
     platformFeeRate: POLYMARKET_PLATFORM_FEE_BPS / 10_000,
   } : null;
-  return { ok: true, userControls, round: { id: roundId, market: String(round.market || ''), provider, polymarket, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
+  const now = Date.now();
+  return { ok: true, serverTime: now, userControls, round: { id: roundId, market: String(round.market || ''), provider, polymarket, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
 }
 async function ensurePredictTables(env: Env): Promise<void> {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_rounds (id TEXT PRIMARY KEY, market TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, start_price REAL NOT NULL, end_price REAL, status TEXT NOT NULL DEFAULT 'open', result TEXT, settled_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
@@ -334,13 +340,13 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
     if (existing) {
       const provider = await getPredictRoundProvider(env, existing.id);
       if (provider === 'polymarket') {
-        const metadata = await env.DB.prepare('SELECT round_id FROM predict_polymarket_rounds WHERE round_id = ? LIMIT 1').bind(existing.id).first<{ round_id: string }>();
+        const metadata = await env.DB.prepare('SELECT round_id, rtds_topic FROM predict_polymarket_rounds WHERE round_id = ? LIMIT 1').bind(existing.id).first<{ round_id: string; rtds_topic: string }>();
         const startMs = Date.parse(existing.starts_at);
         if (!Number.isFinite(startMs) || startMs <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
         if (metadata) {
           let canonicalStart: number;
           try {
-            canonicalStart = await fetchPolymarketBitcoinStartPrice(startMs);
+            canonicalStart = await fetchPolymarketBitcoinStartPrice(startMs, metadata.rtds_topic);
           } catch (error) {
             throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, /HTTP 429/i.test(messageOf(error)) ? ROUND_BOOTSTRAP_RATE_LIMIT_RETRY_MS : ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
           }

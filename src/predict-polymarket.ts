@@ -106,7 +106,7 @@ type TradingClient = Awaited<ReturnType<typeof createSecureClient>>;
 let tradingClientPromise: Promise<TradingClient> | null = null;
 let approvalsReadyPromise: Promise<void> | null = null;
 let providerTablesReady: Promise<void> | null = null;
-const startPriceRequests = new Map<number, Promise<number>>();
+const startPriceRequests = new Map<string, Promise<number>>();
 
 export type PolymarketMarketView = {
   slug: string;
@@ -472,14 +472,19 @@ export async function loadPolymarketBitcoinMarket(startMs: number): Promise<Poly
   const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
   const slug = `btc-updown-5m-${Math.floor(normalizedStart / 1000)}`;
-  const startPrice = await fetchPolymarketBitcoinStartPrice(normalizedStart);
-  return loadPolymarketBitcoinMarketBySlug(slug, startPrice);
+  return loadPolymarketBitcoinMarketBySlug(slug, undefined, false);
 }
 
-async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice: number): Promise<PolymarketMarketView> {
-  if (!(Number(startPrice) > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
+async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice?: number, refreshBooks = true): Promise<PolymarketMarketView> {
   const [market, event] = await Promise.all([fetchGammaMarketBySlug(slug), fetchGammaEventBySlug(slug)]);
+  if (startPrice === undefined) {
+    const startMs = Number(slug.split('-').pop()) * 1000;
+    startPrice = await fetchPolymarketBitcoinStartPrice(startMs, bitcoinRtdsTopic(market, event));
+  }
   const parsed = parseGammaBitcoinMarket(market, event, slug, startPrice);
+  // Round readiness needs the reference price and token IDs. Executing a bet
+  // still refreshes both books; the UI receives its books over the CLOB stream.
+  if (!refreshBooks) return parsed;
   const [upBook, downBook] = await Promise.all([fetchBook(parsed.upTokenId), fetchBook(parsed.downTokenId)]);
   return {
     ...parsed,
@@ -821,25 +826,35 @@ async function assertPolymarketTradingAllowed(): Promise<GeoBlockState> {
   return geo;
 }
 
-export async function fetchPolymarketBitcoinStartPrice(startMs: number): Promise<number> {
+export async function fetchPolymarketBitcoinStartPrice(startMs: number, rtdsTopic: string): Promise<number> {
   const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
-  const inFlight = startPriceRequests.get(normalizedStart);
+  if (!['crypto_prices_chainlink', 'crypto_prices_twap_thirty', 'crypto_prices_twap_sixty'].includes(rtdsTopic)) throw new Error('Unsupported Polymarket Bitcoin reference feed');
+  const key = `${normalizedStart}:${rtdsTopic}`;
+  const inFlight = startPriceRequests.get(key);
   if (inFlight) return inFlight;
-  const request = fetchPolymarketBitcoinStartPriceOnce(normalizedStart).finally(() => {
-    startPriceRequests.delete(normalizedStart);
+  const request = fetchPolymarketBitcoinStartPriceOnce(normalizedStart, rtdsTopic).catch((error) => {
+    startPriceRequests.delete(key);
+    throw error;
   });
-  startPriceRequests.set(normalizedStart, request);
+  startPriceRequests.set(key, request);
+  // Successful opening references are immutable for this round/source. Bound
+  // isolate memory while sharing the same result across concurrent requests.
+  if (startPriceRequests.size > 16) startPriceRequests.delete(startPriceRequests.keys().next().value!);
   return request;
 }
 
-async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number): Promise<number> {
+async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number, rtdsTopic: string): Promise<number> {
   const query = new URLSearchParams({
     symbol: 'BTC',
     eventStartTime: new Date(normalizedStart).toISOString(),
     variant: 'fiveminute',
     endDate: new Date(normalizedStart + POLYMARKET_ROUND_MS).toISOString(),
   });
+  if (rtdsTopic !== 'crypto_prices_chainlink') {
+    query.set('twapEnabled', 'true');
+    query.set('twapLookbackSeconds', rtdsTopic === 'crypto_prices_twap_thirty' ? '30' : '60');
+  }
   const url = `${POLYMARKET_WEB_BASE}/api/crypto/crypto-price?${query.toString()}`;
   const cacheKey = new Request(url, { method: 'GET' });
   const cache = getPolymarketEdgeCache();
@@ -852,7 +867,7 @@ async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number): Pr
     if (Number.isFinite(retryAt) && retryAt > Date.now()) throw new Error('Polymarket Bitcoin start price is unavailable: HTTP 429');
   }
 
-  const response = await fetch(url, { headers: { accept: 'application/json' } });
+  const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(6_000) });
   if (!response.ok) {
     if (response.status === 429 && cache) {
       const retryMs = parseRetryAfterMs(response.headers.get('retry-after'));
@@ -900,7 +915,7 @@ function parseRetryAfterMs(value: string | null): number {
 }
 
 async function fetchGammaMarketBySlug(slug: string): Promise<GammaRecord> {
-  const response = await fetch(`${GAMMA_BASE}/markets/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' } });
+  const response = await fetch(`${GAMMA_BASE}/markets/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(6_000) });
   if (!response.ok) throw new Error(`Polymarket Bitcoin market is unavailable: HTTP ${response.status}`);
   const market = await response.json() as unknown;
   if (!market || typeof market !== 'object' || Array.isArray(market)) throw new Error('Polymarket returned invalid Bitcoin market metadata');
@@ -908,7 +923,7 @@ async function fetchGammaMarketBySlug(slug: string): Promise<GammaRecord> {
 }
 
 async function fetchGammaEventBySlug(slug: string): Promise<GammaRecord> {
-  const response = await fetch(`${GAMMA_BASE}/events/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' } });
+  const response = await fetch(`${GAMMA_BASE}/events/slug/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(6_000) });
   if (!response.ok) throw new Error(`Polymarket Bitcoin event is unavailable: HTTP ${response.status}`);
   const event = await response.json() as unknown;
   if (!event || typeof event !== 'object' || Array.isArray(event)) throw new Error('Polymarket returned invalid Bitcoin event metadata');
@@ -935,8 +950,7 @@ function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expect
   if (!/^\d+$/.test(upTokenId) || !/^\d+$/.test(downTokenId)) throw new Error('Polymarket Bitcoin outcome token IDs are invalid');
   if (!(Number(startPrice) > 0)) throw new Error('Polymarket Bitcoin start price is unavailable for this round');
   const resolutionSource = findResolutionSource(market, event);
-  const sourceText = `${resolutionSource} ${String(market.description || event.description || '')}`.toLowerCase();
-  const rtdsTopic = /twap[-_ ]?30s|30[- ]second/.test(sourceText) ? 'crypto_prices_twap_thirty' : 'crypto_prices_twap_sixty';
+  const rtdsTopic = bitcoinRtdsTopic(market, event);
   return {
     slug,
     marketId,
@@ -954,6 +968,21 @@ function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expect
     rtdsSymbol: 'btc/usd',
     rtdsUrl: RTDS_URL,
   };
+}
+
+function bitcoinRtdsTopic(market: GammaRecord, event: GammaRecord): string {
+  const config = parseRecord(market.cryptoMarketConfig ?? event.cryptoMarketConfig);
+  if (config?.twapEnabled === true) {
+    if (Number(config.twapLookbackSeconds) === 30) return 'crypto_prices_twap_thirty';
+    if (Number(config.twapLookbackSeconds) === 60) return 'crypto_prices_twap_sixty';
+    throw new Error('Unsupported Polymarket Bitcoin TWAP window');
+  }
+  const source = `${findResolutionSource(market, event)} ${String(market.description || event.description || '')}`.toLowerCase();
+  if (/twap[-_ ]?30s|30[- ]second/.test(source)) return 'crypto_prices_twap_thirty';
+  if (/twap[-_ ]?60s|60[- ]second/.test(source)) return 'crypto_prices_twap_sixty';
+  if (/twap|time-weighted/.test(source)) throw new Error('Unsupported Polymarket Bitcoin TWAP window');
+  if (/chain\.link|chainlink/.test(source)) return 'crypto_prices_chainlink';
+  throw new Error('Unsupported Polymarket Bitcoin reference feed');
 }
 
 async function fetchBook(tokenId: string): Promise<{ bestAsk: number | null; askLiquidityUsd: number }> {

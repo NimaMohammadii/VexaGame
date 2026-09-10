@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v2'
+    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v3'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 5
+          fetch-depth: 6
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -38,14 +38,23 @@ jobs:
               raise SystemExit('validated patch payload not found')
           code = zlib.decompress(base64.b64decode(match.group(1))).decode('utf-8')
           lines = code.splitlines()
-          hit = [i for i, line in enumerate(lines) if 'old update estimate' in line]
-          if len(hit) != 1:
-              raise SystemExit(f'updateEstimate repair anchor count: {len(hit)}')
-          i = hit[0]
-          indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
-          lines[i:i+1] = [
+          hits = [i for i, line in enumerate(lines) if 'old update estimate' in line]
+          if len(hits) != 1:
+              raise SystemExit(f'updateEstimate repair anchor count: {len(hits)}')
+          hit = hits[0]
+          start = hit
+          while start >= 0 and 'replace_once(' not in lines[start]:
+              start -= 1
+          end = hit
+          while end < len(lines) and lines[end].strip() != ')':
+              end += 1
+          if start < 0 or end >= len(lines):
+              raise SystemExit('could not isolate old updateEstimate replace block')
+          indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+          lines[start:end+1] = [
               indent + "text, _vexa_update_count = re.subn(r'    function updateEstimate\\(\\)\\{[^\\n]*\\}\\n', '    function updateEstimate(){renderPresetQuotes()}\\n', text, count=1)",
-              indent + "if _vexa_update_count != 1: raise SystemExit(f'updateEstimate regex: expected 1 match, found {_vexa_update_count}')",
+              indent + "if _vexa_update_count != 1:",
+              indent + "    raise SystemExit('updateEstimate regex: expected 1 match, found %s' % _vexa_update_count)",
           ]
           code = 'import re\n' + '\n'.join(lines) + '\n'
           exec(compile(code, '<predict-one-tap-patch>', 'exec'), {})
@@ -69,11 +78,7 @@ jobs:
           const raw = src.slice(bodyStart, end);
           const cooked = Function('PREDICT_ERROR_TEXTS', 'return `' + raw + '`;')({ en: {} });
           new Function(cooked);
-
-          const legacy = [
-            'data-predict-bet-stage', 'data-predict-bet-input', 'data-predict-bet-submit',
-            'Place prediction', 'function openBet(', 'function closeBet(', 'betOpen'
-          ];
+          const legacy = ['data-predict-bet-stage','data-predict-bet-input','data-predict-bet-submit','Place prediction','function openBet(','function closeBet(','betOpen'];
           for (const token of legacy) if (src.includes(token)) throw new Error('Legacy Predict bet path remains: ' + token);
           const section = src.split('export const PREDICT_ZONE_STYLES', 1)[0];
           const presets = (section.match(/data-predict-bet-preset="/g) || []).length;

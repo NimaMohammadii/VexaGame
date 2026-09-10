@@ -488,6 +488,21 @@ body:has(#slot.active) header.top{
 }
 #slot .slot-asset-button:disabled{opacity:.48!important;cursor:default!important;filter:saturate(.55)!important}
 
+/* Slot keeps its uploaded control assets available for testing; this is the Crash control layout. */
+#slot .slot-simple-controls{width:min(92vw,390px)!important;margin:42px auto 0!important;display:grid!important;gap:10px!important;justify-items:stretch!important}
+#slot .slot-simple-bet-row{grid-template-columns:.58fr 1.84fr .58fr!important;gap:7px!important;align-items:center!important}
+#slot .slot-asset-button,#slot .slot-asset-input{height:38px!important;border-radius:28px!important;background:#080808!important;color:#fff!important;box-shadow:0 12px 30px rgba(31,1,10,.32),0 0 18px rgba(69,5,26,.15),inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(156,38,70,.48),inset 1px 1px 1px -.5px rgba(140,29,61,.30),inset -1px -1px 1px -.5px rgba(124,22,53,.24),inset 0 0 6px 6px rgba(255,255,255,.055),inset 0 0 2px 2px rgba(255,255,255,.035)!important;overflow:hidden!important}
+#slot .slot-asset-button img,#slot .slot-asset-input img{display:none!important}
+#slot .slot-asset-step{width:100%!important;height:38px!important;border-radius:28px!important;transform:none!important}
+#slot #slotBetMinus,#slot #slotBetPlus{--slot-step-x:0px!important}
+#slot .slot-asset-button>span{position:static!important;visibility:visible!important;color:#fff!important;font-size:12px!important;font-weight:950!important;text-shadow:none!important}
+#slot .slot-asset-input{width:100%!important;height:38px!important;padding:0 12px!important;display:flex!important;align-items:center!important;justify-content:center!important}
+#slot .slot-asset-input input{position:static!important;width:100%!important;height:38px!important;color:#fff!important;background:transparent!important;text-align:center!important;font-size:20px!important;font-weight:950!important;text-shadow:none!important}
+#slot .slot-asset-spin{width:100%!important;height:48px!important;margin:0!important;border-radius:28px!important;background:#080808!important}
+#slot .slot-asset-spin .slot-spin-label{position:static!important;visibility:visible!important;transform:none!important;color:#fff!important;font-family:inherit!important;font-size:14px!important;font-weight:950!important;letter-spacing:0!important;text-shadow:none!important}
+#slot .slot-asset-spin:active,#slot .slot-asset-step:active{transform:translate3d(0,1px,0) scale(.94)!important;filter:brightness(1.14) saturate(1.08)!important}
+#slot .slot-asset-button:disabled{opacity:.62!important;filter:none!important}
+
 #slot .slot-live{
   position:relative!important;
   z-index:5!important;

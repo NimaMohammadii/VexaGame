@@ -17,6 +17,17 @@ const VERSIONED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const DICE_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 50);
 const SLOT_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 200);
 const PUMP_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 24);
+let slotRoundsReady: Promise<void> | null = null;
+
+type SlotRoundRow = {
+  round_id: string;
+  user_id: string;
+  result_json: string;
+  tier: string;
+  multiplier: number;
+  payout_nano: number;
+  ton_balance_nano: number;
+};
 
 type LevelXpEventInput = {
   amount?: unknown;
@@ -182,17 +193,25 @@ app.post('/app/api/slot/spin', async (c) => {
   try {
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
     const { userId } = await authenticatedGameUser(c.env, body.initData, 'slot');
+    const roundId = cleanSlotRoundId(body.roundId);
+    await ensureSlotRoundsTable(c.env);
+    const previous = await readSlotRound(c.env, userId, roundId);
+    if (body.recover === true) {
+      if (!previous) throw new Error('Slot result is not ready yet');
+      return c.json({ ok: true, recovered: true, ...publicSlotRound(previous) }, 200, { 'cache-control': 'no-store' });
+    }
+    if (previous) return c.json({ ok: true, recovered: true, ...publicSlotRound(previous) }, 200, { 'cache-control': 'no-store' });
     const amountNano = cleanGameAmount(body.amountNano, SLOT_MAX_BET_NANO, 'Slot');
     const result = serverSlotResult();
     const profile = serverSlotProfile(result);
     const payoutNano = profile.multiplier > 0 ? Math.floor(amountNano * profile.multiplier) : 0;
-    const roundId = `slot_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
     const settled = await settleGameTonBalanceRound(c.env, userId, amountNano, payoutNano, {
       referenceId: roundId,
       referenceType: 'slot_round',
       metadata: { section: 'slot', result, tier: profile.tier, multiplier: profile.multiplier },
     });
-    return c.json({ ok: true, roundId, result, tier: profile.tier, multiplier: profile.multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+    const saved = await saveSlotRound(c.env, { roundId, userId, result, tier: profile.tier, multiplier: profile.multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano });
+    return c.json({ ok: true, ...publicSlotRound(saved) }, 200, { 'cache-control': 'no-store' });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Could not spin Slot' }, 400, { 'cache-control': 'no-store' });
   }
@@ -401,6 +420,43 @@ function serverSlotProfile(result: number[]): { tier: string; multiplier: number
   }
   if (count === 2 && symbol >= 0 && symbol <= 4) return { tier: 'pair-fruit', multiplier: 0.8 };
   return { tier: 'standard', multiplier: 0 };
+}
+
+function cleanSlotRoundId(value: unknown): string {
+  const roundId = String(value || '').trim();
+  if (/^slot_[a-zA-Z0-9_-]{16,64}$/.test(roundId)) return roundId;
+  return `slot_${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+async function ensureSlotRoundsTable(env: Env): Promise<void> {
+  if (!slotRoundsReady) slotRoundsReady = env.DB.prepare(`CREATE TABLE IF NOT EXISTS slot_rounds (
+    round_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    tier TEXT NOT NULL,
+    multiplier REAL NOT NULL,
+    payout_nano INTEGER NOT NULL,
+    ton_balance_nano INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run().then(() => undefined);
+  await slotRoundsReady;
+}
+
+async function readSlotRound(env: Env, userId: string, roundId: string): Promise<SlotRoundRow | null> {
+  return env.DB.prepare(`SELECT round_id, user_id, result_json, tier, multiplier, payout_nano, ton_balance_nano
+    FROM slot_rounds WHERE round_id = ? AND user_id = ?`).bind(roundId, userId).first<SlotRoundRow>();
+}
+
+async function saveSlotRound(env: Env, round: { roundId: string; userId: string; result: number[]; tier: string; multiplier: number; payoutNano: number; tonBalanceNano: number }): Promise<SlotRoundRow> {
+  await env.DB.prepare(`INSERT INTO slot_rounds (round_id, user_id, result_json, tier, multiplier, payout_nano, ton_balance_nano)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(round.roundId, round.userId, JSON.stringify(round.result), round.tier, round.multiplier, round.payoutNano, round.tonBalanceNano).run();
+  return { round_id: round.roundId, user_id: round.userId, result_json: JSON.stringify(round.result), tier: round.tier, multiplier: round.multiplier, payout_nano: round.payoutNano, ton_balance_nano: round.tonBalanceNano };
+}
+
+function publicSlotRound(round: SlotRoundRow): { roundId: string; result: number[]; tier: string; multiplier: number; payoutNano: number; tonBalanceNano: number } {
+  const parsed = JSON.parse(round.result_json);
+  return { roundId: round.round_id, result: Array.isArray(parsed) ? parsed : [], tier: round.tier, multiplier: round.multiplier, payoutNano: round.payout_nano, tonBalanceNano: round.ton_balance_nano };
 }
 
 function serverPumpBurstPoint(): number {

@@ -32,6 +32,21 @@ export const MINIAPP_SCRIPT = `
     if(code)return code;
     return zone==='UTC'||zone==='Etc/UTC'||zone==='GMT'?'GLOBAL':'';
   }
+  function countryTimeZone(countryCode){
+    var code=String(countryCode||'').trim().toUpperCase(),current=currentTimeZone();
+    if(!code)return current;
+    if(code==='GLOBAL')return'UTC';
+    if(timeZoneCountryCode(current)===code)return current;
+    var primary={AU:'Australia/Sydney',BR:'America/Sao_Paulo',CA:'America/Toronto',CL:'America/Santiago',CN:'Asia/Shanghai',EC:'America/Guayaquil',ES:'Europe/Madrid',GL:'America/Nuuk',ID:'Asia/Jakarta',KI:'Pacific/Tarawa',MX:'America/Mexico_City',NZ:'Pacific/Auckland',PF:'Pacific/Tahiti',PG:'Pacific/Port_Moresby',PT:'Europe/Lisbon',RU:'Europe/Moscow',US:'America/New_York',UZ:'Asia/Tashkent'},preferred=primary[code]||'',zones=[];
+    try{var locale=new Intl.Locale('und-'+code);zones=typeof locale.getTimeZones==='function'?locale.getTimeZones():(locale.timeZones||[])}catch(e){}
+    if(zones.indexOf(current)!==-1)return current;
+    if(preferred&&zones.indexOf(preferred)!==-1)return preferred;
+    if(zones.length)return String(zones[0]||current);
+    if(preferred&&timeZoneCountries[preferred]===code)return preferred;
+    for(var zone in timeZoneCountries)if(timeZoneCountries[zone]===code)return zone;
+    return current;
+  }
+  window.VexaCountryTimeZone=countryTimeZone;
   function detectedCountryCode(){
     if(detectedCountryPromise)return detectedCountryPromise;
     var zone=currentTimeZone();

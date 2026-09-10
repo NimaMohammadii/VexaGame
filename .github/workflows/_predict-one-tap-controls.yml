@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v6'
+    if: github.event.head_commit.message == 'Repair Predict one-tap controls patch v7'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 9
+          fetch-depth: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -39,9 +39,9 @@ jobs:
           code = zlib.decompress(base64.b64decode(match.group(1))).decode('utf-8')
           lines = code.splitlines()
 
-          rename_hits = [i for i, line in enumerate(lines) if "text = text.replace('updateEstimate()', 'renderPresetQuotes()')" in line]
+          rename_hits = [i for i, line in enumerate(lines) if 'text.replace' in line and 'updateEstimate()' in line and 'renderPresetQuotes()' in line]
           if len(rename_hits) != 1:
-              raise SystemExit(f'global updateEstimate rename count: {len(rename_hits)}')
+              raise SystemExit('global updateEstimate rename count: %s; related=%r' % (len(rename_hits), [line for line in lines if 'updateEstimate' in line]))
           del lines[rename_hits[0]]
 
           hits = [i for i, line in enumerate(lines) if 'old update estimate' in line]

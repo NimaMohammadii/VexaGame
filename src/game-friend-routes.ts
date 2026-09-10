@@ -49,16 +49,12 @@ export function registerFriendGameRoutes(app: App): void {
       }
       if (round.status !== 'active') return c.json({ ok: true, active: false, tonBalanceNano: controls.tonBalanceNano });
 
-      let runtime = await runtimeForRound(c.env, userId, round);
-      if (runtime.status === 'collecting') {
-        await rollbackMinesSoloCollect(c.env, userId, runtime.roundId);
-        runtime = await getMinesSoloRuntime(c.env, userId);
-      }
+      const runtime = await runtimeForRound(c.env, userId, round);
       if (runtime.status === 'lost') {
         await persistSoloRuntimeLoss(c.env, runtime);
         return c.json(soloRuntimeState(runtime, controls.tonBalanceNano));
       }
-      if (runtime.status === 'cashed_out') {
+      if (runtime.status === 'collecting' || runtime.status === 'cashed_out') {
         const settled = await settleSoloRuntimeCollect(c.env, runtime);
         return c.json(soloState(settled.round, settled.controls.tonBalanceNano));
       }
@@ -83,18 +79,14 @@ export function registerFriendGameRoutes(app: App): void {
         current = activated.round;
       }
       if (current?.status === 'active') {
-        let runtime = await runtimeForRound(c.env, userId, current);
+        const runtime = await runtimeForRound(c.env, userId, current);
         if (runtime.status === 'lost') {
           await persistSoloRuntimeLoss(c.env, runtime);
           current = await soloRound(c.env, userId);
-        } else if (runtime.status === 'cashed_out') {
+        } else if (runtime.status === 'collecting' || runtime.status === 'cashed_out') {
           const settled = await settleSoloRuntimeCollect(c.env, runtime);
           current = settled.round;
         } else {
-          if (runtime.status === 'collecting') {
-            await rollbackMinesSoloCollect(c.env, userId, runtime.roundId);
-            runtime = await getMinesSoloRuntime(c.env, userId);
-          }
           const controls = await getUserControls(c.env, userId);
           return c.json({ ...soloRuntimeState(runtime, controls.tonBalanceNano), started: false });
         }
@@ -487,4 +479,4 @@ function secureHiddenCells(size:number,count:number){
 }
 function parseNums(value:string){try{const parsed=JSON.parse(value);return Array.isArray(parsed)?Array.from(new Set(parsed.map(Number).filter((n)=>Number.isInteger(n)&&n>=0&&n<25))).sort((a,b)=>a-b):[];}catch{return[];}}
 function parseRevealed(value:string):Array<{cell:number;byUserId:string;result:'safe'|'hidden'}>{try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map((item)=>({cell:Number(item.cell),byUserId:String(item.byUserId||''),result:item.result==='hidden'?'hidden' as const:'safe' as const})).filter((item)=>Number.isInteger(item.cell)&&item.cell>=0&&item.cell<25):[];}catch{return[];}}
-function fail(c:any,error:unknown,fallback:string){const message=error instanceof Error?error.message:fallback;const runtimeStatus=error instanceof MinesSoloRuntimeError?error.status:0;const status=runtimeStatus||message==='Room not found'||message==='Round not found'?404:/blocked|not in this room|Only the host/i.test(message)?403:/Telegram user mismatch|init data|authentication/i.test(message)?401:/already ended|not active|Open more safe/i.test(message)?409:400;return c.json({error:message},status);}
+function fail(c:any,error:unknown,fallback:string){const message=error instanceof Error?error.message:fallback;const status=error instanceof MinesSoloRuntimeError&&error.status>0?error.status:message==='Room not found'||message==='Round not found'?404:/blocked|not in this room|Only the host/i.test(message)?403:/Telegram user mismatch|init data|authentication/i.test(message)?401:/already ended|not active|Open more safe/i.test(message)?409:400;return c.json({error:message},status);}

@@ -1,0 +1,190 @@
+name: Apply native game amount prompts once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply native prompts to Plinko Mines Slot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Replace game amount editors with Telegram native prompts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_one(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          # Plinko section: remove the obsolete floating editor input only.
+          p = Path('src/miniapp/plinko/section.ts')
+          s = p.read_text(encoding='utf-8')
+          s = replace_one(
+              s,
+              '<input class="plinko-bet-input" data-plinko-bet-input type="number" min="0.01" inputmode="decimal" value="1" aria-hidden="true" tabindex="-1"/>',
+              '',
+              'Plinko floating editor markup',
+          )
+          p.write_text(s, encoding='utf-8')
+
+          # Plinko panel: keep the existing amount card and quick controls, but make manual entry native-only.
+          p = Path('src/miniapp/plinko/scripts/panel.ts')
+          s = p.read_text(encoding='utf-8')
+          s = replace_one(
+              s,
+              "  var inlineInputHome=null;\n  var lastAmountPointerAt=0;\n  var amountAnchor=null;\n  var amountViewportHandler=null;\n  var amountRestoreTimer=0;\n  var amountClosing=false;\n",
+              "  var lastAmountPointerAt=0;\n",
+              'Plinko floating editor state',
+          )
+          s = replace_one(
+              s,
+              "  function setBet(value){var input=q('plinkoBet'),open=document.querySelector('[data-plinko-bet-input-open]'),editorInput=document.querySelector('[data-plinko-bet-input]');var next=roundCurrency(value);if(!Number.isFinite(next)||next<MIN_BET)next=MIN_BET;var balance=roundCurrency(readBalanceNano()/NANO);if(balance>=MIN_BET&&next>balance)next=balance;var display=money(next);if(input)input.value=display;if(open)open.textContent=display;if(editorInput&&document.activeElement!==editorInput)editorInput.value=display;renderStats()}\n",
+              "  function setBet(value){var input=q('plinkoBet'),open=document.querySelector('[data-plinko-bet-input-open]');var next=roundCurrency(value);if(!Number.isFinite(next)||next<MIN_BET)next=MIN_BET;var balance=roundCurrency(readBalanceNano()/NANO);if(balance>=MIN_BET&&next>balance)next=balance;var display=money(next);if(input)input.value=display;if(open)open.textContent=display;renderStats()}\n",
+              'Plinko setBet editor dependency',
+          )
+          start = s.find('  function setInputRect(input,rect){')
+          end = s.find('  function syncHeaderCredit(){', start)
+          if start < 0 or end < 0:
+              raise SystemExit('Plinko floating editor helper block anchors not found')
+          old_block = s[start:end]
+          required = ['function setInputRect(', 'function focusAmountInput(', 'function restoreInlineInput(', 'function closeEditor(']
+          missing = [name for name in required if name not in old_block]
+          if missing:
+              raise SystemExit(f'Plinko expected old helpers missing: {missing}')
+          replacement = "  function promptBetAmount(){if(!isPlinkoActive())return;var current=money(currentBet()),next=null;try{next=window.prompt('Enter point amount',current)}catch(e){return}if(next===null)return;var parsed=Number(String(next).trim().replace(',','.'));if(!Number.isFinite(parsed)||parsed<MIN_BET)return;setBet(parsed)}\n"
+          s = s[:start] + replacement + s[end:]
+          s = replace_one(s, "if(btn.hasAttribute('data-plinko-bet-input-open'))focusAmountInput(btn);", "if(btn.hasAttribute('data-plinko-bet-input-open'))promptBetAmount();", 'Plinko pointer amount path')
+          s = replace_one(s, "if(button.hasAttribute('data-plinko-bet-input-open')){ev.preventDefault();focusAmountInput(button);return}", "if(button.hasAttribute('data-plinko-bet-input-open')){ev.preventDefault();promptBetAmount();return}", 'Plinko click amount path')
+          s = replace_one(s, "if(button.hasAttribute('data-plinko-bet-done')){ev.preventDefault();closeEditor(true);return}", '', 'Plinko obsolete done path')
+          s = replace_one(s, "  document.addEventListener('click',function(ev){var editor=document.querySelector('[data-plinko-bet-editor]');if(editor&&editor.classList.contains('active')&&ev.target===editor)closeEditor(true)});\n", '', 'Plinko obsolete editor backdrop listener')
+          keydown_pattern = re.compile(r"  document\.addEventListener\('keydown',function\(ev\)\{var input=document\.querySelector\('\[data-plinko-bet-input\]'\);.*?\}\);\n")
+          s, count = keydown_pattern.subn('', s, count=1)
+          if count != 1:
+              raise SystemExit(f'Plinko obsolete keydown listener: expected 1, found {count}')
+          old_input_listener = "  document.addEventListener('input',function(ev){if(ev.target&&ev.target.id==='plinkoBet')setBet(ev.target.value);if(ev.target&&ev.target.hasAttribute&&ev.target.hasAttribute('data-plinko-bet-input')){var hidden=q('plinkoBet'),open=document.querySelector('[data-plinko-bet-input-open]');if(hidden)hidden.value=ev.target.value;if(open)open.textContent=money(ev.target.value);renderStats()}});\n"
+          new_input_listener = "  document.addEventListener('input',function(ev){if(ev.target&&ev.target.id==='plinkoBet')setBet(ev.target.value)});\n"
+          s = replace_one(s, old_input_listener, new_input_listener, 'Plinko editor input listener')
+          s = replace_one(s, "  document.addEventListener('focusout',function(ev){if(ev.target&&ev.target.hasAttribute&&ev.target.hasAttribute('data-plinko-bet-input'))restoreInlineInput(true)});\n", '', 'Plinko editor focusout listener')
+          forbidden = ['focusAmountInput(', 'restoreInlineInput(', 'setInputRect(', 'amountViewportHandler', 'amountRestoreTimer', 'amountClosing', "querySelector('[data-plinko-bet-input]')"]
+          leftovers = [item for item in forbidden if item in s]
+          if leftovers:
+              raise SystemExit(f'Plinko obsolete editor path remains: {leftovers}')
+          if s.count("window.prompt('Enter point amount',current)") != 1:
+              raise SystemExit('Plinko native prompt missing or duplicated')
+          p.write_text(s, encoding='utf-8')
+
+          # Plinko styles: remove only the dead floating editor styles.
+          p = Path('src/miniapp/plinko/control-styles.ts')
+          s = p.read_text(encoding='utf-8')
+          for pattern, label in [
+              (r"#plinko \.plinko-bet-editor,#plinko \.plinko-bet-editor\.active,#plinko \.plinko-bet-box,#plinko \.plinko-bet-box small,#plinko \.plinko-bet-done\{[^\n]*\}\n", 'Plinko editor shell style'),
+              (r"#plinko \.plinko-bet-input\{[^\n]*\}\n", 'Plinko hidden editor style'),
+              (r"body \.plinko-bet-input\.plinko-bet-input-floating\{[^\n]*\}\n", 'Plinko floating editor style'),
+              (r"body \.plinko-bet-input\.plinko-bet-input-floating\.plinko-bet-input-expanded\{[^\n]*\}\n", 'Plinko expanded editor style'),
+          ]:
+              s, count = re.subn(pattern, '', s, count=1)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1, found {count}')
+          s = replace_one(s, ',body .plinko-bet-input.plinko-bet-input-floating{transition:none!important}', '{transition:none!important}', 'Plinko reduced-motion stale editor selector')
+          if '.plinko-bet-input' in s or '.plinko-bet-editor' in s or '.plinko-bet-done' in s:
+              raise SystemExit('Plinko dead editor styles remain')
+          p.write_text(s, encoding='utf-8')
+
+          # Mines: retain the existing visible amount field, make it readonly, and use Telegram native prompt on tap.
+          p = Path('src/miniapp/mines/script.ts')
+          s = p.read_text(encoding='utf-8')
+          marker = "  function refresh(){"
+          if s.count(marker) != 1:
+              raise SystemExit(f'Mines refresh anchor: expected 1, found {s.count(marker)}')
+          helper = "  function promptMinesBetAmount(){if(friendMode||state.active||state.busy)return;var amount=q('minesBet'),current=amount?String(amount.value||fromNano(state.amountNano)):fromNano(state.amountNano),next=null;try{next=window.prompt('Enter point amount',current)}catch(e){return}if(next===null)return;var parsed=Number(String(next).trim().replace(',','.'));if(!Number.isFinite(parsed)||parsed<=0)return;setBetNano(toNano(parsed));refresh()}\n"
+          s = s.replace(marker, helper + marker, 1)
+          old_bind = "var amount=q('minesBet');var count=q('minesCount');if(amount)amount.addEventListener('input',refresh);if(count)count.addEventListener('change',refresh);"
+          new_bind = "var amount=q('minesBet');var count=q('minesCount');if(amount){amount.readOnly=true;amount.setAttribute('aria-haspopup','dialog');amount.addEventListener('click',function(ev){if(friendMode||state.active||state.busy)return;ev.preventDefault();try{amount.blur()}catch(e){}promptMinesBetAmount()})}if(count)count.addEventListener('change',refresh);"
+          s = replace_one(s, old_bind, new_bind, 'Mines direct HTML amount binding')
+          if "amount.addEventListener('input',refresh)" in s:
+              raise SystemExit('Mines direct HTML editing path remains')
+          if s.count("window.prompt('Enter point amount',current)") != 1:
+              raise SystemExit('Mines native prompt missing or duplicated')
+          p.write_text(s, encoding='utf-8')
+
+          # Slot: retain all +/-/half/max controls; tapping the amount field uses Telegram native prompt.
+          p = Path('src/miniapp/slot/script.ts')
+          s = p.read_text(encoding='utf-8')
+          marker = "  function refreshControls(){"
+          if s.count(marker) != 1:
+              raise SystemExit(f'Slot refreshControls anchor: expected 1, found {s.count(marker)}')
+          helper = "  function promptSlotBetValue(){if(spinning)return;var current=String(betValue()),next=null;try{next=window.prompt('Enter TON amount',current)}catch(e){return}if(next===null)return;var parsed=Math.floor(Number(String(next).trim().replace(',','.')));if(!Number.isFinite(parsed))return;setBetValue(parsed)}\n"
+          s = s.replace(marker, helper + marker, 1)
+          old_bind = "if(amount&&!amount.dataset.slotBetBound){amount.dataset.slotBetBound='1';amount.addEventListener('input',refreshControls);amount.addEventListener('change',refreshControls)}"
+          new_bind = "if(amount&&!amount.dataset.slotBetBound){amount.dataset.slotBetBound='1';amount.readOnly=true;amount.setAttribute('aria-haspopup','dialog');amount.addEventListener('click',function(ev){if(spinning)return;ev.preventDefault();try{amount.blur()}catch(e){}promptSlotBetValue()})}"
+          s = replace_one(s, old_bind, new_bind, 'Slot direct HTML amount binding')
+          if "amount.addEventListener('input',refreshControls)" in s or "amount.addEventListener('change',refreshControls)" in s:
+              raise SystemExit('Slot direct HTML editing path remains')
+          if s.count("window.prompt('Enter TON amount',current)") != 1:
+              raise SystemExit('Slot native prompt missing or duplicated')
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          allowed='src/miniapp/mines/script.ts src/miniapp/plinko/control-styles.ts src/miniapp/plinko/scripts/panel.ts src/miniapp/plinko/section.ts src/miniapp/slot/script.ts'
+          actual="$(git diff --name-only | sort | paste -sd ' ' -)"
+          test "$actual" = "$allowed"
+          git diff --check -- $allowed
+
+      - name: Validate game scripts and native-only amount paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          function script(path, marker){
+            const source=fs.readFileSync(path,'utf8');
+            const prefix='export const '+marker+' = `';
+            const start=source.indexOf(prefix);
+            if(start<0) throw new Error(path+': script marker missing');
+            const bodyStart=start+prefix.length;
+            const end=source.lastIndexOf('\n`;');
+            if(end<bodyStart) throw new Error(path+': script end missing');
+            const body=source.slice(bodyStart,end);
+            new Function(body);
+            return source;
+          }
+          const plinko=script('src/miniapp/plinko/scripts/panel.ts','PLINKO_PANEL_SCRIPT');
+          const mines=script('src/miniapp/mines/script.ts','MINES_SCRIPT');
+          const slot=script('src/miniapp/slot/script.ts','SLOT_SCRIPT');
+          const plinkoSection=fs.readFileSync('src/miniapp/plinko/section.ts','utf8');
+          const plinkoStyles=fs.readFileSync('src/miniapp/plinko/control-styles.ts','utf8');
+          if((plinko.match(/window\.prompt\('Enter point amount',current\)/g)||[]).length!==1) throw new Error('Plinko prompt path invalid');
+          if((mines.match(/window\.prompt\('Enter point amount',current\)/g)||[]).length!==1) throw new Error('Mines prompt path invalid');
+          if((slot.match(/window\.prompt\('Enter TON amount',current\)/g)||[]).length!==1) throw new Error('Slot prompt path invalid');
+          if(plinkoSection.includes('data-plinko-bet-input')||plinko.includes("querySelector('[data-plinko-bet-input]')")||plinkoStyles.includes('.plinko-bet-input')) throw new Error('Old Plinko floating editor remains');
+          if(!mines.includes("amount.readOnly=true")||!slot.includes("amount.readOnly=true")) throw new Error('Readonly native-prompt gate missing');
+          NODE
+
+      - name: Commit only the scoped game amount changes and remove executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_game-native-prompt-once.yml
+          git config user.name 'Vexa Patch Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/miniapp/plinko/section.ts src/miniapp/plinko/scripts/panel.ts src/miniapp/plinko/control-styles.ts src/miniapp/mines/script.ts src/miniapp/slot/script.ts .github/workflows/_game-native-prompt-once.yml
+          git diff --cached --check
+          staged="$(git diff --cached --name-only | sort | paste -sd ' ' -)"
+          expected='.github/workflows/_game-native-prompt-once.yml src/miniapp/mines/script.ts src/miniapp/plinko/control-styles.ts src/miniapp/plinko/scripts/panel.ts src/miniapp/plinko/section.ts src/miniapp/slot/script.ts'
+          test "$staged" = "$expected"
+          git commit -m 'Use Telegram native prompts for Plinko Mines Slot amounts'
+          git push origin HEAD:main

@@ -6,7 +6,7 @@ import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, pub
 import { gameBotToken, validateTelegramInitData } from './utils';
 import { getSectionAccess, isMiniAppAdmin } from './section-access';
 import { getStarsGramRate } from './stars-deposits';
-import { ensurePredictProviderTables, executePolymarketBitcoinBet, fetchPolymarketBitcoinStartPrice, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
+import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -343,19 +343,10 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
         const metadata = await env.DB.prepare('SELECT round_id, rtds_topic FROM predict_polymarket_rounds WHERE round_id = ? LIMIT 1').bind(existing.id).first<{ round_id: string; rtds_topic: string }>();
         const startMs = Date.parse(existing.starts_at);
         if (!Number.isFinite(startMs) || startMs <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
-        if (metadata) {
-          let canonicalStart: number;
-          try {
-            canonicalStart = await fetchPolymarketBitcoinStartPrice(startMs, metadata.rtds_topic);
-          } catch (error) {
-            throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, /HTTP 429/i.test(messageOf(error)) ? ROUND_BOOTSTRAP_RATE_LIMIT_RETRY_MS : ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
-          }
-          if (!(canonicalStart > 0)) throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
-          const storedStart = Number(existing.start_price);
-          if (!(storedStart > 0) || Math.abs(storedStart - canonicalStart) > 1e-9) {
-            await env.DB.prepare('UPDATE predict_rounds SET start_price = ? WHERE id = ?').bind(canonicalStart, existing.id).run();
-            existing = { ...existing, start_price: canonicalStart };
-          }
+        if (metadata && Number(existing.start_price) > 0) {
+          // A persisted Polymarket round is already complete. Its opening
+          // reference is immutable, so a later upstream timeout or rate limit
+          // must never turn the live round back into a starting round.
           return existing;
         }
         const bootstrap = await claimPredictRoundBootstrap(env, existing.id, market);

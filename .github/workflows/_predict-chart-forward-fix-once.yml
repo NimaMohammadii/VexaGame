@@ -150,13 +150,12 @@ jobs:
           console.log('Predict simple forward chart validation OK');
           NODE
 
-      - name: Commit only Predict owner and remove one-shot workflow
+      - name: Commit only Predict owner
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "Vexa Patch Bot"
           git config user.email "actions@users.noreply.github.com"
-          git rm -f .github/workflows/_predict-chart-forward-fix-once.yml
           git add src/miniapp/predict-zone.ts
           git diff --cached --check
           test "$(git diff --cached --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"

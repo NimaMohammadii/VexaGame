@@ -7,7 +7,7 @@ import { setTelegramWebhook } from './telegram-game-bot';
 import { PUBLIC_BASE_URL } from './utils';
 import { cleanSectionId, sectionBackgroundInfo, sectionBackgroundR2Key } from './section-backgrounds';
 import type { Env } from './types';
-import { getOnlineUserCountConfig, ONLINE_COUNT_SECTIONS, resetOnlineUserCountConfig, saveOnlineUserCountConfig } from './online-user-counts';
+import { resetOnlineUserCountConfig, saveOnlineUserCountConfig } from './online-user-counts';
 import { clearSectionLock, getSectionAccess, isMiniAppAdmin, setSectionLock } from './section-access';
 import './predict-routes';
 import './crash-routes';
@@ -130,7 +130,6 @@ function normalizeUploadedImagesContext(context: string | undefined): string | n
   const clean = String(context || '').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(UPLOADED_IMAGE_CONTEXT_SECTIONS, clean) ? clean : null;
 }
-app.get('/app/api/online-user-counts', async (c) => c.json({ ok: true, sections: ONLINE_COUNT_SECTIONS, ...(await getOnlineUserCountConfig(c.env)) }, 200, { 'cache-control': 'no-store' }));
 app.get('/app/api/user-controls', zValidator('query', userIdSchema), async (c) => c.json(await publicUserControls(c.env, c.req.valid('query').userId)));
 app.get('/app/api/section-access', zValidator('query', userIdSchema), async (c) => {
   const userId = c.req.valid('query').userId;

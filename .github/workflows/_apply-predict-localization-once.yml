@@ -1,0 +1,44 @@
+name: Apply Predict localization once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run Predict localization patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply validated Predict patch
+        shell: bash
+        run: |
+          git show 790d38cf6b663fb727b5d6df9a04bab8017b8d78:.github/workflows/_apply-predict-localization-once.yml > /tmp/original-predict-patch.yml
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('/tmp/original-predict-patch.yml').read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(source) if line == '        run: |') + 1
+          end = next(i for i in range(start, len(source)) if source[i] == '      - name: Commit Predict patch')
+          body = []
+          for line in source[start:end]:
+              body.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply-predict-patch.sh').write_text('\n'.join(body) + '\n', encoding='utf-8')
+          PY
+          bash /tmp/apply-predict-patch.sh
+      - name: Commit Predict localization
+        shell: bash
+        run: |
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --name-only | grep -qx 'src/miniapp/predict-zone.ts'
+          git commit -m "Localize Predict errors and add region support contact"
+          git push origin HEAD:main

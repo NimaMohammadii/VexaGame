@@ -1,0 +1,67 @@
+name: Apply Predict startup price source fix once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply Predict startup price source fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Fix Predict first-load price source ordering only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/miniapp/predict-zone.ts')
+          s=p.read_text(encoding='utf-8')
+          old="var my=seq,selectedMarket=market;connectFeed(my,selectedMarket);syncRound(my,selectedMarket).then(function(ok){if(ok&&my===seq&&selectedMarket===market&&!eventMode)startClock()})"
+          new="var my=seq,selectedMarket=market;syncRound(my,selectedMarket).then(function(ok){if(my!==seq||selectedMarket!==market||eventMode)return;if(!ws&&!reconnectTimer)connectFeed(my,selectedMarket);if(ok)startClock()})"
+          if s.count(old)!=1:
+              raise SystemExit(f'expected exactly one startup ordering anchor, found {s.count(old)}')
+          if s.count('connectFeed(my,selectedMarket);syncRound(my,selectedMarket)')!=1:
+              raise SystemExit('unexpected startup path shape; refusing to guess')
+          s=s.replace(old,new,1)
+          if 'connectFeed(my,selectedMarket);syncRound(my,selectedMarket)' in s:
+              raise SystemExit('old feed-before-round startup path remains')
+          if s.count('syncRound(my,selectedMarket).then(function(ok)')!=1:
+              raise SystemExit('startup sync path is not singular')
+          p.write_text(s,encoding='utf-8')
+          PY
+          git diff --check -- src/miniapp/predict-zone.ts
+          test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
+      - name: Validate emitted Predict browser script
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('src/miniapp/predict-zone.ts','utf8');
+          const marker='export const PREDICT_ZONE_SCRIPT = `';
+          const a=src.indexOf(marker); if(a<0) throw new Error('script marker missing');
+          const b=a+marker.length, e=src.indexOf('\n`;',b); if(e<0) throw new Error('script end missing');
+          const raw=src.slice(b,e);
+          const cooked=Function('PREDICT_ERROR_TEXTS','return `'+raw+'`;')({en:{}});
+          new Function(cooked);
+          if(src.includes('connectFeed(my,selectedMarket);syncRound(my,selectedMarket)')) throw new Error('old startup order remains');
+          console.log('Predict startup price-source ordering validation OK');
+          NODE
+      - name: Commit only Predict source and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/_predict-startup-price-source-once.yml
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --check
+          git commit -m "Fix Predict first-load chart price jump"
+          git push origin HEAD:main

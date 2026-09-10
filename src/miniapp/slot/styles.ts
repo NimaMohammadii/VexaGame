@@ -91,7 +91,7 @@ body:has(#slot.active) header.top{
   opacity:.72!important;
 }
 #slot .slot-rewards-card{left:16px!important;width:38px!important;min-width:38px!important;padding:0!important}
-#slot .slot-live-menu-button{right:16px!important;font-size:12px!important;font-weight:950!important;line-height:1!important;letter-spacing:-.02em!important}
+#slot .slot-live-menu-button{right:16px!important;z-index:30!important;pointer-events:auto!important;font-size:12px!important;font-weight:950!important;line-height:1!important;letter-spacing:-.02em!important}
 #slot .slot-rewards-card:active,#slot .slot-live-menu-button:active{transform:translate3d(0,1px,0) scale(.94)!important;filter:brightness(1.14) saturate(1.08)!important;transition-duration:.11s!important}
 #slot .slot-rewards-card svg{filter:drop-shadow(0 5px 8px rgba(0,0,0,.5))}
 #slot .slot-rewards-panel{

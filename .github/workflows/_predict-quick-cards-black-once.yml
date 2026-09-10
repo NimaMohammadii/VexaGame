@@ -1,0 +1,49 @@
+name: Apply Predict quick card black styling once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply Predict quick card black styling'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Update only Predict quick cards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('src/miniapp/predict-zone.ts')
+          text=path.read_text(encoding='utf-8')
+          old=".predict-zone-quick-bets{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important;gap:7px!important;margin:0!important}.predict-zone-bet-preset,.predict-zone-preset-edit{position:relative!important;overflow:hidden!important;height:38px!important;min-width:0!important;padding:0 8px!important;border:0!important;outline:0!important;border-radius:28px!important;background:rgba(0,0,0,.22)!important;box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(255,255,255,.12),inset 1px 1px 1px -.5px rgba(255,255,255,.08),inset -1px -1px 1px -.5px rgba(255,255,255,.06),inset 0 0 6px 6px rgba(255,255,255,.04),inset 0 0 2px 2px rgba(255,255,255,.025)!important;backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important;-webkit-backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important;color:#fff!important;font-family:ui-rounded,\"SF Pro Rounded\",\"SF Pro Display\",-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif!important;font-size:12px!important;font-weight:760!important;letter-spacing:-.02em!important;font-variant-numeric:tabular-nums!important;display:flex!important;align-items:center!important;justify-content:center!important;white-space:nowrap!important;transform:translateZ(0)!important;touch-action:manipulation!important;-webkit-tap-highlight-color:transparent!important;transition:transform .16s ease,opacity .16s ease!important}.predict-zone-bet-preset:active,.predict-zone-preset-edit:active{transform:scale(.96)!important}.predict-zone-bet-preset:disabled{opacity:.38!important}.predict-zone-preset-edit{font-size:10.5px!important;font-weight:800!important;color:#fff!important}.predict-zone-preset-edit.is-editing{color:#fff!important}"
+          new=".predict-zone-quick-bets{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)) 52px!important;gap:7px!important;margin:0!important}.predict-zone-bet-preset,.predict-zone-preset-edit{position:relative!important;overflow:hidden!important;height:38px!important;min-width:0!important;padding:0 8px!important;border:0!important;outline:0!important;border-radius:28px!important;background:#000!important;box-shadow:inset 3px 3px .5px -3.5px rgba(255,255,255,.10),inset -3px -3px .5px -3.5px rgba(255,255,255,.12),inset 1px 1px 1px -.5px rgba(255,255,255,.08),inset -1px -1px 1px -.5px rgba(255,255,255,.06),inset 0 0 6px 6px rgba(255,255,255,.04),inset 0 0 2px 2px rgba(255,255,255,.025)!important;backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important;-webkit-backdrop-filter:blur(22px) saturate(1.12) brightness(1.03)!important;color:#fff!important;font-family:ui-rounded,\"SF Pro Rounded\",\"SF Pro Display\",-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif!important;font-size:12px!important;font-weight:760!important;letter-spacing:-.02em!important;font-variant-numeric:tabular-nums!important;display:flex!important;align-items:center!important;justify-content:center!important;white-space:nowrap!important;transform:translateZ(0)!important;touch-action:manipulation!important;-webkit-tap-highlight-color:transparent!important;transition:transform .16s ease,opacity .16s ease!important}.predict-zone-bet-preset:active,.predict-zone-preset-edit:active{transform:scale(.96)!important}.predict-zone-bet-preset:disabled{opacity:.38!important}"
+          if text.count(old)!=1:
+              raise SystemExit(f'Expected one exact quick-card style block, found {text.count(old)}')
+          text=text.replace(old,new,1)
+          if text.count('background:#000!important')<1:
+              raise SystemExit('black quick-card background missing')
+          if '.predict-zone-preset-edit{font-size:10.5px' in text:
+              raise SystemExit('Edit-only visual override still present')
+          path.write_text(text,encoding='utf-8')
+          PY
+          git diff --check -- src/miniapp/predict-zone.ts
+          test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
+      - name: Commit Predict quick-card styling only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Vexa Patch Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/_predict-quick-cards-black-once.yml
+          git add src/miniapp/predict-zone.ts
+          git diff --cached --check
+          git commit -m "Make Predict quick cards solid black"
+          git push origin HEAD:main

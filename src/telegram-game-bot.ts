@@ -34,7 +34,7 @@ const USER_REGION_OPTIONS = [
 ] as const;
 
 // Change to true to enable /emojisend.
-const EMOJI_SEND_ENABLED = false;
+const EMOJI_SEND_ENABLED = true;
 const MENU_CUSTOM_EMOJI_ENABLED = true;
 
 const MAIN_MENU_COPY: Readonly<Record<VexaLocale, MainMenuCopy>> = {

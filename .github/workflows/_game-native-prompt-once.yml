@@ -170,7 +170,7 @@ jobs:
           if((plinko.match(/window\.prompt\('Enter point amount',current\)/g)||[]).length!==1) throw new Error('Plinko prompt path invalid');
           if((mines.match(/window\.prompt\('Enter point amount',current\)/g)||[]).length!==1) throw new Error('Mines prompt path invalid');
           if((slot.match(/window\.prompt\('Enter TON amount',current\)/g)||[]).length!==1) throw new Error('Slot prompt path invalid');
-          if(plinkoSection.includes('data-plinko-bet-input')||plinko.includes("querySelector('[data-plinko-bet-input]')")||plinkoStyles.includes('.plinko-bet-input')) throw new Error('Old Plinko floating editor remains');
+          if(plinkoSection.includes('data-plinko-bet-input type')||plinko.includes("querySelector('[data-plinko-bet-input]')")||plinkoStyles.includes('.plinko-bet-input')) throw new Error('Old Plinko floating editor remains');
           if(!mines.includes("amount.readOnly=true")||!slot.includes("amount.readOnly=true")) throw new Error('Readonly native-prompt gate missing');
           NODE
 

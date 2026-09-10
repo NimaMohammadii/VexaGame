@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Repair Predict region sheet workflow v3'
+    if: github.event.head_commit.message == 'Run Predict region sheet patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,23 +18,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Replace Predict region error with Home-style bottom sheet
+      - name: Apply Predict region sheet
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import base64, zlib
-          exec(zlib.decompress(base64.b64decode("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")).decode("utf-8"))
-          PY
+          python .github/_predict_region_patch.py
           git diff --check -- src/miniapp/predict-zone.ts
           test "$(git diff --name-only | paste -sd ' ' -)" = "src/miniapp/predict-zone.ts"
-      - name: Commit Predict region sheet and remove one-shot workflow
+      - name: Commit Predict region sheet and remove temporary patch files
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "Vexa Patch Bot"
           git config user.email "actions@users.noreply.github.com"
-          git rm .github/workflows/_predict-region-sheet-once.yml
+          git rm .github/workflows/_predict-region-sheet-once.yml .github/_predict_region_patch.py
           git add src/miniapp/predict-zone.ts
           git diff --cached --check
           git commit -m "Use Home-style sheet for Predict region errors"

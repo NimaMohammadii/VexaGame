@@ -7,43 +7,6 @@ const DEFAULT_PAYMENT_METHOD_IMAGES = {
   nft: '/app/api/deposit-method-icon/nft.png',
 } as const;
 
-const BOOT_ASSET_READY_KEY = 'vexa:boot-assets-ready:v1';
-
-type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
-
-function safeSingleQuotedJs(value: string): string {
-  return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-}
-
-function replaceRequired(source: string, target: string, replacement: string): string {
-  if (!source.includes(target)) throw new Error(`Mini App boot loader target not found: ${target.slice(0, 72)}`);
-  return source.replace(target, replacement);
-}
-
-function applyBootAssetCachePolicy(shell: string): string {
-  shell = replaceRequired(
-    shell,
-    '  var bootImageReady=prepareBootImage();\n  prepareBootAudio();',
-    `  var bootAssetCacheKey='${BOOT_ASSET_READY_KEY}';\n  var assetsWarmed=false;\n  try{var bootUser=window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user;if(bootUser&&bootUser.id)bootAssetCacheKey+=':'+String(bootUser.id);assetsWarmed=localStorage.getItem(bootAssetCacheKey)==='1'}catch(e){}\n\n  var bootImageReady=prepareBootImage();\n  prepareBootAudio();`,
-  );
-  shell = replaceRequired(
-    shell,
-    "    jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));",
-    "    if(!assetsWarmed)jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));else try{var applyBackgrounds=window.VexaApplySectionBackgrounds;if(typeof applyBackgrounds==='function')Promise.resolve(applyBackgrounds()).catch(function(){})}catch(e){}",
-  );
-  shell = replaceRequired(
-    shell,
-    '      progressGate(settle(playHubReady(),10000,false),18),',
-    '      progressGate(assetsWarmed?Promise.resolve(true):settle(playHubReady(),10000,false),18),',
-  );
-  shell = replaceRequired(
-    shell,
-    '    var gameImagesGate=progressGate(gameImagesReady(),32);',
-    "    var gameImagesGate=assetsWarmed?Promise.resolve(true):progressGate(gameImagesReady().then(function(value){try{localStorage.setItem(bootAssetCacheKey,'1')}catch(e){}return value}),32);",
-  );
-  return shell;
-}
-
 export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
   const starsUrl = paymentMethodImageUrls.stars || DEFAULT_PAYMENT_METHOD_IMAGES.stars;
   const gramUrl = paymentMethodImageUrls.gram || DEFAULT_PAYMENT_METHOD_IMAGES.gram;
@@ -69,7 +32,6 @@ export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMet
     );
   }
 
-  shell = applyBootAssetCachePolicy(shell);
 
   const headExtras: string[] = [];
   headExtras.push(`<script>(function(){if(!document.documentElement.classList.contains('vexa-web'))return;var w=Number(screen&&screen.width)||innerWidth||0;var h=Number(screen&&screen.height)||innerHeight||0;if(Math.min(w,h)>=600)document.documentElement.classList.add('vexa-web-large')})()</script>`);

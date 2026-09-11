@@ -157,9 +157,10 @@ app.post('/app/api/predict-bet', async (c) => {
     stakeNano = tonToNano(body.stakeTon);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
     const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
-    const tonUsd = await fetchGramUsdPrice();
-    const minimumStakeNano = minimumPredictStakeNano(tonUsd);
+    const minimumGramUsd = await fetchGramUsdPrice();
+    const minimumStakeNano = minimumPredictStakeNano(minimumGramUsd);
     if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
+    const tonUsd = providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot);
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     await settleDueRounds(c.env, market, false, snapshot.price);
@@ -989,7 +990,7 @@ function isPredictPriceFeedError(error: unknown): boolean { return /aster|mark p
 
 async function isExpectedPredictRequestError(env: Env, market: TradeMarket | null, error: unknown): Promise<boolean> {
   const message = messageOf(error);
-  if (/open the mini app inside telegram|invalid telegram session|telegram session expired|telegram user mismatch|missing telegram user|missing user id|invalid predict market|choose up or down|enter a valid gram amount|this prediction is closed|prediction round is starting|already placed a prediction|previous prediction is still processing|prediction could not be reserved|insufficient balance|your access to this market is currently paused|predictions are temporarily unavailable|predictions are temporarily paused|live price feed is unavailable|your maximum prediction|your daily predict limit|current betting capacity/i.test(message)) return true;
+  if (/open the mini app inside telegram|invalid telegram session|telegram session expired|telegram user mismatch|missing telegram user|missing user id|invalid predict market|choose up or down|enter a valid gram amount|below the minimum|this prediction is closed|prediction round is starting|already placed a prediction|previous prediction is still processing|prediction could not be reserved|insufficient balance|your access to this market is currently paused|predictions are temporarily unavailable|predictions are temporarily paused|live price feed is unavailable|your maximum prediction|your daily predict limit|current betting capacity/i.test(message)) return true;
   if (!market) return false;
   const control = await readPredictOpsControl(env).catch(() => null);
   return Boolean(control?.maintenanceMessage && message === control.maintenanceMessage);

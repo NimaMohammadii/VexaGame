@@ -1,9 +1,8 @@
-name: Apply scoped Predict minimum audit fix once
-on:
-  workflow_dispatch:
+name: "Apply scoped Predict minimum audit fix once"
+"on":
   push:
     paths:
-      - '.github/workflows/_predict-one-dollar-audit-fix-once.yml'
+      - ".github/workflows/_predict-one-dollar-audit-fix-once.yml"
 permissions:
   contents: write
 jobs:
@@ -13,50 +12,43 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch audited Predict minimum details only
-        shell: bash
+      - name: Apply exact Predict audit fix
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('src/predict-routes.ts')
-          s=p.read_text()
-          old="""    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+          p = Path('src/predict-routes.ts')
+          s = p.read_text()
+          old = """    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
     const tonUsd = await fetchGramUsdPrice();
     const minimumStakeNano = minimumPredictStakeNano(tonUsd);
     if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
 """
-          new="""    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+          new = """    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
     const minimumGramUsd = await fetchGramUsdPrice();
     const minimumStakeNano = minimumPredictStakeNano(minimumGramUsd);
     if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
     const tonUsd = providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot);
 """
-          if s.count(old)!=1: raise SystemExit(f'bet anchor count {s.count(old)}')
-          s=s.replace(old,new,1)
-          old2="""enter a valid gram amount|this prediction is closed"""
-          new2="""enter a valid gram amount|below the minimum|this prediction is closed"""
-          if s.count(old2)!=1: raise SystemExit(f'expected-error anchor count {s.count(old2)}')
-          s=s.replace(old2,new2,1)
-          p.write_text(s)
+          if s.count(old) != 1:
+              raise SystemExit(f'bet anchor count {s.count(old)}')
+          s = s.replace(old, new, 1)
+          old2 = 'enter a valid gram amount|this prediction is closed'
+          new2 = 'enter a valid gram amount|below the minimum|this prediction is closed'
+          if s.count(old2) != 1:
+              raise SystemExit(f'expected error anchor count {s.count(old2)}')
+          p.write_text(s.replace(old2, new2, 1))
           PY
-      - name: Validate exact scope
-        shell: bash
+      - name: Validate
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only)"
-          printf '%s\n' "$changed"
-          test "$changed" = 'src/predict-routes.ts'
-          grep -q "const minimumGramUsd = await fetchGramUsdPrice();" src/predict-routes.ts
-          grep -q "providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot)" src/predict-routes.ts
-          grep -q "enter a valid gram amount|below the minimum|this prediction is closed" src/predict-routes.ts
+          test "$(git diff --name-only)" = "src/predict-routes.ts"
+          grep -Fq "const minimumGramUsd = await fetchGramUsdPrice();" src/predict-routes.ts
+          grep -Fq "providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot)" src/predict-routes.ts
           set +e
-          npx tsc --noEmit --pretty false > /tmp/tsc.log 2>&1
-          status=$?
+          npx tsc --noEmit --pretty false >/tmp/tsc.log 2>&1
           set -e
           if grep -E 'src/predict-routes\.ts' /tmp/tsc.log; then cat /tmp/tsc.log; exit 1; fi
-          echo "predict-routes.ts has no TypeScript diagnostics. Full repo tsc status: $status"
-      - name: Commit scoped audit fix and remove executor
-        shell: bash
+      - name: Commit and remove executor
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

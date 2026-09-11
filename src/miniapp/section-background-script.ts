@@ -146,7 +146,6 @@ export const SECTION_BACKGROUND_SCRIPT = `
     };
     window.VexaRefreshPlayZoneImages.__adminBgWrapped=true;
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){load(false)});else load(false);
 })();
 `;
 

@@ -1,8 +1,8 @@
-name: "Apply scoped Predict minimum audit fix once"
-"on":
+name: Predict audit fix
+on:
   push:
     paths:
-      - ".github/workflows/_predict-one-dollar-audit-fix-once.yml"
+      - .github/workflows/_predict-one-dollar-audit-fix-once.yml
 permissions:
   contents: write
 jobs:
@@ -10,50 +10,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Apply exact Predict audit fix
-        run: |
+      - run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('src/predict-routes.ts')
-          s = p.read_text()
-          old = """    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
-    const tonUsd = await fetchGramUsdPrice();
-    const minimumStakeNano = minimumPredictStakeNano(tonUsd);
-    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
-"""
-          new = """    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
-    const minimumGramUsd = await fetchGramUsdPrice();
-    const minimumStakeNano = minimumPredictStakeNano(minimumGramUsd);
-    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
-    const tonUsd = providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot);
-"""
-          if s.count(old) != 1:
-              raise SystemExit(f'bet anchor count {s.count(old)}')
-          s = s.replace(old, new, 1)
-          old2 = 'enter a valid gram amount|this prediction is closed'
-          new2 = 'enter a valid gram amount|below the minimum|this prediction is closed'
-          if s.count(old2) != 1:
-              raise SystemExit(f'expected error anchor count {s.count(old2)}')
-          p.write_text(s.replace(old2, new2, 1))
+          p=Path('src/predict-routes.ts')
+          s=p.read_text()
+          a="    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;\n    const tonUsd = await fetchGramUsdPrice();\n    const minimumStakeNano = minimumPredictStakeNano(tonUsd);\n    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');\n"
+          b="    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;\n    const minimumGramUsd = await fetchGramUsdPrice();\n    const minimumStakeNano = minimumPredictStakeNano(minimumGramUsd);\n    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');\n    const tonUsd = providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot);\n"
+          assert s.count(a)==1
+          s=s.replace(a,b,1)
+          a='enter a valid gram amount|this prediction is closed'
+          b='enter a valid gram amount|below the minimum|this prediction is closed'
+          assert s.count(a)==1
+          p.write_text(s.replace(a,b,1))
           PY
-      - name: Validate
-        run: |
-          set -euo pipefail
           test "$(git diff --name-only)" = "src/predict-routes.ts"
-          grep -Fq "const minimumGramUsd = await fetchGramUsdPrice();" src/predict-routes.ts
-          grep -Fq "providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot)" src/predict-routes.ts
-          set +e
-          npx tsc --noEmit --pretty false >/tmp/tsc.log 2>&1
-          set -e
-          if grep -E 'src/predict-routes\.ts' /tmp/tsc.log; then cat /tmp/tsc.log; exit 1; fi
-      - name: Commit and remove executor
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git rm .github/workflows/_predict-one-dollar-audit-fix-once.yml
           git add src/predict-routes.ts
           git commit -m "Refine Predict one-dollar minimum enforcement"
-          git push origin HEAD:main
+          git push

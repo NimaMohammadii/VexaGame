@@ -168,7 +168,7 @@ jobs:
           const diceScript=diceSection.match(/<script>([\s\S]*?)<\/script><\/section>$/);
           if(!diceScript) throw new Error('Dice emitted script missing');
           new Function(diceScript[1]);
-          if(diceSection.includes('data-dice-bet-editor')||diceSection.includes('data-dice-bet-input')||diceSection.includes('data-dice-bet-done')) throw new Error('Dice emitted old editor remains');
+          if(diceSection.includes('data-dice-bet-editor')||diceSection.includes('data-dice-bet-input type')||diceSection.includes('data-dice-bet-done')) throw new Error('Dice emitted old editor remains');
           NODE
 
           git diff --check

@@ -1,0 +1,120 @@
+name: Apply scoped game prompt bounce fix once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply scoped game prompt bounce fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Patch only Plinko Mines Slot prompt interactions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_one(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Plinko: keep 1/2 and 2x on the existing pointer path, but open the native
+          # amount prompt only from click so it never blocks while :active is held.
+          old = "  function handleAmountPoint(ev){if(!isPlinkoActive())return false;if(ev&&ev.type==='touchstart'&&window.PointerEvent)return false;var x=ev.clientX,y=ev.clientY;if((x==null||y==null)&&ev.touches&&ev.touches[0]){x=ev.touches[0].clientX;y=ev.touches[0].clientY}if(x==null||y==null)return false;var btn=amountButtonFromPoint(x,y);if(!btn)return false;if(ev.cancelable!==false)ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();if(btn.hasAttribute('data-plinko-bet-input-open'))promptBetAmount();else if(btn.getAttribute('data-action')==='plinko-bet-half')multiplyBet(.5);else if(btn.getAttribute('data-action')==='plinko-bet-double')multiplyBet(2);return true}"
+          new = "  function handleAmountPoint(ev){if(!isPlinkoActive())return false;if(ev&&ev.type==='touchstart'&&window.PointerEvent)return false;var x=ev.clientX,y=ev.clientY;if((x==null||y==null)&&ev.touches&&ev.touches[0]){x=ev.touches[0].clientX;y=ev.touches[0].clientY}if(x==null||y==null)return false;var btn=amountButtonFromPoint(x,y);if(!btn)return false;if(btn.hasAttribute('data-plinko-bet-input-open')&&ev.type!=='click')return false;if(ev.cancelable!==false)ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();if(btn.hasAttribute('data-plinko-bet-input-open'))promptBetAmount();else if(btn.getAttribute('data-action')==='plinko-bet-half')multiplyBet(.5);else if(btn.getAttribute('data-action')==='plinko-bet-double')multiplyBet(2);return true}"
+          replace_one('src/miniapp/plinko/scripts/panel.ts', old, new, 'Plinko click-only prompt path')
+
+          # Mines: the visible amount stays exactly where it is, but the input itself
+          # can no longer receive pointer focus. Its existing card opens the prompt.
+          old = "if(amount){amount.readOnly=true;amount.setAttribute('aria-haspopup','dialog');amount.addEventListener('click',function(ev){if(friendMode||state.active||state.busy)return;ev.preventDefault();try{amount.blur()}catch(e){}promptMinesBetAmount()})}"
+          new = "if(amount){amount.readOnly=true;amount.tabIndex=-1;amount.style.pointerEvents='none';var amountCard=amount.closest&&amount.closest('.mines-bet-amount');if(amountCard){amountCard.setAttribute('aria-haspopup','dialog');amountCard.addEventListener('click',function(ev){if(friendMode||state.active||state.busy)return;var quick=ev.target&&ev.target.closest&&ev.target.closest('[data-mines-action]');if(quick)return;ev.preventDefault();promptMinesBetAmount()})}}"
+          replace_one('src/miniapp/mines/script.ts', old, new, 'Mines non-focus amount card')
+
+          # Slot: same native-prompt route; keep the visual input as display only and
+          # bind the existing amount card, preventing the old focus -> blur bounce.
+          old = "if(amount&&!amount.dataset.slotBetBound){amount.dataset.slotBetBound='1';amount.readOnly=true;amount.setAttribute('aria-haspopup','dialog');amount.addEventListener('click',function(ev){if(spinning)return;ev.preventDefault();try{amount.blur()}catch(e){}promptSlotBetValue()})}"
+          new = "if(amount&&!amount.dataset.slotBetBound){amount.dataset.slotBetBound='1';amount.readOnly=true;amount.tabIndex=-1;amount.style.pointerEvents='none';var amountCard=amount.closest&&amount.closest('.slot-asset-input');if(amountCard&&!amountCard.dataset.slotBetPromptBound){amountCard.dataset.slotBetPromptBound='1';amountCard.setAttribute('aria-haspopup','dialog');amountCard.addEventListener('click',function(ev){if(spinning)return;ev.preventDefault();promptSlotBetValue()})}}"
+          replace_one('src/miniapp/slot/script.ts', old, new, 'Slot non-focus amount card')
+          PY
+
+      - name: Validate exact scope and script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/miniapp/plinko/scripts/panel.ts').read_text(encoding='utf-8')
+          if "btn.hasAttribute('data-plinko-bet-input-open')&&ev.type!=='click'" not in p:
+              raise SystemExit('Plinko click-only guard missing')
+          if p.count("promptBetAmount()") < 2:
+              raise SystemExit('Plinko prompt route unexpectedly missing')
+
+          m = Path('src/miniapp/mines/script.ts').read_text(encoding='utf-8')
+          for expected in ["amount.style.pointerEvents='none'", "amount.closest('.mines-bet-amount')", "promptMinesBetAmount()"]:
+              if expected not in m:
+                  raise SystemExit('Mines validation missing: '+expected)
+          if "try{amount.blur()}" in m:
+              raise SystemExit('Mines old focus/blur path still present')
+
+          s = Path('src/miniapp/slot/script.ts').read_text(encoding='utf-8')
+          for expected in ["amount.style.pointerEvents='none'", "amount.closest('.slot-asset-input')", "promptSlotBetValue()"]:
+              if expected not in s:
+                  raise SystemExit('Slot validation missing: '+expected)
+          if "try{amount.blur()}" in s:
+              raise SystemExit('Slot old focus/blur path still present')
+          PY
+
+          node - <<'NODE'
+          const fs=require('fs');
+          for(const file of ['src/miniapp/plinko/scripts/panel.ts','src/miniapp/mines/script.ts','src/miniapp/slot/script.ts']){
+            const text=fs.readFileSync(file,'utf8');
+            const match=text.match(/=\s*`([\s\S]*)`;\s*$/);
+            if(!match) throw new Error('Could not extract script template: '+file);
+            new Function(match[1]);
+          }
+          NODE
+
+          changed="$(git diff --name-only)"
+          expected="src/miniapp/mines/script.ts
+          src/miniapp/plinko/scripts/panel.ts
+          src/miniapp/slot/script.ts"
+          if [ "$(printf '%s\n' "$changed" | sort)" != "$(printf '%s\n' "$expected" | sort)" ]; then
+            echo "Unexpected changed files:"
+            printf '%s\n' "$changed"
+            exit 1
+          fi
+
+      - name: Commit only scoped fixes and remove executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Vexa Patch Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/_game-prompt-bounce-once.yml
+          git add src/miniapp/plinko/scripts/panel.ts src/miniapp/mines/script.ts src/miniapp/slot/script.ts
+          staged="$(git diff --cached --name-only)"
+          allowed=".github/workflows/_game-prompt-bounce-once.yml
+          src/miniapp/mines/script.ts
+          src/miniapp/plinko/scripts/panel.ts
+          src/miniapp/slot/script.ts"
+          if [ "$(printf '%s\n' "$staged" | sort)" != "$(printf '%s\n' "$allowed" | sort)" ]; then
+            echo "Unexpected staged files:"
+            printf '%s\n' "$staged"
+            exit 1
+          fi
+          git commit -m 'Fix native prompt control bounce in Plinko Mines Slot'
+          git push origin HEAD:main

@@ -7,6 +7,12 @@ const DEFAULT_PAYMENT_METHOD_IMAGES = {
   nft: '/app/api/deposit-method-icon/nft.png',
 } as const;
 
+type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
+
+function safeSingleQuotedJs(value: string): string {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
   const starsUrl = paymentMethodImageUrls.stars || DEFAULT_PAYMENT_METHOD_IMAGES.stars;
   const gramUrl = paymentMethodImageUrls.gram || DEFAULT_PAYMENT_METHOD_IMAGES.gram;

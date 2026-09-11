@@ -177,6 +177,8 @@ export const WHEEL_SECTION = `
             setControlsLocked(false);
           }
         }
+        function promptWheelAmount(){if(spinning)return;var current=String(amountInput.value||'0.1'),next=null;try{next=window.prompt('Enter GRAM amount',current)}catch(e){return}if(next===null)return;var parsed=Number(String(next).trim().replace(',','.'));if(!Number.isFinite(parsed)||parsed<=0)return;amountInput.value=String(parsed)}
+        amountInput.readOnly=true;amountInput.tabIndex=-1;amountInput.style.pointerEvents='none';var amountRow=amountInput.closest&&amountInput.closest('.wheel-input-row');if(amountRow){amountRow.setAttribute('aria-haspopup','dialog');amountRow.addEventListener('click',function(ev){if(spinning)return;var button=ev.target&&ev.target.closest&&ev.target.closest('button');if(button)return;ev.preventDefault();promptWheelAmount()})}
         root.querySelectorAll('[data-wheel-quick]').forEach(function(button){button.addEventListener('click',function(){if(spinning)return;root.querySelectorAll('[data-wheel-quick]').forEach(function(item){item.classList.remove('active')});button.classList.add('active');amountInput.value=button.getAttribute('data-wheel-quick')||'0.1'})});
         halfButton.addEventListener('click',function(){if(spinning)return;var v=Math.max(.1,Number(amountInput.value||'.1')/2);amountInput.value=String(Math.round(v*100)/100).replace(/\.0$/,'')});
         doubleButton.addEventListener('click',function(){if(spinning)return;var v=Math.max(.1,Number(amountInput.value||'.1')*2);amountInput.value=String(Math.round(v*100)/100).replace(/\.0$/,'')});

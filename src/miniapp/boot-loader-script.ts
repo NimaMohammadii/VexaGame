@@ -16,6 +16,7 @@ export const BOOT_LOADER_SCRIPT = `
   var bootProgress=0;
   var READY_TIMEOUT_MS=12000;
   var STARTUP_MANIFEST_URL='/app/api/uploaded-images?context=startup';
+  var BACKGROUND_ASSETS_READY_KEY='vexa:background-assets-ready:v2';
   var startupManifestJob=null;
   function bootNode(){return document.getElementById('vexaBoot')}
   function bootImage(){return document.getElementById('vexaBootImage')}
@@ -40,7 +41,6 @@ export const BOOT_LOADER_SCRIPT = `
     })
   }
   function call(fn,ms,fallback){try{return typeof fn==='function'?settle(fn(),ms,fallback):Promise.resolve(fallback)}catch(e){return Promise.resolve(fallback)}}
-  function windowReady(){return document.readyState==='complete'?Promise.resolve(true):new Promise(function(resolve){window.addEventListener('load',function(){resolve(true)},{once:true})})}
   function observeUntil(check,ms){
     return new Promise(function(resolve){
       var observer=null,done=false,timer=setTimeout(function(){finish(false)},ms);
@@ -166,15 +166,22 @@ export const BOOT_LOADER_SCRIPT = `
     var url=String(value||'').trim();
     return !url||url==='none'||url.indexOf('data:image/')===0?'':url
   }
-  function preloadUrlList(values){
-    var seen={},jobs=[];
+  function idleTurn(){
+    return new Promise(function(resolve){
+      if(typeof window.requestIdleCallback==='function'){window.requestIdleCallback(function(){resolve()},{timeout:1800});return}
+      setTimeout(resolve,180)
+    })
+  }
+  function preloadUrlListLowPriority(values){
+    var seen={},urls=[];
     (Array.isArray(values)?values:[]).forEach(function(value){
       var url=cleanGameImageUrl(value);
       if(!url||seen[url])return;
-      seen[url]=true;
-      jobs.push(preloadGameImageStrict(url))
+      seen[url]=true;urls.push(url)
     });
-    return Promise.all(jobs)
+    return urls.reduce(function(job,url){
+      return job.then(idleTurn).then(function(){return preloadGameImageStrict(url)})
+    },Promise.resolve())
   }
   function preloadArrayUrls(j){return j&&Array.isArray(j.preload)?j.preload:[]}
   function sectionBackgroundUrls(j){
@@ -217,33 +224,33 @@ export const BOOT_LOADER_SCRIPT = `
     {url:'/app/api/slot-symbols',game:'slot',urls:slotSymbolUrls},
     {url:'/app/api/slot-controls',game:'slot',urls:slotControlUrls}
   ];
-  function preloadManifest(spec,cache){
+  function preloadManifestLowPriority(spec,cache){
     if(spec.game&&!shouldPreloadGame(spec.game))return Promise.resolve(true);
     var cached=cache&&cache[spec.url];
-    var cachedJob=preloadUrlList(spec.urls(cached));
-    var liveJob=spec.url===STARTUP_MANIFEST_URL?startupManifestReady():fetchJsonStrict(spec.url,0);
-    return liveJob.then(function(j){
-      if(!j)return cachedJob.then(function(){return true});
+    return preloadUrlListLowPriority(spec.urls(cached)).then(idleTurn).then(function(){
+      return spec.url===STARTUP_MANIFEST_URL?startupManifestReady():fetchJsonStrict(spec.url,0)
+    }).then(function(j){
+      if(!j)return true;
       cache[spec.url]=j;
       writeManifestCache(cache);
-      return preloadUrlList(spec.urls(j)).then(function(){return true})
+      return preloadUrlListLowPriority(spec.urls(j)).then(function(){return true})
     })
   }
   function gameImagesReady(){
     if(window.__vexaAllGameImagesReady)return window.__vexaAllGameImagesReady;
     window.__vexaAllGameImagesReady=Promise.resolve(window.__vexaPlayZoneVisibilityReady||false).then(function(){
       var manifestCache=readManifestCache();
-      var jobs=[preloadUrlList(staticUrlsForVisibleGames())];
-      GAME_IMAGE_MANIFESTS.forEach(function(spec){jobs.push(preloadManifest(spec,manifestCache))});
-      return Promise.all(jobs)
+      var job=preloadUrlListLowPriority(staticUrlsForVisibleGames());
+      GAME_IMAGE_MANIFESTS.forEach(function(spec){job=job.then(function(){return preloadManifestLowPriority(spec,manifestCache)})});
+      return job
     }).then(function(){
       window.__vexaGameImagePreloadFailures=Object.keys(gameImageFailures);
       gameImageKeep.length=0;
-      return true
+      return window.__vexaGameImagePreloadFailures.length===0
     }).catch(function(){
       window.__vexaGameImagePreloadFailures=Object.keys(gameImageFailures);
       gameImageKeep.length=0;
-      return true
+      return false
     });
     return window.__vexaAllGameImagesReady
   }
@@ -255,7 +262,6 @@ export const BOOT_LOADER_SCRIPT = `
     var jobs=[];
     jobs.push(call(window.VexaRefreshHomeLotterySlotImage,5500,false));
     jobs.push(call(window.VexaRefreshTonLogo,5500,false));
-    jobs.push(call(window.VexaApplySectionBackgrounds,5500,false));
     jobs.push(window.VexaTonBalance&&typeof window.VexaTonBalance.load==='function'?settle(window.VexaTonBalance.load(),5500,false):Promise.resolve(false));
     if(window.VexaLevel&&typeof window.VexaLevel.load==='function')jobs.push(settle(window.VexaLevel.load(),5500,false));
     return Promise.all(jobs)
@@ -278,42 +284,28 @@ export const BOOT_LOADER_SCRIPT = `
       })
     })
   }
-  function playHubReady(){
-    var manifest=window.__vexaPlayZoneImagesReady||Promise.resolve(false);
-    var visibilityReady=window.__vexaPlayZoneVisibilityReady||Promise.resolve(false);
-    return Promise.all([settle(manifest,6500,false),settle(visibilityReady,6500,false)]).then(function(){
-      return observeUntil(function(){
-        if(!document.documentElement.classList.contains('play-zone-visibility-ready'))return false;
-        var cards=Array.prototype.slice.call(document.querySelectorAll('#playzone [data-play-zone-card-id]')).filter(function(card){return !card.hidden});
-        var imgs=cards.map(function(card){return card.querySelector('.game-image img')}).filter(Boolean);
-        if(!cards.length)return [];
-        if(imgs.length!==cards.length)return false;
-        for(var i=0;i<imgs.length;i++){var src=String(imgs[i].getAttribute('src')||'');if(!src||src.indexOf('data:image/gif')===0)return false}
-        return imgs
-      },7000)
-    }).then(function(imgs){
-      if(!Array.isArray(imgs))return false;
-      if(!imgs.length)return true;
-      return settle(Promise.all(imgs.map(function(img){return imageReady(img,5500)})),6500,false).then(function(){return true})
-    })
-  }
-  function lazySectionsReady(){
-    var lazy=window.VexaLazySections;
-    return lazy&&typeof lazy.preload==='function'?settle(lazy.preload(),10000,false):Promise.resolve(false)
+  function scheduleBackgroundWarmup(){
+    if(window.__vexaBackgroundWarmupScheduled)return;
+    window.__vexaBackgroundWarmupScheduled=true;
+    setTimeout(function(){
+      idleTurn().then(function(){
+        var applyBackgrounds=window.VexaApplySectionBackgrounds;
+        return typeof applyBackgrounds==='function'?Promise.resolve(applyBackgrounds()).catch(function(){return false}):false
+      }).then(function(){
+        try{if(localStorage.getItem(BACKGROUND_ASSETS_READY_KEY)==='1')return true}catch(e){}
+        return gameImagesReady().then(function(value){if(value)try{localStorage.setItem(BACKGROUND_ASSETS_READY_KEY,'1')}catch(e){}return value})
+      }).catch(function(){})
+    },700)
   }
   function revealWhenReady(){
     if(window.__vexaInitialUiReadyStarted)return;
     window.__vexaInitialUiReadyStarted=true;
     var ready=Promise.all([
-      progressGate(settle(bootImageReady,7000,false),10),
-      progressGate(settle(windowReady(),8000,true),8),
-      progressGate(settle(homeReady(),10000,false),24),
-      progressGate(settle(playHubReady(),10000,false),18),
-      progressGate(lazySectionsReady(),6)
+      progressGate(settle(bootImageReady,7000,false),20),
+      progressGate(settle(homeReady(),10000,false),80)
     ]);
     var timedUiReady=settle(ready,READY_TIMEOUT_MS,false);
-    var gameImagesGate=progressGate(gameImagesReady(),32);
-    window.__vexaInitialUiReady=Promise.all([timedUiReady,gameImagesGate]).then(function(){return new Promise(function(resolve){requestAnimationFrame(function(){setBootProgress(100);requestAnimationFrame(function(){hide();try{window.dispatchEvent(new CustomEvent('vexa:home-ready'))}catch(e){}resolve(true)})})})})
+    window.__vexaInitialUiReady=timedUiReady.then(function(){return new Promise(function(resolve){requestAnimationFrame(function(){setBootProgress(100);requestAnimationFrame(function(){hide();try{window.dispatchEvent(new CustomEvent('vexa:home-ready'))}catch(e){}scheduleBackgroundWarmup();resolve(true)})})})})
   }
   setBootProgress(0);
   window.addEventListener('pagehide',stopBootAudio,{once:true});

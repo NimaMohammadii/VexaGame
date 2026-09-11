@@ -3,9 +3,11 @@ import type { Env } from './types';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
 import { getSectionAccess, isMiniAppAdmin } from './section-access';
+import { getStarsGramRate } from './stars-deposits';
 
 const CACHE_NONE = 'no-store';
 const NANO = 1_000_000_000;
+const MIN_PREDICT_USD = 1;
 const PLATFORM_FEE_BPS = 500;
 const DISCOVERY_LIMIT = 80;
 const DISCOVERY_SOURCE = 'https://gamma-api.polymarket.com';
@@ -74,6 +76,8 @@ app.post('/app/api/prediction-events/bet', async (c) => {
     const pick = normalizePick(body.pick);
     const stakeNano = tonToNano(body.stakeTon);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
+    const minimumStakeNano = await minimumPredictionStakeNano();
+    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
 
     const event = await c.env.DB.prepare('SELECT * FROM prediction_events WHERE id = ?').bind(eventId).first<EventRow>();
     if (!event) throw new Error('Prediction not found');
@@ -312,6 +316,14 @@ function cleanResolutionSource(value: unknown): string | null { const url = Stri
 function cleanUserId(value: unknown): string { const id = cleanUserIdOptional(value); if (!id) throw new Error('Missing user id'); return id; }
 function cleanUserIdOptional(value: unknown): string { return String(value || '').replace(/[^0-9A-Za-z_-]/g, '').trim().slice(0, 80); }
 function cleanDbText(value: unknown, message: string): string { const text = String(value || '').trim().slice(0, 120); if (!text) throw new Error(message); return text; }
+async function minimumPredictionStakeNano(): Promise<number> {
+  const rate = await getStarsGramRate();
+  const price = Number(rate.gramUsd);
+  if (!Number.isFinite(price) || price <= 0) throw new Error('Gram/USD price is unavailable');
+  const nano = Math.ceil((MIN_PREDICT_USD / price) * NANO);
+  if (!Number.isSafeInteger(nano) || nano < 1) throw new Error('Gram/USD price is unavailable');
+  return nano;
+}
 function tonToNano(value: unknown): number { const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.max(1, Math.floor(n * NANO)) : 0; }
 function nanoToTon(value: number): number { return Math.floor(Number(value || 0)) / NANO; }
 function isEventOpen(event: EventRow): boolean { return event.status === 'open' && Date.parse(event.closes_at) > Date.now(); }

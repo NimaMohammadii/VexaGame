@@ -20,6 +20,7 @@ const LOCK_MS = 0;
 const PLATFORM_FEE_BPS = 500;
 const POLYMARKET_PLATFORM_FEE_BPS = 200;
 const NANO = 1_000_000_000;
+const MIN_PREDICT_USD = 1;
 const ROUND_BOOTSTRAP_LEASE_MS = 20_000;
 const ROUND_BOOTSTRAP_DEFAULT_RETRY_MS = 2_000;
 const ROUND_BOOTSTRAP_RATE_LIMIT_RETRY_MS = 30_000;
@@ -156,7 +157,9 @@ app.post('/app/api/predict-bet', async (c) => {
     stakeNano = tonToNano(body.stakeTon);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
     const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
-    const tonUsd = providerState === 'polymarket' ? await fetchGramUsdPrice() : cleanOptionalPrice(body.tonUsdSnapshot);
+    const tonUsd = await fetchGramUsdPrice();
+    const minimumStakeNano = minimumPredictStakeNano(tonUsd);
+    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     await settleDueRounds(c.env, market, false, snapshot.price);
@@ -561,6 +564,13 @@ async function fetchGramUsdPrice(): Promise<number> {
   const price = Number(rate.gramUsd);
   if (!Number.isFinite(price) || price <= 0) throw new Error('Gram/USD price is unavailable');
   return price;
+}
+function minimumPredictStakeNano(gramUsd: number): number {
+  const price = Number(gramUsd);
+  if (!Number.isFinite(price) || price <= 0) throw new Error('Gram/USD price is unavailable');
+  const nano = Math.ceil((MIN_PREDICT_USD / price) * NANO);
+  if (!Number.isSafeInteger(nano) || nano < 1) throw new Error('Gram/USD price is unavailable');
+  return nano;
 }
 async function fetchMonthlyBoundaryPrice(market: TradeMarket, boundaryMs: number, boundary: 'start' | 'end'): Promise<number> {
   const symbol = marketSymbol(market);

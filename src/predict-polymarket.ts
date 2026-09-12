@@ -16,7 +16,7 @@ import type { Env } from './types';
 
 export type PredictProvider = 'vexa' | 'polymarket';
 export type PolymarketSide = 'up' | 'down';
-export type PolymarketBetStatus = 'reserved' | 'prepared' | 'matched' | 'failed';
+export type PolymarketBetStatus = 'reserved' | 'signing' | 'prepared' | 'matched' | 'failed';
 export type PolymarketBridgeDestination = 'polygon-usdc' | 'bsc-usdt';
 
 const PROVIDER_KEY = 'admin:predict-provider:v1';
@@ -35,6 +35,7 @@ const BSC_CHAIN_ID = '56';
 const RTDS_URL = 'wss://ws-live-data.polymarket.com';
 const START_PRICE_CACHE_SECONDS = 15 * 60;
 const POLYMARKET_ORDER_LOOKUP_GRACE_MS = 2 * 60 * 1000;
+const POLYMARKET_AMOUNT_EPSILON = 1 / PUSD_SCALE;
 const V2_RESERVED_BITS_MASK = ((1n << 64n) - 1n) << 40n;
 const POLYMARKET_ORDER_TYPES = {
   Order: [
@@ -331,8 +332,14 @@ export function polymarketSecretsConfigured(env: Env): boolean {
 
 export async function preparePolymarketForActivation(env: Env): Promise<PolymarketAccountHealth> {
   const geo = await assertPolymarketTradingAllowed();
-  const client = await getTradingClient(env);
-  await ensureTradingApprovals(client);
+  let client: TradingClient;
+  try {
+    client = await getTradingClient(env);
+    await ensureTradingApprovals(client);
+  } catch (error) {
+    await markPolymarketBetFailed(env, input.betId);
+    throw error;
+  }
   const [balance, bridgeEvmAddress] = await Promise.all([
     readCollateralBalanceUsd(client),
     getBridgeEvmAddress(client.account.wallet),
@@ -598,24 +605,41 @@ export async function executePolymarketBitcoinBet(env: Env, input: { betId: stri
   const market = await getPolymarketRoundMarket(env, input.roundId, true);
   const tokenId = input.side === 'down' ? market.downTokenId : market.upTokenId;
   let row = await env.DB.prepare('SELECT * FROM predict_polymarket_bets WHERE bet_id = ?').bind(input.betId).first<PolymarketBetRow>();
-  if (row) {
-    if (row.round_id !== input.roundId || row.token_id !== tokenId || Math.abs(Number(row.requested_usd) - requestedUsd) > 0.000001) throw new Error('Polymarket prediction reservation does not match the original request');
-    if (row.status === 'matched') return executionFromRow(row);
-    if (row.status === 'failed') throw new Error('The Polymarket order for this prediction already failed');
-    if (row.status === 'prepared') {
-      const reconciled = await reconcilePolymarketBitcoinBet(env, input.betId);
-      if (reconciled.status === 'matched') return reconciled.execution;
-      if (reconciled.status === 'failed') throw new Error('The Polymarket order for this prediction failed');
-      throw new Error('The Polymarket order for this prediction is still being confirmed');
-    }
-  } else {
-    await env.DB.prepare(`INSERT INTO predict_polymarket_bets (
+  if (!row) {
+    await env.DB.prepare(`INSERT OR IGNORE INTO predict_polymarket_bets (
       bet_id, round_id, token_id, requested_usd, filled_usd, shares, status, created_at, updated_at
     ) VALUES (?, ?, ?, ?, 0, 0, 'reserved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
       .bind(input.betId, input.roundId, tokenId, requestedUsd).run();
     row = await env.DB.prepare('SELECT * FROM predict_polymarket_bets WHERE bet_id = ?').bind(input.betId).first<PolymarketBetRow>();
   }
   if (!row) throw new Error('Could not reserve Polymarket order');
+  if (row.round_id !== input.roundId || row.token_id !== tokenId || Math.abs(Number(row.requested_usd) - requestedUsd) > POLYMARKET_AMOUNT_EPSILON) throw new Error('Polymarket prediction reservation does not match the original request');
+  if (row.status === 'matched') return executionFromRow(row);
+  if (row.status === 'failed') throw new Error('The Polymarket order for this prediction already failed');
+  if (row.status === 'prepared') {
+    const reconciled = await reconcilePolymarketBitcoinBet(env, input.betId);
+    if (reconciled.status === 'matched') return reconciled.execution;
+    if (reconciled.status === 'failed') throw new Error('The Polymarket order for this prediction failed');
+    throw new Error('The Polymarket order for this prediction is still being confirmed');
+  }
+  if (row.status === 'signing') throw new Error('The Polymarket order for this prediction is still being prepared');
+  if (row.status !== 'reserved') throw new Error('The Polymarket order for this prediction has an invalid state');
+
+  // Only the request that atomically claims this reservation may create and post
+  // a signed order. Concurrent retries observe `signing` and cannot post a duplicate.
+  const claimed = await env.DB.prepare(`UPDATE predict_polymarket_bets SET status = 'signing', updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status = 'reserved'`)
+    .bind(input.betId).run();
+  if ((claimed.meta?.changes || 0) <= 0) {
+    const current = await env.DB.prepare('SELECT * FROM predict_polymarket_bets WHERE bet_id = ?').bind(input.betId).first<PolymarketBetRow>();
+    if (current?.status === 'matched') return executionFromRow(current);
+    if (current?.status === 'failed') throw new Error('The Polymarket order for this prediction already failed');
+    if (current?.status === 'prepared') {
+      const reconciled = await reconcilePolymarketBitcoinBet(env, input.betId);
+      if (reconciled.status === 'matched') return reconciled.execution;
+      if (reconciled.status === 'failed') throw new Error('The Polymarket order for this prediction failed');
+    }
+    throw new Error('The Polymarket order for this prediction is still being prepared');
+  }
 
   const client = await getTradingClient(env);
   await ensureTradingApprovals(client);
@@ -643,8 +667,14 @@ export async function executePolymarketBitcoinBet(env: Env, input: { betId: stri
       await markPolymarketBetFailed(env, input.betId);
       throw error;
     }
-    await env.DB.prepare(`UPDATE predict_polymarket_bets SET signed_order_json = ?, order_id = ?, status = 'prepared', updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status IN ('reserved','prepared')`)
+    const prepared = await env.DB.prepare(`UPDATE predict_polymarket_bets SET signed_order_json = ?, order_id = ?, status = 'prepared', updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status = 'signing'`)
       .bind(signedJson, orderId, input.betId).run();
+    if ((prepared.meta?.changes || 0) <= 0) {
+      const current = await env.DB.prepare('SELECT * FROM predict_polymarket_bets WHERE bet_id = ?').bind(input.betId).first<PolymarketBetRow>();
+      if (current?.status === 'matched') return executionFromRow(current);
+      if (current?.status === 'failed') throw new Error('The Polymarket order for this prediction already failed');
+      throw new Error('The Polymarket order for this prediction could not be prepared safely');
+    }
   }
 
   // A transport failure after this point is intentionally not marked failed. The exact
@@ -682,7 +712,7 @@ export async function getPolymarketBetStatus(env: Env, betId: string): Promise<P
   await ensurePredictProviderTables(env);
   const row = await env.DB.prepare('SELECT status FROM predict_polymarket_bets WHERE bet_id = ?').bind(betId).first<{ status: string }>();
   const value = String(row?.status || '').toLowerCase();
-  if (value === 'reserved' || value === 'prepared' || value === 'matched' || value === 'failed') return value;
+  if (value === 'reserved' || value === 'signing' || value === 'prepared' || value === 'matched' || value === 'failed') return value;
   return null;
 }
 
@@ -699,7 +729,7 @@ export async function reconcilePolymarketBitcoinBet(env: Env, betId: string): Pr
   if (!row) return { status: 'failed' };
   if (row.status === 'matched') return { status: 'matched', execution: executionFromRow(row) };
   if (row.status === 'failed') return { status: 'failed' };
-  if (row.status === 'reserved') {
+  if (row.status === 'reserved' || row.status === 'signing') {
     const reservedAt = Number(row.state_at_ms);
     if (!(reservedAt > 0) || Date.now() - reservedAt < POLYMARKET_ORDER_LOOKUP_GRACE_MS) return { status: 'pending' };
     await markPolymarketBetFailed(env, betId);
@@ -725,10 +755,16 @@ export async function reconcilePolymarketBitcoinBet(env: Env, betId: string): Pr
   try {
     const order = await client.fetchOrder({ orderId });
     if (String(order.id).toLowerCase() !== orderId.toLowerCase() || String(order.assetId) !== String(row.token_id)) return { status: 'pending' };
+    const originalSize = Number(order.originalSize);
     const matchedSize = Number(order.sizeMatched);
-    if (Number.isFinite(matchedSize) && matchedSize > 0) {
+    const signedShares = baseUnitsToUsd(BigInt(signedOrder.takerAmount));
+    const fullyMatched = Number.isFinite(originalSize) && originalSize > 0
+      && Number.isFinite(matchedSize) && matchedSize > 0
+      && Math.abs(originalSize - signedShares) <= POLYMARKET_AMOUNT_EPSILON
+      && Math.abs(matchedSize - originalSize) <= POLYMARKET_AMOUNT_EPSILON;
+    if (fullyMatched) {
       const filledUsd = baseUnitsToUsd(BigInt(signedOrder.makerAmount));
-      const shares = baseUnitsToUsd(BigInt(signedOrder.takerAmount));
+      const shares = matchedSize;
       if (!(filledUsd > 0) || !(shares > 0)) return { status: 'pending' };
       await env.DB.prepare(`UPDATE predict_polymarket_bets SET status = 'matched', filled_usd = ?, shares = ?, order_id = ?, response_json = ?, updated_at = CURRENT_TIMESTAMP WHERE bet_id = ? AND status = 'prepared'`)
         .bind(filledUsd, shares, orderId, JSON.stringify({ reconciled: true, order }), betId).run();

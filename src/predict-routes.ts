@@ -243,7 +243,7 @@ app.post('/app/api/predict-bet', async (c) => {
     if (market && feedError) await notePredictFeedFailure(c.env, market, errorMessage).catch(() => undefined);
     let releasedReservation = false;
     const polymarketStatus = betId && market === 'bitcoin' ? await getPolymarketBetStatus(c.env, betId).catch(() => null) : null;
-    const preserveReservation = polymarketOrderMayExist || polymarketStatus === 'prepared' || polymarketStatus === 'matched';
+    const preserveReservation = polymarketOrderMayExist || polymarketStatus === 'signing' || polymarketStatus === 'prepared' || polymarketStatus === 'matched';
     if (debited && betId && userId && !preserveReservation) {
       await adjustUserTonBalance(c.env, userId, stakeNano, { kind: 'predict', title: 'Prediction stake rollback', referenceId: betId, referenceType: 'predict_bet', metadata: { market, status: 'polymarket-order-failed' } }).catch(() => undefined);
     }
@@ -477,8 +477,13 @@ async function reconcilePendingPolymarketBets(env: Env, roundId?: string): Promi
 }
 
 export async function runPredictScheduledSettlement(env: Env): Promise<void> {
-  await reconcilePendingPolymarketBets(env);
   let firstError: unknown = null;
+  try {
+    await reconcilePendingPolymarketBets(env);
+  } catch (error) {
+    firstError = error;
+    console.error('Scheduled Polymarket prediction reconciliation failed', messageOf(error));
+  }
   for (const market of TRADE_MARKETS) {
     try {
       await settleDueRounds(env, market);
@@ -1053,7 +1058,7 @@ function isPredictPriceFeedError(error: unknown): boolean { return /aster|mark p
 
 async function isExpectedPredictRequestError(env: Env, market: TradeMarket | null, error: unknown): Promise<boolean> {
   const message = messageOf(error);
-  if (/open the mini app inside telegram|invalid telegram session|telegram session expired|telegram user mismatch|missing telegram user|missing user id|invalid predict market|choose up or down|enter a valid gram amount|below the minimum|this prediction is closed|prediction round is starting|already placed a prediction|previous prediction is still processing|prediction could not be reserved|insufficient balance|your access to this market is currently paused|predictions are temporarily unavailable|predictions are temporarily paused|live price feed is unavailable|your maximum prediction|your daily predict limit|current betting capacity/i.test(message)) return true;
+  if (/open the mini app inside telegram|invalid telegram session|telegram session expired|telegram user mismatch|missing telegram user|missing user id|invalid predict market|choose up or down|enter a valid gram amount|below the minimum|this prediction is closed|prediction round is starting|already placed a prediction|previous prediction is still processing|order for this prediction is still being (prepared|confirmed)|prediction could not be reserved|insufficient balance|your access to this market is currently paused|predictions are temporarily unavailable|predictions are temporarily paused|live price feed is unavailable|your maximum prediction|your daily predict limit|current betting capacity/i.test(message)) return true;
   if (!market) return false;
   const control = await readPredictOpsControl(env).catch(() => null);
   return Boolean(control?.maintenanceMessage && message === control.maintenanceMessage);

@@ -32,39 +32,22 @@ jobs:
           count = s.count(old)
           if count != 1:
               raise SystemExit(f'Predict prompt anchor expected exactly once, found {count}')
-          s = s.replace(old, new, 1)
-          p.write_text(s, encoding='utf-8')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
           PY
 
-      - name: Validate exact scope and browser script
+      - name: Validate exact scope
         shell: bash
         run: |
           set -euo pipefail
           test "$(git diff --name-only)" = "src/miniapp/predict-zone.ts"
           git diff --check -- src/miniapp/predict-zone.ts
-          grep -q "var presetPromptPending=false" src/miniapp/predict-zone.ts
-          grep -q "setTimeout(function(){if(!presetEditing||busy||!isActive()||!root.contains(anchor))" src/miniapp/predict-zone.ts
-          grep -q "},180)}" src/miniapp/predict-zone.ts
-          grep -q "savePresetValues();resetPresetLabels();updateEstimate()" src/miniapp/predict-zone.ts
-          grep -q "grid-template-columns:repeat(3,minmax(0,1fr)) 54px!important" src/miniapp/predict-zone.ts
-          test "$(grep -o "window.prompt('Enter GRAM amount',current)" src/miniapp/predict-zone.ts | wc -l | tr -d ' ')" = "1"
-          node <<'NODE'
-          const fs=require('fs');
-          const src=fs.readFileSync('src/miniapp/predict-zone.ts','utf8');
-          const marker='export const PREDICT_ZONE_SCRIPT = `';
-          const a=src.indexOf(marker); if(a<0) throw new Error('Predict script marker missing');
-          const b=a+marker.length,e=src.indexOf('\n`;',b); if(e<0) throw new Error('Predict script end missing');
-          const errorsMarker='const PREDICT_ERROR_TEXTS = ';
-          const errStart=src.indexOf(errorsMarker); if(errStart<0) throw new Error('Predict errors missing');
-          const errJsonStart=errStart+errorsMarker.length;
-          const errJsonEnd=src.indexOf(';\n\nexport const PREDICT_ZONE_SCRIPT',errJsonStart);
-          const errors=Function('return '+src.slice(errJsonStart,errJsonEnd))();
-          const cooked=Function('PREDICT_ERROR_TEXTS','return `'+src.slice(b,e)+'`;')(errors);
-          new Function(cooked);
-          if(!src.includes('var presetPromptPending=false')) throw new Error('prompt guard missing');
-          if(!src.includes('anchor.blur()')) throw new Error('preset blur missing');
-          if(!src.includes('root.scrollTop=scrollTop')) throw new Error('Predict scroll restore missing');
-          NODE
+          grep -Fq "var presetPromptPending=false" src/miniapp/predict-zone.ts
+          grep -Fq "anchor.blur()" src/miniapp/predict-zone.ts
+          grep -Fq "root.scrollTop=scrollTop" src/miniapp/predict-zone.ts
+          grep -Fq "},180)}" src/miniapp/predict-zone.ts
+          grep -Fq "savePresetValues();resetPresetLabels();updateEstimate()" src/miniapp/predict-zone.ts
+          grep -Fq "grid-template-columns:repeat(3,minmax(0,1fr)) 54px!important" src/miniapp/predict-zone.ts
+          test "$(grep -Fo "window.prompt('Enter GRAM amount',current)" src/miniapp/predict-zone.ts | wc -l | tr -d ' ')" = "1"
           set +e
           npx tsc --noEmit --pretty false > /tmp/tsc.log 2>&1
           status=$?

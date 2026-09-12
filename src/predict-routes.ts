@@ -6,7 +6,7 @@ import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, pub
 import { gameBotToken, validateTelegramInitData } from './utils';
 import { getSectionAccess, isMiniAppAdmin } from './section-access';
 import { getStarsGramRate } from './stars-deposits';
-import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
+import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, reconcilePolymarketBitcoinBet, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -439,6 +439,57 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
   if (!existing) throw new Error('Could not create monthly prediction round');
   return existing;
 }
+
+async function reconcilePendingPolymarketBets(env: Env, roundId?: string): Promise<number> {
+  await ensurePredictTables(env);
+  await ensurePredictProviderTables(env);
+  const sql = `SELECT b.* FROM predict_bets b
+    INNER JOIN predict_round_providers rp ON rp.round_id = b.round_id AND rp.provider = 'polymarket'
+    INNER JOIN predict_polymarket_bets pb ON pb.bet_id = b.id
+    WHERE b.status = 'pending'${roundId ? ' AND b.round_id = ?' : ''}
+    ORDER BY datetime(b.created_at) ASC LIMIT 50`;
+  const query = env.DB.prepare(sql);
+  const rows = (roundId ? await query.bind(roundId).all<BetRow>() : await query.all<BetRow>()).results || [];
+  let changed = 0;
+  for (const bet of rows) {
+    const betId = cleanDbText(bet.id, 'Prediction bet is not ready');
+    const result = await reconcilePolymarketBitcoinBet(env, betId).catch((error) => {
+      console.warn(`Polymarket prediction reconciliation failed for ${betId}`, messageOf(error));
+      return null;
+    });
+    if (!result) continue;
+    if (result.status === 'pending') continue;
+    if (result.status === 'matched') {
+      const activated = await env.DB.prepare("UPDATE predict_bets SET status = 'active' WHERE id = ? AND status = 'pending'").bind(betId).run();
+      if ((activated.meta?.changes || 0) > 0) changed += 1;
+    } else {
+      await adjustUserTonBalance(env, cleanUserId(bet.user_id), Number(bet.stake_nano || 0), {
+        kind: 'predict', title: 'Prediction stake rollback', referenceId: betId, referenceType: 'predict_bet',
+        metadata: { market: bet.market, side: bet.side, roundId: bet.round_id, status: 'polymarket-order-failed' },
+      });
+      const failed = await env.DB.prepare("UPDATE predict_bets SET status = 'failed' WHERE id = ? AND status = 'pending'").bind(betId).run();
+      if ((failed.meta?.changes || 0) > 0) changed += 1;
+    }
+    await publishPredictRoundRealtimeObserved(env, normalizeTradeMarket(bet.market), cleanDbText(bet.round_id, 'Prediction round is not ready'), cleanUserId(bet.user_id));
+  }
+  if (changed > 0) await publishPredictOpsRealtime(env).catch(() => undefined);
+  return changed;
+}
+
+export async function runPredictScheduledSettlement(env: Env): Promise<void> {
+  await reconcilePendingPolymarketBets(env);
+  let firstError: unknown = null;
+  for (const market of TRADE_MARKETS) {
+    try {
+      await settleDueRounds(env, market);
+    } catch (error) {
+      firstError ??= error;
+      console.error(`Scheduled ${market} prediction settlement failed`, messageOf(error));
+    }
+  }
+  if (firstError) throw firstError;
+}
+
 async function settleDueRounds(env: Env, market: TradeMarket, force = false, settlementPrice = 0): Promise<number> {
   await ensurePredictTables(env);
   const rows = await env.DB.prepare(`SELECT * FROM predict_rounds WHERE market = ? AND status NOT IN ('refunding','refunded') AND (status != 'settled' OR id IN (SELECT round_id FROM predict_bets WHERE status IN ('active', 'settling_payment'))) AND (datetime(ends_at) <= datetime('now') OR ? = 1) ORDER BY datetime(ends_at) ASC LIMIT 10`).bind(market, force ? 1 : 0).all<RoundRow>();
@@ -456,11 +507,16 @@ async function settleRound(env: Env, round: RoundRow, settlementPrice = 0): Prom
   const fresh = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id = ?').bind(cleanDbText(round.id, 'Prediction round is not ready')).first<RoundRow>();
   if (!fresh) return;
   const freshId = cleanDbText(fresh.id, 'Prediction round is not ready');
-  const activeCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM predict_bets WHERE round_id = ? AND status IN ('active', 'settling_payment')").bind(freshId).first<{ count: number }>();
   if (fresh.status === 'refunding' || fresh.status === 'refunded') return;
-  if (fresh.status === 'settled' && Number(activeCount?.count || 0) <= 0) return;
   const market = normalizeTradeMarket(fresh.market);
   const provider = await getPredictRoundProvider(env, freshId);
+  if (provider === 'polymarket') {
+    await reconcilePendingPolymarketBets(env, freshId);
+    const pending = await env.DB.prepare("SELECT COUNT(*) AS count FROM predict_bets WHERE round_id = ? AND status = 'pending'").bind(freshId).first<{ count: number }>();
+    if (Number(pending?.count || 0) > 0) return;
+  }
+  const activeCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM predict_bets WHERE round_id = ? AND status IN ('active', 'settling_payment')").bind(freshId).first<{ count: number }>();
+  if (fresh.status === 'settled' && Number(activeCount?.count || 0) <= 0) return;
   if (provider === 'polymarket') {
     if (market !== 'bitcoin') throw new Error('Polymarket provider is only available for Bitcoin');
     const resolved = await resolvePolymarketBitcoinRound(env, freshId);
@@ -860,6 +916,13 @@ export async function manualRefundPredictRound(env: Env, roundIdInput: unknown, 
   let round = await env.DB.prepare('SELECT * FROM predict_rounds WHERE id=? LIMIT 1').bind(roundId).first<RoundRow>();
   if (!round) throw new Error('Prediction round not found.');
   const market = normalizeTradeMarket(round.market);
+  const provider = await getPredictRoundProvider(env, roundId);
+
+  if (provider === 'polymarket') {
+    await reconcilePendingPolymarketBets(env, roundId);
+    const pending = await env.DB.prepare("SELECT COUNT(*) AS count FROM predict_bets WHERE round_id=? AND status='pending'").bind(roundId).first<{ count: number }>();
+    if (Number(pending?.count || 0) > 0) throw new Error('Some Polymarket orders are still being confirmed. Retry Close & Refund shortly.');
+  }
 
   if (round.status === 'settled') {
     const lost = await env.DB.prepare("SELECT id FROM predict_bets WHERE round_id=? AND status='lost' ORDER BY datetime(created_at) ASC").bind(roundId).all<{ id: string }>();

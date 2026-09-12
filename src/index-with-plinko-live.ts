@@ -16,6 +16,7 @@ import { getSectionAccess, isMiniAppAdmin } from './section-access';
 import { handleSlotLiveBetsAdminRequest } from './telegram-slot-live-bets-admin';
 import { setGameMenuButton, setTelegramWebhook } from './telegram-game-bot';
 import { addUserXp } from './levels';
+import { runPredictScheduledSettlement } from './predict-routes';
 import {
   nextCrashAutoCashoutMultiplier,
   settleDueCrashAutoCashouts,
@@ -866,5 +867,8 @@ export default {
       statusText: response.statusText,
       headers,
     });
+  },
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
+    ctx.waitUntil(runPredictScheduledSettlement(env));
   },
 };

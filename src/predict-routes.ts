@@ -159,7 +159,7 @@ app.post('/app/api/predict-bet', async (c) => {
     const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
     const minimumGramUsd = await fetchGramUsdPrice();
     const minimumStakeNano = minimumPredictStakeNano(minimumGramUsd);
-    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
+    if (stakeNano < minimumStakeNano) throw new Error(`This amount is below the minimum for this market. Minimum prediction is ${nanoToTon(minimumStakeNano)} GRAM ($1).`);
     const tonUsd = providerState === 'polymarket' ? minimumGramUsd : cleanOptionalPrice(body.tonUsdSnapshot);
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);

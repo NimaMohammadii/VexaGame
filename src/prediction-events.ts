@@ -77,7 +77,7 @@ app.post('/app/api/prediction-events/bet', async (c) => {
     const stakeNano = tonToNano(body.stakeTon);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
     const minimumStakeNano = await minimumPredictionStakeNano();
-    if (stakeNano < minimumStakeNano) throw new Error('This amount is below the minimum for this market. Minimum prediction is $1.');
+    if (stakeNano < minimumStakeNano) throw new Error(`This amount is below the minimum for this market. Minimum prediction is ${nanoToTon(minimumStakeNano)} GRAM ($1).`);
 
     const event = await c.env.DB.prepare('SELECT * FROM prediction_events WHERE id = ?').bind(eventId).first<EventRow>();
     if (!event) throw new Error('Prediction not found');

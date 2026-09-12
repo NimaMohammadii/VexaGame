@@ -570,6 +570,7 @@ const HOME_ASSET_SCRIPT = `
   var META_CACHE_MS=300000;
   var TON_META_KEY='vexaTonLogoMeta:v1';
   var promoTimer=0,promoLoopTimer=0,promoIndex=0,promoCount=0,promoHost=null,promoTrack=null,promoLoaded=false,promoInFlight=null;
+  var homeBackgroundInFlight=null;
   function applyTonLogo(url){if(!url)return;tonLogoAppliedUrl=url;var icons=document.querySelectorAll('.ton-mini-icon img');for(var i=0;i<icons.length;i++){if(icons[i].getAttribute('src')!==url)icons[i].setAttribute('src',url)}}
   function readMeta(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){return null}}
   function saveMeta(key,value){try{localStorage.setItem(key,JSON.stringify(value))}catch(e){}}
@@ -653,11 +654,32 @@ const HOME_ASSET_SCRIPT = `
     promoInFlight=Promise.all([1,2,3].map(loadPromoImage)).then(function(images){promoLoaded=true;renderHomePromos(images);return true}).catch(function(){promoLoaded=true;renderHomePromos([]);return false}).finally(function(){promoInFlight=null});
     return promoInFlight;
   }
-  function apply(){loadTonLogo(false);loadHomePromos(false)}
+  function loadHomeBackground(){
+    if(homeBackgroundInFlight)return homeBackgroundInFlight;
+    homeBackgroundInFlight=new Promise(function(resolve){
+      var img=new Image(),done=false,timer=setTimeout(finish,7000);
+      function cleanup(){clearTimeout(timer);img.removeEventListener('load',loaded);img.removeEventListener('error',failed)}
+      function finish(){if(done)return;done=true;cleanup();resolve(true)}
+      function loaded(){
+        if(typeof img.decode==='function')img.decode().then(finish,finish);else finish();
+      }
+      function failed(){finish()}
+      img.decoding='async';img.loading='eager';
+      try{img.fetchPriority='high'}catch(e){}
+      img.addEventListener('load',loaded,{once:true});img.addEventListener('error',failed,{once:true});
+      img.src='/assets/Home.PNG?v=1';
+      if(img.complete&&img.naturalWidth>0)loaded();
+    });
+    return homeBackgroundInFlight;
+  }
+  function homeVisualAssetsReady(){
+    return Promise.all([loadTonLogo(false),loadHomePromos(false),loadHomeBackground()]).then(function(){return true},function(){return false});
+  }
+  function apply(){homeVisualAssetsReady()}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply,{once:true});else apply();
   document.addEventListener('visibilitychange',function(){if(document.hidden){clearPromoTimer();clearPromoLoopTimer()}else schedulePromo()});
   window.addEventListener('resize',function(){(window.requestAnimationFrame||function(cb){return setTimeout(cb,0)})(function(){setPromoTransform(false)})},{passive:true});
-  window.VexaRefreshHomeLotteryChrome=apply;window.VexaRefreshTonLogo=function(){return loadTonLogo(true)};
+  window.VexaRefreshHomeLotteryChrome=apply;window.VexaRefreshTonLogo=function(){return loadTonLogo(true)};window.VexaHomeVisualAssetsReady=homeVisualAssetsReady;
 })();
 `;
 

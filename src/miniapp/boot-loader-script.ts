@@ -260,8 +260,7 @@ export const BOOT_LOADER_SCRIPT = `
 
   function headerAndHomeAssetsReady(){
     var jobs=[];
-    jobs.push(call(window.VexaRefreshHomeLotterySlotImage,5500,false));
-    jobs.push(call(window.VexaRefreshTonLogo,5500,false));
+    jobs.push(call(window.VexaHomeVisualAssetsReady,7500,false));
     jobs.push(window.VexaTonBalance&&typeof window.VexaTonBalance.load==='function'?settle(window.VexaTonBalance.load(),5500,false):Promise.resolve(false));
     if(window.VexaLevel&&typeof window.VexaLevel.load==='function')jobs.push(settle(window.VexaLevel.load(),5500,false));
     return Promise.all(jobs)

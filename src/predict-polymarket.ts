@@ -332,14 +332,8 @@ export function polymarketSecretsConfigured(env: Env): boolean {
 
 export async function preparePolymarketForActivation(env: Env): Promise<PolymarketAccountHealth> {
   const geo = await assertPolymarketTradingAllowed();
-  let client: TradingClient;
-  try {
-    client = await getTradingClient(env);
-    await ensureTradingApprovals(client);
-  } catch (error) {
-    await markPolymarketBetFailed(env, input.betId);
-    throw error;
-  }
+  const client = await getTradingClient(env);
+  await ensureTradingApprovals(client);
   const [balance, bridgeEvmAddress] = await Promise.all([
     readCollateralBalanceUsd(client),
     getBridgeEvmAddress(client.account.wallet),
@@ -641,8 +635,14 @@ export async function executePolymarketBitcoinBet(env: Env, input: { betId: stri
     throw new Error('The Polymarket order for this prediction is still being prepared');
   }
 
-  const client = await getTradingClient(env);
-  await ensureTradingApprovals(client);
+  let client: TradingClient;
+  try {
+    client = await getTradingClient(env);
+    await ensureTradingApprovals(client);
+  } catch (error) {
+    await markPolymarketBetFailed(env, input.betId);
+    throw error;
+  }
   let signedOrder: SignedOrder;
   if (row.signed_order_json) {
     signedOrder = JSON.parse(row.signed_order_json) as SignedOrder;

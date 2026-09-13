@@ -1,0 +1,36 @@
+name: Temporary Predict loader diagnostics
+
+on:
+  push:
+    branches:
+      - diag/predict-timeframes-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe exact loader endpoints
+        shell: bash
+        run: |
+          node <<'NODE'
+          const G='https://gamma-api.polymarket.com';
+          const ms={ '5m':300000,'15m':900000,'1h':3600000 };
+          function hourSlug(t){const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'long',day:'numeric',year:'numeric',hour:'numeric',hour12:true}).formatToParts(new Date(t));const v=k=>String(p.find(x=>x.type===k)?.value||'').toLowerCase();return `bitcoin-up-or-down-${v('month')}-${v('day')}-${v('year')}-${v('hour')}${v('dayPeriod')}-et`}
+          async function probe(url){const t=Date.now();try{const r=await fetch(url,{headers:{accept:'application/json'},signal:AbortSignal.timeout(6000)});const text=await r.text();console.log('PROBE',r.status,Date.now()-t,url,text.slice(0,1200));return {r,text}}catch(e){console.log('PROBE_ERR',Date.now()-t,url,String(e));return null}}
+          const now=Date.now();
+          for(const tf of ['5m','15m','1h']){
+            const start=Math.floor(now/ms[tf])*ms[tf];
+            const slug=tf==='1h'?hourSlug(start):`btc-updown-${tf}-${Math.floor(start/1000)}`;
+            console.log('\nTIMEFRAME',tf,'START',new Date(start).toISOString(),'SLUG',slug);
+            await probe(`${G}/markets/slug/${encodeURIComponent(slug)}`);
+            await probe(`${G}/events/slug/${encodeURIComponent(slug)}`);
+          }
+          NODE

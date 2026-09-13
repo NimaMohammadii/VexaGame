@@ -87,7 +87,7 @@ jobs:
             }
           }
           const routes=fs.readFileSync('src/predict-routes.ts','utf8');
-          if(!routes.includes("c.req.query('prepare') === '1'))throw new Error('prepare query guard missing');
+          if(!routes.includes("c.req.query('prepare') === '1'"))throw new Error('prepare query guard missing');
           if(!routes.includes('await warmLongTimeframes'))throw new Error('Home preload does not await long timeframes');
           NODE
       - name: Re-run actual long-timeframe loaders

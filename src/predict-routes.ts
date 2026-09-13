@@ -103,13 +103,11 @@ app.get('/app/api/predict-round', async (c) => {
     } else await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     if (market === 'bitcoin' && timeframe === '5m') {
-      // Home prepares the default Bitcoin round before Predict opens. Use that
-      // same existing bootstrap path for the longer rounds. Home preparation
-      // waits for it; normal 5m requests keep the warm-up in the background.
-      const warmLongTimeframes = Promise.all((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
-        getOrCreateCurrentRound(c.env, 'bitcoin', 0, warmTimeframe),
-      )).then(() => undefined);
-      if (c.req.query('prepare') === '1') await warmLongTimeframes;
+      // Home preparation waits for the same authoritative long-round bootstrap.
+      // Normal requests only warm it in the background.
+      const prepareLongTimeframes = c.req.query('prepare') === '1';
+      const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(c.env, prepareLongTimeframes);
+      if (prepareLongTimeframes) await warmLongTimeframes;
       else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
     }
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history, candleHistory: await candleHistoryPromise };
@@ -503,8 +501,35 @@ async function reconcilePendingPolymarketBets(env: Env, roundId?: string): Promi
   return changed;
 }
 
+async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {
+  const deadline = waitForReady ? Date.now() + 10_000 : 0;
+  const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
+    for (;;) {
+      try {
+        await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+        return;
+      } catch (error) {
+        if (!(error instanceof PredictRoundStartingError)) throw error;
+        if (!waitForReady) return;
+        const remaining = deadline - Date.now();
+        if (remaining <= 300) throw new Error(`Bitcoin ${timeframe} round preparation timed out`);
+        const delay = Math.min(remaining - 100, Math.max(250, Math.min(2_000, error.retryAfterMs)));
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  };
+  const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(warmOne));
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
+}
+
 export async function runPredictScheduledSettlement(env: Env): Promise<void> {
   let firstError: unknown = null;
+  try {
+    await warmCurrentBitcoinLongTimeframes(env, false);
+  } catch (error) {
+    firstError = error;
+    console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
+  }
   try {
     await reconcilePendingPolymarketBets(env);
   } catch (error) {

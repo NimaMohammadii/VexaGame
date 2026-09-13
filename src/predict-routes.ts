@@ -105,10 +105,10 @@ app.get('/app/api/predict-round', async (c) => {
       ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, 10_000)
       : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     if (market === 'bitcoin' && timeframe === '5m') {
-  c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
-    console.warn('Predict long-timeframe background preparation failed', messageOf(error));
-  }));
-}
+      c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
+        console.warn('Predict long-timeframe background preparation failed', messageOf(error));
+      }));
+    }
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history, candleHistory: await candleHistoryPromise };
     c.executionCtx.waitUntil(reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined));
     return c.json(response, 200, { 'cache-control': CACHE_NONE });

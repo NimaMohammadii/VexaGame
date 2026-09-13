@@ -102,7 +102,7 @@ app.get('/app/api/predict-round', async (c) => {
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);
     const round = market === 'bitcoin' && timeframe !== '5m'
-      ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, 10_000)
+      ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, ROUND_BOOTSTRAP_LEASE_MS + 10_000)
       : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     if (market === 'bitcoin' && timeframe === '5m') {
       c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
@@ -515,18 +515,14 @@ async function getOrCreateBitcoinRoundWithWait(env: Env, timeframe: BitcoinTimef
   }
 }
 async function warmCurrentBitcoinLongTimeframes(env: Env): Promise<void> {
-  const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
+  const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(async (timeframe) => {
     try {
-      await getOrCreateBitcoinRoundWithWait(env, timeframe, 10_000);
+      await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
     } catch (error) {
-      if (error instanceof PredictRoundStartingError) {
-        console.warn(`Bitcoin ${timeframe} round is still starting after background warm window`);
-        return;
-      }
+      if (error instanceof PredictRoundStartingError) return;
       throw error;
     }
-  };
-  const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(warmOne));
+  }));
   for (const result of results) if (result.status === 'rejected') throw result.reason;
 }
 

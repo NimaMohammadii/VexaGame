@@ -32,7 +32,7 @@ jobs:
           s=routes.read_text()
           old="    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);"
           new="    const round = market === 'bitcoin' && timeframe !== '5m'\n      ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, 10_000)\n      : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);"
-          if s.count(old)!=1: raise SystemExit(f'route round target count: {s.count(old)}')
+          if s.count(old)!=2: raise SystemExit(f'expected GET+bet round targets, got: {s.count(old)}')
           s=s.replace(old,new,1)
 
           marker="async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {"
@@ -111,6 +111,7 @@ jobs:
           const routes=fs.readFileSync('src/predict-routes.ts','utf8');
           if(!routes.includes("timeframe !== '5m'\n      ? await getOrCreateBitcoinRoundWithWait"))throw new Error('direct long-timeframe join missing');
           if(!routes.includes('await warmCurrentBitcoinLongTimeframes(env, true);'))throw new Error('scheduled long-timeframe wait missing');
+          if((routes.match(/const round = await getOrCreateCurrentRound\(c\.env, market, snapshot\.price, timeframe\);/g)||[]).length!==1)throw new Error('bet path was unexpectedly changed');
           const poly=fs.readFileSync('src/predict-polymarket.ts','utf8');
           if(!poly.includes('attempt < 4'))throw new Error('hourly opening-price retry missing');
           NODE

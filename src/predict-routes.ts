@@ -104,11 +104,13 @@ app.get('/app/api/predict-round', async (c) => {
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     if (market === 'bitcoin' && timeframe === '5m') {
       // Home prepares the default Bitcoin round before Predict opens. Use that
-      // same successful request to warm the longer rounds through the existing
-      // round bootstrap path, so switching timeframes never owns first bootstrap.
-      c.executionCtx.waitUntil(Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
+      // same existing bootstrap path for the longer rounds. Home preparation
+      // waits for it; normal 5m requests keep the warm-up in the background.
+      const warmLongTimeframes = Promise.all((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
         getOrCreateCurrentRound(c.env, 'bitcoin', 0, warmTimeframe),
-      )).then(() => undefined));
+      )).then(() => undefined);
+      if (c.req.query('prepare') === '1') await warmLongTimeframes;
+      else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
     }
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history, candleHistory: await candleHistoryPromise };
     c.executionCtx.waitUntil(reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined));

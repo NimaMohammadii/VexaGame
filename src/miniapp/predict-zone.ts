@@ -503,8 +503,8 @@ export const PREDICT_ZONE_SCRIPT = `
       var userId=uid(),initData=telegramInitData(),headers={},request={controller:new AbortController(),promise:null},requestedAt=Date.now();
       if(userId&&initData)headers['x-telegram-init-data']=initData;
       roundRequest=request;roundSyncPending=true;
-      var timeout=setTimeout(function(){request.controller.abort()},15000);
-      request.promise=fetch('/app/api/predict-round?market='+encodeURIComponent(id)+(id==='bitcoin'?'&timeframe='+encodeURIComponent(bitcoinTimeframe):'')+'&userId='+encodeURIComponent(userId),{cache:'no-store',headers:headers,signal:request.controller.signal}).then(function(r){
+      var timeout=setTimeout(function(){request.controller.abort()},15000),prepareSuffix=id==='bitcoin'&&predictPreparing&&onReadyHome()?'&prepare=1':'';
+      request.promise=fetch('/app/api/predict-round?market='+encodeURIComponent(id)+(id==='bitcoin'?'&timeframe='+encodeURIComponent(bitcoinTimeframe):'')+prepareSuffix+'&userId='+encodeURIComponent(userId),{cache:'no-store',headers:headers,signal:request.controller.signal}).then(function(r){
         return r.json().then(function(j){if(!r.ok)throw new Error((j&&j.error)||'Could not load prediction round');return j})
       }).then(function(d){
         if(roundRequest!==request||my!==seq||id!==market||eventMode||!canLoadPredict())return false;

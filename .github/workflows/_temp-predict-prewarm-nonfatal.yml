@@ -135,7 +135,8 @@ jobs:
         run: |
           set -euo pipefail
           rm .github/workflows/_temp-predict-prewarm-nonfatal.yml
-          git add src/predict-routes.ts .github/workflows/_temp-predict-prewarm-nonfatal.yml
+          rm -f .github/.predict-prewarm-trigger
+          git add src/predict-routes.ts .github/workflows/_temp-predict-prewarm-nonfatal.yml .github/.predict-prewarm-trigger
           git config user.name "NimaMohammadii"
           git config user.email "nima.mohammadi084@gmail.com"
           git commit -m "Make Predict long-timeframe prewarm non-fatal"

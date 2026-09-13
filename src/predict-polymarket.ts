@@ -1011,13 +1011,16 @@ async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number, rtd
   if (timeframe === '1h') {
     // Hourly Polymarket rules use the Binance BTC/USDT candle open.
     const query = new URLSearchParams({ symbol: 'BTCUSDT', interval: '1h', startTime: String(normalizedStart), limit: '1' });
-    const response = await fetch(`https://data-api.binance.vision/api/v3/klines?${query}`, { signal: AbortSignal.timeout(6_000) });
-    if (!response.ok) throw new Error(`Binance Bitcoin opening price is unavailable: HTTP ${response.status}`);
-    const rows = await response.json() as unknown;
-    const candle = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : [];
-    const open = Number(candle[1]);
-    if (Number(candle[0]) !== normalizedStart || !Number.isFinite(open) || open <= 0) throw new Error('Binance returned the wrong Bitcoin hourly candle');
-    return open;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (attempt > 0) await new Promise<void>((resolve) => setTimeout(resolve, attempt * 250));
+      const response = await fetch(`https://data-api.binance.vision/api/v3/klines?${query}`, { signal: AbortSignal.timeout(6_000) });
+      if (!response.ok) throw new Error(`Binance Bitcoin opening price is unavailable: HTTP ${response.status}`);
+      const rows = await response.json() as unknown;
+      const candle = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : [];
+      const open = Number(candle[1]);
+      if (Number(candle[0]) === normalizedStart && Number.isFinite(open) && open > 0) return open;
+    }
+    throw new Error('Binance returned the wrong Bitcoin hourly candle');
   }
   const query = new URLSearchParams({
     symbol: 'BTC',

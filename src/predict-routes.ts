@@ -101,7 +101,9 @@ app.get('/app/api/predict-round', async (c) => {
         console.error('Predict background settlement failed', messageOf(error));
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);
-    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
+    const round = market === 'bitcoin' && timeframe !== '5m'
+      ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, 10_000)
+      : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     if (market === 'bitcoin' && timeframe === '5m') {
       // Home preparation waits for the same authoritative long-round bootstrap.
       // Normal requests only warm it in the background.
@@ -501,12 +503,27 @@ async function reconcilePendingPolymarketBets(env: Env, roundId?: string): Promi
   return changed;
 }
 
+async function getOrCreateBitcoinRoundWithWait(env: Env, timeframe: BitcoinTimeframe, waitMs: number): Promise<RoundRow> {
+  const deadline = Date.now() + Math.max(0, waitMs);
+  for (;;) {
+    try {
+      return await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+    } catch (error) {
+      if (!(error instanceof PredictRoundStartingError) || waitMs <= 0) throw error;
+      const remaining = deadline - Date.now();
+      if (remaining <= 300) throw error;
+      const delay = Math.min(remaining - 100, Math.max(250, Math.min(1_500, error.retryAfterMs)));
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
 async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {
   const deadline = waitForReady ? Date.now() + 10_000 : 0;
   const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
     for (;;) {
       try {
-        await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+        if (waitForReady) await getOrCreateBitcoinRoundWithWait(env, timeframe, 10_000);
+        else await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
         return;
       } catch (error) {
         if (!(error instanceof PredictRoundStartingError)) throw error;
@@ -525,7 +542,7 @@ async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean)
 export async function runPredictScheduledSettlement(env: Env): Promise<void> {
   let firstError: unknown = null;
   try {
-    await warmCurrentBitcoinLongTimeframes(env, false);
+    await warmCurrentBitcoinLongTimeframes(env, true);
   } catch (error) {
     firstError = error;
     console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));

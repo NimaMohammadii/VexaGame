@@ -487,14 +487,14 @@ export const PREDICT_ZONE_SCRIPT = `
       if(isFinite(ends)&&roundNow()>=ends)trendLabel.textContent=roundPreparationText()
     }
     function scheduleRoundRetry(delay,my,id){
-      if(my!==seq||id!==market||eventMode||!isActive())return;
+      if(my!==seq||id!==market||eventMode||!canLoadPredict())return;
       var wait=Math.max(500,Math.min(60000,Number(delay)||2000));
       if(roundRetryTimer)clearTimeout(roundRetryTimer);
       roundRetryAt=Date.now()+wait;roundSyncAwaitingFeed=true;
       roundRetryTimer=setTimeout(function(){roundRetryTimer=0;resumeRoundSync(my,id)},wait+25)
     }
     function resumeRoundSync(my,id){
-      if(!roundSyncAwaitingFeed||roundSyncPending||Date.now()<roundRetryAt||my!==seq||id!==market||eventMode||!isActive())return;
+      if(!roundSyncAwaitingFeed||roundSyncPending||Date.now()<roundRetryAt||my!==seq||id!==market||eventMode||!canLoadPredict())return;
       syncNextRound(my,id)
     }
     function syncRound(my,id){
@@ -559,7 +559,7 @@ export const PREDICT_ZONE_SCRIPT = `
       return request.promise
     }
     function syncNextRound(my,id){
-      if(roundSyncPending||my!==seq||id!==market||eventMode||!isActive()||Date.now()<roundRetryAt)return;
+      if(roundSyncPending||my!==seq||id!==market||eventMode||!canLoadPredict()||Date.now()<roundRetryAt)return;
       roundSyncAwaitingFeed=false;renderRoundSyncState(false);
       syncRound(my,id).then(function(ok){if(my!==seq||id!==market||eventMode||!isActive())return;if(ok)startClock()})
     }

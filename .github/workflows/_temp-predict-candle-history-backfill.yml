@@ -113,7 +113,25 @@ jobs:
           const zone = fs.readFileSync('src/miniapp/predict-zone.ts','utf8');
           const match = zone.match(/export const PREDICT_ZONE_SCRIPT = `([\s\S]*?)`;\s*$/);
           if (!match) throw new Error('PREDICT_ZONE_SCRIPT not found');
-          new Function(match[1]);
+          const marker = '${JSON.stringify(PREDICT_ERROR_TEXTS)}';
+          if ((match[1].split(marker).length - 1) !== 1) throw new Error('Unexpected PREDICT_ZONE_SCRIPT interpolation count');
+          const runtime = match[1].replace(marker, '{}');
+          if (runtime.includes('${')) throw new Error('Unexpected unresolved interpolation in PREDICT_ZONE_SCRIPT');
+          new Function(runtime);
+          NODE
+          node <<'NODE'
+          for (const interval of ['5m','15m','1h']) {
+            const url = `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=3`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Binance ${interval} history HTTP ${response.status}`);
+            const rows = await response.json();
+            if (!Array.isArray(rows) || rows.length < 2) throw new Error(`Binance ${interval} history is empty`);
+            for (const row of rows) {
+              if (!Array.isArray(row) || row.length < 7) throw new Error(`Binance ${interval} history schema mismatch`);
+              const values = [row[0],row[1],row[2],row[3],row[4],row[6]].map(Number);
+              if (!values.every(v => Number.isFinite(v) && v > 0)) throw new Error(`Binance ${interval} history contains invalid OHLC`);
+            }
+          }
           NODE
           python3 <<'PY'
           from pathlib import Path

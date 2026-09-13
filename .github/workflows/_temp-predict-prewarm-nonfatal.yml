@@ -1,0 +1,158 @@
+name: Temporary Predict Prewarm Nonfatal
+
+'on':
+  push:
+    branches:
+      - fix/predict-prewarm-nonfatal
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Patch authoritative Predict prewarm path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path('src/predict-routes.ts')
+          s=p.read_text()
+
+          old="""    if (market === 'bitcoin' && timeframe === '5m') {
+              // Home preparation waits for the same authoritative long-round bootstrap.
+              // Normal requests only warm it in the background.
+              const prepareLongTimeframes = c.req.query('prepare') === '1';
+              const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(c.env, prepareLongTimeframes);
+              if (prepareLongTimeframes) await warmLongTimeframes;
+              else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
+            }
+          """
+          new="""    if (market === 'bitcoin' && timeframe === '5m') {
+              c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
+                console.warn('Predict long-timeframe background preparation failed', messageOf(error));
+              }));
+            }
+          """
+          if s.count(old) != 1:
+              raise SystemExit(f'5m prewarm target count: {s.count(old)}')
+          s=s.replace(old,new,1)
+
+          start=s.index('async function warmCurrentBitcoinLongTimeframes(')
+          end=s.index('\nexport async function runPredictScheduledSettlement', start)
+          replacement="""async function warmCurrentBitcoinLongTimeframes(env: Env): Promise<void> {
+            const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
+              try {
+                await getOrCreateBitcoinRoundWithWait(env, timeframe, 10_000);
+              } catch (error) {
+                if (error instanceof PredictRoundStartingError) {
+                  console.warn(`Bitcoin ${timeframe} round is still starting after background warm window`);
+                  return;
+                }
+                throw error;
+              }
+            };
+            const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(warmOne));
+            for (const result of results) if (result.status === 'rejected') throw result.reason;
+          }
+          """
+          s=s[:start]+replacement+s[end:]
+
+          old="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
+            let firstError: unknown = null;
+            try {
+              await warmCurrentBitcoinLongTimeframes(env, true);
+            } catch (error) {
+              firstError = error;
+              console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
+            }
+            try {
+          """
+          new="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
+            let firstError: unknown = null;
+            const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(env).catch((error) => {
+              console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
+            });
+            try {
+          """
+          if s.count(old) != 1:
+              raise SystemExit(f'scheduled prewarm target count: {s.count(old)}')
+          s=s.replace(old,new,1)
+
+          old="""  }
+            if (firstError) throw firstError;
+          }
+
+          async function settleDueRounds"""
+          new="""  }
+            await warmLongTimeframes;
+            if (firstError) throw firstError;
+          }
+
+          async function settleDueRounds"""
+          if s.count(old) != 1:
+              raise SystemExit(f'scheduled completion target count: {s.count(old)}')
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/predict-routes.ts"
+      - name: Verify scoped behavior and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const file='src/predict-routes.ts';
+          const source=fs.readFileSync(file,'utf8');
+          const out=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler},reportDiagnostics:true,fileName:file});
+          const errors=(out.diagnostics||[]).filter(x=>x.category===ts.DiagnosticCategory.Error);
+          if(errors.length) throw new Error(errors.map(x=>ts.flattenDiagnosticMessageText(x.messageText,'\n')).join('\n'));
+          if(source.includes("const prepareLongTimeframes = c.req.query('prepare') === '1'")) throw new Error('5m response still blocks on prepare flag');
+          if(source.includes('Bitcoin ${timeframe} round preparation timed out')) throw new Error('generic warm timeout still present');
+          if(!source.includes('c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch')) throw new Error('5m warm is not detached');
+          if(!source.includes('const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(env).catch')) throw new Error('scheduled warm is not detached from settlement');
+          if(!source.includes('await warmLongTimeframes;')) throw new Error('scheduled warm completion is not observed');
+          if((source.match(/const round = await getOrCreateCurrentRound\(c\.env, market, snapshot\.price, timeframe\);/g)||[]).length!==1) throw new Error('bet path changed unexpectedly');
+          if(!source.includes("timeframe !== '5m'\n      ? await getOrCreateBitcoinRoundWithWait")) throw new Error('direct long-timeframe join missing');
+          NODE
+      - name: Verify current hourly loader remains healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const source=fs.readFileSync('src/predict-polymarket.ts','utf8');
+          const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler}}).outputText;
+          fs.writeFileSync('src/__tmp-predict-polymarket.mjs',compiled);
+          const mod=await import(new URL('./src/__tmp-predict-polymarket.mjs',import.meta.url));
+          const start=Math.floor(Date.now()/3600000)*3600000;
+          const market=await mod.loadPolymarketBitcoinMarket(start,'1h');
+          if(!(Number(market.startPrice)>0)||!market.upTokenId||!market.downTokenId) throw new Error('live 1h loader failed');
+          fs.unlinkSync('src/__tmp-predict-polymarket.mjs');
+          NODE
+      - name: Commit scoped fix and remove verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-predict-prewarm-nonfatal.yml
+          git add src/predict-routes.ts .github/workflows/_temp-predict-prewarm-nonfatal.yml
+          git config user.name "NimaMohammadii"
+          git config user.email "nima.mohammadi084@gmail.com"
+          git commit -m "Make Predict long-timeframe prewarm non-fatal"
+          git push origin HEAD:fix/predict-prewarm-nonfatal

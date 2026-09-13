@@ -30,27 +30,26 @@ jobs:
           p=Path('src/predict-routes.ts')
           s=p.read_text()
 
-          old="""    if (market === 'bitcoin' && timeframe === '5m') {
-              // Home preparation waits for the same authoritative long-round bootstrap.
-              // Normal requests only warm it in the background.
-              const prepareLongTimeframes = c.req.query('prepare') === '1';
-              const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(c.env, prepareLongTimeframes);
-              if (prepareLongTimeframes) await warmLongTimeframes;
-              else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
-            }
+          route_anchor=s.index("app.get('/app/api/predict-round'")
+          block_start=s.index("    if (market === 'bitcoin' && timeframe === '5m') {", route_anchor)
+          block_end=s.index("    const response =", block_start)
+          old_block=s[block_start:block_end]
+          required=[
+              "const prepareLongTimeframes = c.req.query('prepare') === '1';",
+              "if (prepareLongTimeframes) await warmLongTimeframes;",
+          ]
+          if not all(x in old_block for x in required):
+              raise SystemExit('unexpected 5m prewarm block')
+          new_block="""    if (market === 'bitcoin' && timeframe === '5m') {
+            c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
+              console.warn('Predict long-timeframe background preparation failed', messageOf(error));
+            }));
+          }
           """
-          new="""    if (market === 'bitcoin' && timeframe === '5m') {
-              c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
-                console.warn('Predict long-timeframe background preparation failed', messageOf(error));
-              }));
-            }
-          """
-          if s.count(old) != 1:
-              raise SystemExit(f'5m prewarm target count: {s.count(old)}')
-          s=s.replace(old,new,1)
+          s=s[:block_start]+new_block+s[block_end:]
 
-          start=s.index('async function warmCurrentBitcoinLongTimeframes(')
-          end=s.index('\nexport async function runPredictScheduledSettlement', start)
+          warm_start=s.index('async function warmCurrentBitcoinLongTimeframes(')
+          warm_end=s.index('\nexport async function runPredictScheduledSettlement', warm_start)
           replacement="""async function warmCurrentBitcoinLongTimeframes(env: Env): Promise<void> {
             const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
               try {
@@ -67,43 +66,28 @@ jobs:
             for (const result of results) if (result.status === 'rejected') throw result.reason;
           }
           """
-          s=s[:start]+replacement+s[end:]
+          s=s[:warm_start]+replacement+s[warm_end:]
 
-          old="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
-            let firstError: unknown = null;
-            try {
-              await warmCurrentBitcoinLongTimeframes(env, true);
-            } catch (error) {
-              firstError = error;
-              console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
-            }
-            try {
-          """
-          new="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
+          sched_start=s.index('export async function runPredictScheduledSettlement(env: Env): Promise<void> {')
+          reconcile_start=s.index('  try {\n    await reconcilePendingPolymarketBets(env);', sched_start)
+          old_prelude=s[sched_start:reconcile_start]
+          if "await warmCurrentBitcoinLongTimeframes(env, true);" not in old_prelude:
+              raise SystemExit('unexpected scheduled warm prelude')
+          new_prelude="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
             let firstError: unknown = null;
             const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(env).catch((error) => {
               console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
             });
-            try {
           """
-          if s.count(old) != 1:
-              raise SystemExit(f'scheduled prewarm target count: {s.count(old)}')
-          s=s.replace(old,new,1)
+          s=s[:sched_start]+new_prelude+s[reconcile_start:]
 
-          old="""  }
-            if (firstError) throw firstError;
-          }
-
-          async function settleDueRounds"""
-          new="""  }
-            await warmLongTimeframes;
-            if (firstError) throw firstError;
-          }
-
-          async function settleDueRounds"""
-          if s.count(old) != 1:
-              raise SystemExit(f'scheduled completion target count: {s.count(old)}')
-          s=s.replace(old,new,1)
+          sched_end=s.index('\n}\n\nasync function settleDueRounds', sched_start)
+          sched_body=s[sched_start:sched_end]
+          needle='  if (firstError) throw firstError;'
+          if sched_body.count(needle) != 1:
+              raise SystemExit('unexpected scheduled completion')
+          sched_body=sched_body.replace(needle, '  await warmLongTimeframes;\n'+needle, 1)
+          s=s[:sched_start]+sched_body+s[sched_end:]
 
           p.write_text(s)
           PY
@@ -123,7 +107,7 @@ jobs:
           const errors=(out.diagnostics||[]).filter(x=>x.category===ts.DiagnosticCategory.Error);
           if(errors.length) throw new Error(errors.map(x=>ts.flattenDiagnosticMessageText(x.messageText,'\n')).join('\n'));
           if(source.includes("const prepareLongTimeframes = c.req.query('prepare') === '1'")) throw new Error('5m response still blocks on prepare flag');
-          if(source.includes('Bitcoin ${timeframe} round preparation timed out')) throw new Error('generic warm timeout still present');
+          if(source.includes('round preparation timed out')) throw new Error('generic warm timeout still present');
           if(!source.includes('c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch')) throw new Error('5m warm is not detached');
           if(!source.includes('const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(env).catch')) throw new Error('scheduled warm is not detached from settlement');
           if(!source.includes('await warmLongTimeframes;')) throw new Error('scheduled warm completion is not observed');

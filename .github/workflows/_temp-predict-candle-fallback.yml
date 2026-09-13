@@ -1,0 +1,124 @@
+name: Temporary Predict candle fallback
+
+on:
+  push:
+    branches:
+      - fix/predict-candle-history-fallback-2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Patch candle history fallback only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path=Path('src/predict-routes.ts')
+          text=path.read_text()
+          old='''async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {
+  const res = await fetch(`${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${encodeURIComponent(timeframe)}&limit=16`, { cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
+  if (!res.ok) throw new Error(`Binance Bitcoin candle history failed: HTTP ${res.status}`);
+  const rows = await res.json() as unknown;
+  if (!Array.isArray(rows)) throw new Error('Invalid Binance Bitcoin candle history');
+  const now = Date.now();
+  const history: CandleHistoryBar[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const time = Number(row[0]);
+    const open = Number(row[1]);
+    const high = Number(row[2]);
+    const low = Number(row[3]);
+    const close = Number(row[4]);
+    const closeTime = Number(row[6]);
+    if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
+    if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
+    history.push({ time, open, high, low, close });
+  }
+  return history.slice(-12);
+}
+'''
+          new='''async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {
+  const interval = encodeURIComponent(timeframe);
+  const sources = [
+    `${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=16`,
+    `${ASTER_FUTURES_REST_BASE}/fapi/v1/markPriceKlines?symbol=BTCUSDT&interval=${interval}&limit=16`,
+  ];
+  for (const url of sources) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      const res = await fetch(url, { signal: controller.signal, cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
+      if (!res.ok) continue;
+      const rows = await res.json() as unknown;
+      if (!Array.isArray(rows)) continue;
+      const now = Date.now();
+      const history: CandleHistoryBar[] = [];
+      for (const row of rows) {
+        if (!Array.isArray(row)) continue;
+        const time = Number(row[0]);
+        const open = Number(row[1]);
+        const high = Number(row[2]);
+        const low = Number(row[3]);
+        const close = Number(row[4]);
+        const closeTime = Number(row[6]);
+        if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
+        if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
+        history.push({ time, open, high, low, close });
+      }
+      if (history.length >= 2) return history.slice(-12);
+    } catch {
+      // Try the next already-approved market-data source.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return [];
+}
+'''
+          if text.count(old)!=1: raise SystemExit(f'expected exact candle history function once, found {text.count(old)}')
+          path.write_text(text.replace(old,new,1))
+          PY
+          git diff --check
+      - name: Verify fallback and Predict scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const file='src/predict-routes.ts';
+          const out=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext},reportDiagnostics:true});
+          const errors=(out.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error);
+          if(errors.length) throw new Error(errors.map(d=>ts.flattenDiagnosticMessageText(d.messageText,'\n')).join('\n'));
+          for(const interval of ['5m','15m','1h']){
+            const r=await fetch(`https://fapi.asterdex.com/fapi/v1/markPriceKlines?symbol=BTCUSDT&interval=${interval}&limit=16`);
+            if(!r.ok) throw new Error(`Aster ${interval}: HTTP ${r.status}`);
+            const rows=await r.json();
+            if(!Array.isArray(rows)||rows.length<12) throw new Error(`Aster ${interval}: insufficient candle history`);
+          }
+          NODE
+          git diff --name-only 8d742141cbe066f2d92a03dc7d26aa4729201264...HEAD | grep -vx '.github/workflows/_temp-predict-candle-fallback.yml' | grep -qx 'src/predict-routes.ts' || true
+      - name: Commit scoped fix and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-predict-candle-fallback.yml
+          git add src/predict-routes.ts .github/workflows/_temp-predict-candle-fallback.yml
+          git config user.name "NimaMohammadii"
+          git config user.email "nima.mohammadi084@gmail.com"
+          git commit -m "Fix Predict candle history fallback"
+          git push origin HEAD:fix/predict-candle-history-fallback-2

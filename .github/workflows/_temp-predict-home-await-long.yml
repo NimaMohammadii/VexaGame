@@ -1,9 +1,6 @@
 name: Temporary Predict Home Await Long Timeframes
 
-on:
-  push:
-    branches:
-      - fix/predict-home-await-long-timeframes
+on: [push]
 
 permissions:
   contents: write

@@ -632,25 +632,41 @@ async function fetchMarketSnapshot(market: TradeMarket): Promise<MarketSnapshot>
   return { price: history[history.length - 1], history };
 }
 async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {
-  const res = await fetch(`${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${encodeURIComponent(timeframe)}&limit=16`, { cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
-  if (!res.ok) throw new Error(`Binance Bitcoin candle history failed: HTTP ${res.status}`);
-  const rows = await res.json() as unknown;
-  if (!Array.isArray(rows)) throw new Error('Invalid Binance Bitcoin candle history');
-  const now = Date.now();
-  const history: CandleHistoryBar[] = [];
-  for (const row of rows) {
-    if (!Array.isArray(row)) continue;
-    const time = Number(row[0]);
-    const open = Number(row[1]);
-    const high = Number(row[2]);
-    const low = Number(row[3]);
-    const close = Number(row[4]);
-    const closeTime = Number(row[6]);
-    if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
-    if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
-    history.push({ time, open, high, low, close });
+  const interval = encodeURIComponent(timeframe);
+  const sources = [
+    `${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=16`,
+    `${ASTER_FUTURES_REST_BASE}/fapi/v1/markPriceKlines?symbol=BTCUSDT&interval=${interval}&limit=16`,
+  ];
+  for (const url of sources) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      const res = await fetch(url, { signal: controller.signal, cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
+      if (!res.ok) continue;
+      const rows = await res.json() as unknown;
+      if (!Array.isArray(rows)) continue;
+      const now = Date.now();
+      const history: CandleHistoryBar[] = [];
+      for (const row of rows) {
+        if (!Array.isArray(row)) continue;
+        const time = Number(row[0]);
+        const open = Number(row[1]);
+        const high = Number(row[2]);
+        const low = Number(row[3]);
+        const close = Number(row[4]);
+        const closeTime = Number(row[6]);
+        if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
+        if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
+        history.push({ time, open, high, low, close });
+      }
+      if (history.length >= 2) return history.slice(-12);
+    } catch {
+      // Try the next already-approved market-data source.
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  return history.slice(-12);
+  return [];
 }
 async function fetchPrice(market: TradeMarket): Promise<number> {
   const symbol = marketSymbol(market);

@@ -14,6 +14,7 @@ const CACHE_PREDICT_IMAGE_MANIFEST = 'public, max-age=300, stale-while-revalidat
 const PREDICT_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const TRADE_MARKETS = ['bitcoin', 'gold', 'oil'] as const;
 const ASTER_FUTURES_REST_BASE = 'https://fapi.asterdex.com';
+const BINANCE_PUBLIC_REST_BASE = 'https://data-api.binance.vision';
 const ROUND_MS = 5 * 60 * 1000;
 const MONTH_BET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_MS = 0;
@@ -39,6 +40,7 @@ type RoundRow = { id: string; market: string; starts_at: string; ends_at: string
 type BetRow = { id: string; round_id: string; market: string; user_id: string; side: string; stake_nano: number; ton_usd_snapshot: number; stake_usd_snapshot: number; status: string; payout_nano: number; created_at: string };
 type RoundBootstrapRow = { round_id: string; market: string; lease_until_ms: number; retry_after_ms: number; last_error: string | null; updated_at: string };
 type MarketSnapshot = { price: number; history: number[] };
+type CandleHistoryBar = { time: number; open: number; high: number; low: number; close: number };
 type PredictOpsControl = { emergencyPaused: boolean; maintenanceMessage: string; pausedMarkets: Record<TradeMarket, boolean>; exposureLimitsNano: Record<TradeMarket, number>; updatedAt: string | null };
 type PredictOpsFeed = { lastPrice: number | null; lastSuccessAt: string | null; circuitOpen: boolean; circuitReason: string | null; circuitOpenedAt: string | null; lastError: string | null; lastErrorAt: string | null };
 type PredictUserLimitRow = { user_id: string; max_bet_nano: number; daily_limit_nano: number; updated_at: string };
@@ -85,6 +87,9 @@ app.get('/app/api/predict-round', async (c) => {
     const timeframe = market === 'bitcoin' ? normalizeBitcoinTimeframe(c.req.query('timeframe')) : '5m';
     userId = await authenticateUser(c.env, c.req.query('userId'), c.req.header('x-telegram-init-data'));
     const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env, timeframe) : null;
+    const candleHistoryPromise: Promise<CandleHistoryBar[]> = market === 'bitcoin'
+      ? fetchBitcoinCandleHistory(timeframe).catch(() => [])
+      : Promise.resolve([]);
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     if (providerState === 'polymarket') {
@@ -97,7 +102,7 @@ app.get('/app/api/predict-round', async (c) => {
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
-    const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history };
+    const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history, candleHistory: await candleHistoryPromise };
     c.executionCtx.waitUntil(reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined));
     return c.json(response, 200, { 'cache-control': CACHE_NONE });
   } catch (error) {
@@ -625,6 +630,27 @@ async function fetchMarketSnapshot(market: TradeMarket): Promise<MarketSnapshot>
   const history = rows.map((row) => Array.isArray(row) ? Number(row[4]) : 0).filter((price) => Number.isFinite(price) && price > 0).slice(-23);
   if (!history.length) throw new Error('Aster mark price snapshot is empty');
   return { price: history[history.length - 1], history };
+}
+async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {
+  const res = await fetch(`${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${encodeURIComponent(timeframe)}&limit=16`, { cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
+  if (!res.ok) throw new Error(`Binance Bitcoin candle history failed: HTTP ${res.status}`);
+  const rows = await res.json() as unknown;
+  if (!Array.isArray(rows)) throw new Error('Invalid Binance Bitcoin candle history');
+  const now = Date.now();
+  const history: CandleHistoryBar[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const time = Number(row[0]);
+    const open = Number(row[1]);
+    const high = Number(row[2]);
+    const low = Number(row[3]);
+    const close = Number(row[4]);
+    const closeTime = Number(row[6]);
+    if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
+    if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
+    history.push({ time, open, high, low, close });
+  }
+  return history.slice(-12);
 }
 async function fetchPrice(market: TradeMarket): Promise<number> {
   const symbol = marketSymbol(market);

@@ -1,0 +1,46 @@
+name: Temporary Predict RTDS live diagnostics
+on:
+  push:
+    branches:
+      - diag/predict-rtds-live-20260913
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test exact Vexa RTDS subscriptions
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const URL='wss://ws-live-data.polymarket.com';
+          const cases=[
+            {name:'15m-vexa',topic:'crypto_prices_twap_sixty',symbol:'btc/usd'},
+            {name:'1h-vexa-lower',topic:'crypto_prices',symbol:'btcusdt'},
+            {name:'1h-control-upper',topic:'crypto_prices',symbol:'BTCUSDT'},
+          ];
+          async function runCase(c){
+            return await new Promise((resolve)=>{
+              const ws=new WebSocket(URL); let frames=[]; let timer; let done=false;
+              const finish=(reason)=>{if(done)return;done=true;clearTimeout(timer); try{ws.close()}catch{}; console.log('CASE',c.name,'END',reason,'COUNT',frames.length); for(const f of frames.slice(0,5)) console.log('FRAME',c.name,f); resolve({name:c.name,count:frames.length,frames});};
+              ws.onopen=()=>{
+                const payload={action:'subscribe',subscriptions:[{topic:c.topic,type:'update',filters:JSON.stringify({symbol:c.symbol})}]};
+                console.log('SEND',c.name,JSON.stringify(payload)); ws.send(JSON.stringify(payload));
+                timer=setTimeout(()=>finish('timeout'),12000);
+              };
+              ws.onmessage=(e)=>{const s=String(e.data||''); if(s==='PONG')return; frames.push(s.slice(0,500)); if(frames.length>=3)finish('3frames');};
+              ws.onerror=(e)=>console.log('ERROR',c.name,String(e?.message||e||''));
+            });
+          }
+          const results=[];
+          for(const c of cases) results.push(await runCase(c));
+          const by=Object.fromEntries(results.map(x=>[x.name,x]));
+          if(by['15m-vexa'].count<1) throw new Error('15m exact Vexa RTDS subscription received no frame');
+          if(by['1h-control-upper'].count<1) throw new Error('1h uppercase control received no frame');
+          if(by['1h-vexa-lower'].count<1) console.log('DIAGNOSIS: current lowercase 1h filter is broken while uppercase control works');
+          NODE

@@ -1,4 +1,4 @@
-name: Temporary Predict deep round diagnostics
+name: Temporary Predict start-price diagnostics
 on:
   push:
     branches:
@@ -11,19 +11,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Print exact round/bootstrap implementation
+      - name: Print exact Polymarket start-price implementation
         shell: bash
         run: |
           set -euo pipefail
           echo '=== LOCATIONS ==='
-          grep -n "async function getOrCreateCurrentRound\|async function claimPredictRoundBootstrap\|async function deferPredictRoundBootstrap\|async function clearPredictRoundBootstrap\|function bitcoinTimeframeForWindow" src/predict-routes.ts
-          START=$(grep -n "async function getOrCreateCurrentRound" src/predict-routes.ts | head -1 | cut -d: -f1)
-          END=$((START+115))
-          echo "=== getOrCreateCurrentRound ${START}-${END} ==="
-          sed -n "${START},${END}p" src/predict-routes.ts
-          BSTART=$(grep -n "async function claimPredictRoundBootstrap" src/predict-routes.ts | head -1 | cut -d: -f1)
-          BEND=$((BSTART+60))
-          echo "=== bootstrap ${BSTART}-${BEND} ==="
-          sed -n "${BSTART},${BEND}p" src/predict-routes.ts
-          echo '=== client timeframe/state functions ==='
-          grep -n "function hasReusableRound\|function selectMarket\|timeframeSelect.addEventListener\|function syncRound\|function scheduleRoundRetry\|function resumeRoundSync" src/miniapp/predict-zone.ts
+          grep -n "startPriceRequests\|START_PRICE_CACHE_SECONDS\|fetchPolymarketBitcoinStartPrice\|fetchPolymarketBitcoinStartPriceOnce\|start price" src/predict-polymarket.ts | head -80
+          for fn in fetchPolymarketBitcoinStartPrice fetchPolymarketBitcoinStartPriceOnce loadPolymarketBitcoinMarket; do
+            START=$(grep -n "function ${fn}\|function ${fn}<\|${fn}(" src/predict-polymarket.ts | head -1 | cut -d: -f1 || true)
+            if [ -n "$START" ]; then END=$((START+90)); echo "=== $fn $START-$END ==="; sed -n "${START},${END}p" src/predict-polymarket.ts; fi
+          done

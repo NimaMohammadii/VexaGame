@@ -1,0 +1,125 @@
+name: Temporary Predict Home Await Long Timeframes
+
+on:
+  push:
+    branches:
+      - fix/predict-home-await-long-timeframes
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Patch Home preload and existing round path only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          routes=Path('src/predict-routes.ts')
+          s=routes.read_text()
+          old="""    if (market === 'bitcoin' && timeframe === '5m') {
+      // Home prepares the default Bitcoin round before Predict opens. Use that
+      // same successful request to warm the longer rounds through the existing
+      // round bootstrap path, so switching timeframes never owns first bootstrap.
+      c.executionCtx.waitUntil(Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
+        getOrCreateCurrentRound(c.env, 'bitcoin', 0, warmTimeframe),
+      )).then(() => undefined));
+    }
+"""
+          new="""    if (market === 'bitcoin' && timeframe === '5m') {
+      // Home prepares the default Bitcoin round before Predict opens. Use that
+      // same existing bootstrap path for the longer rounds. Home preparation
+      // waits for it; normal 5m requests keep the warm-up in the background.
+      const warmLongTimeframes = Promise.all((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
+        getOrCreateCurrentRound(c.env, 'bitcoin', 0, warmTimeframe),
+      )).then(() => undefined);
+      if (c.req.query('prepare') === '1') await warmLongTimeframes;
+      else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
+    }
+"""
+          if s.count(old)!=1:
+            raise SystemExit(f'route target count: {s.count(old)}')
+          routes.write_text(s.replace(old,new,1))
+
+          zone=Path('src/miniapp/predict-zone.ts')
+          s=zone.read_text()
+          old="""      var timeout=setTimeout(function(){request.controller.abort()},15000);
+      request.promise=fetch('/app/api/predict-round?market='+encodeURIComponent(id)+(id==='bitcoin'?'&timeframe='+encodeURIComponent(bitcoinTimeframe):'')+'&userId='+encodeURIComponent(userId),{cache:'no-store',headers:headers,signal:request.controller.signal}).then(function(r){
+"""
+          new="""      var timeout=setTimeout(function(){request.controller.abort()},15000),prepareSuffix=id==='bitcoin'&&predictPreparing&&onReadyHome()?'&prepare=1':'';
+      request.promise=fetch('/app/api/predict-round?market='+encodeURIComponent(id)+(id==='bitcoin'?'&timeframe='+encodeURIComponent(bitcoinTimeframe):'')+prepareSuffix+'&userId='+encodeURIComponent(userId),{cache:'no-store',headers:headers,signal:request.controller.signal}).then(function(r){
+"""
+          if s.count(old)!=1:
+            raise SystemExit(f'zone target count: {s.count(old)}')
+          zone.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          test "$(git diff --name-only | sort)" = $'src/miniapp/predict-zone.ts\nsrc/predict-routes.ts'
+      - name: Verify architecture and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          for (const file of ['src/predict-routes.ts','src/miniapp/predict-zone.ts']) {
+            const source=fs.readFileSync(file,'utf8');
+            const out=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS},reportDiagnostics:true,fileName:file});
+            const errors=(out.diagnostics||[]).filter(x=>x.category===ts.DiagnosticCategory.Error);
+            if(errors.length)throw new Error(file+'\n'+errors.map(x=>ts.flattenDiagnosticMessageText(x.messageText,'\n')).join('\n'));
+            if(file.endsWith('predict-zone.ts')){
+              const module={exports:{}};
+              new Function('module','exports',out.outputText)(module,module.exports);
+              const runtime=module.exports.PREDICT_ZONE_SCRIPT;
+              if(typeof runtime!=='string'||!runtime.includes("&prepare=1"))throw new Error('Home prepare marker missing from Predict runtime');
+              new Function(runtime);
+            }
+          }
+          const routes=fs.readFileSync('src/predict-routes.ts','utf8');
+          if(!routes.includes("c.req.query('prepare') === '1'))throw new Error('prepare query guard missing');
+          if(!routes.includes('await warmLongTimeframes'))throw new Error('Home preload does not await long timeframes');
+          NODE
+      - name: Re-run actual long-timeframe loaders
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const source=fs.readFileSync('src/predict-polymarket.ts','utf8');
+          const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler}}).outputText;
+          fs.writeFileSync('src/__tmp-predict-polymarket.mjs',compiled);
+          const mod=await import(new URL('./src/__tmp-predict-polymarket.mjs',import.meta.url));
+          const durations={ '15m':900000,'1h':3600000 };
+          for(const tf of ['15m','1h']){
+            const start=Math.floor(Date.now()/durations[tf])*durations[tf];
+            const m=await mod.loadPolymarketBitcoinMarket(start,tf);
+            if(!(Number(m.startPrice)>0)||!m.upTokenId||!m.downTokenId||!m.rtdsTopic)throw new Error(`${tf} loader incomplete`);
+            console.log('LOADER_OK',tf,m.slug,m.startPrice,m.rtdsTopic);
+          }
+          fs.unlinkSync('src/__tmp-predict-polymarket.mjs');
+          NODE
+      - name: Commit scoped fix and remove verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-predict-home-await-long.yml
+          git add src/predict-routes.ts src/miniapp/predict-zone.ts .github/workflows/_temp-predict-home-await-long.yml
+          git config user.name "NimaMohammadii"
+          git config user.email "nima.mohammadi084@gmail.com"
+          git commit -m "Finish Predict long-timeframe preload before Home readiness"
+          git push origin HEAD:fix/predict-home-await-long-timeframes

@@ -26,70 +26,53 @@ jobs:
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
-          path=Path('src/predict-routes.ts')
-          text=path.read_text()
-          old='''async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {
-  const res = await fetch(`${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${encodeURIComponent(timeframe)}&limit=16`, { cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
-  if (!res.ok) throw new Error(`Binance Bitcoin candle history failed: HTTP ${res.status}`);
-  const rows = await res.json() as unknown;
-  if (!Array.isArray(rows)) throw new Error('Invalid Binance Bitcoin candle history');
-  const now = Date.now();
-  const history: CandleHistoryBar[] = [];
-  for (const row of rows) {
-    if (!Array.isArray(row)) continue;
-    const time = Number(row[0]);
-    const open = Number(row[1]);
-    const high = Number(row[2]);
-    const low = Number(row[3]);
-    const close = Number(row[4]);
-    const closeTime = Number(row[6]);
-    if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
-    if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
-    history.push({ time, open, high, low, close });
-  }
-  return history.slice(-12);
-}
-'''
-          new='''async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {
-  const interval = encodeURIComponent(timeframe);
-  const sources = [
-    `${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=16`,
-    `${ASTER_FUTURES_REST_BASE}/fapi/v1/markPriceKlines?symbol=BTCUSDT&interval=${interval}&limit=16`,
-  ];
-  for (const url of sources) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
-    try {
-      const res = await fetch(url, { signal: controller.signal, cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);
-      if (!res.ok) continue;
-      const rows = await res.json() as unknown;
-      if (!Array.isArray(rows)) continue;
-      const now = Date.now();
-      const history: CandleHistoryBar[] = [];
-      for (const row of rows) {
-        if (!Array.isArray(row)) continue;
-        const time = Number(row[0]);
-        const open = Number(row[1]);
-        const high = Number(row[2]);
-        const low = Number(row[3]);
-        const close = Number(row[4]);
-        const closeTime = Number(row[6]);
-        if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;
-        if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;
-        history.push({ time, open, high, low, close });
-      }
-      if (history.length >= 2) return history.slice(-12);
-    } catch {
-      // Try the next already-approved market-data source.
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  return [];
-}
-'''
-          if text.count(old)!=1: raise SystemExit(f'expected exact candle history function once, found {text.count(old)}')
-          path.write_text(text.replace(old,new,1))
+          path = Path('src/predict-routes.ts')
+          text = path.read_text()
+          start_token = 'async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {'
+          end_token = '\nasync function fetchPrice(market: TradeMarket): Promise<number> {'
+          start = text.index(start_token)
+          end = text.index(end_token, start)
+          lines = [
+              'async function fetchBitcoinCandleHistory(timeframe: BitcoinTimeframe): Promise<CandleHistoryBar[]> {',
+              '  const interval = encodeURIComponent(timeframe);',
+              '  const sources = [',
+              '    `${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=16`,',
+              '    `${ASTER_FUTURES_REST_BASE}/fapi/v1/markPriceKlines?symbol=BTCUSDT&interval=${interval}&limit=16`,',
+              '  ];',
+              '  for (const url of sources) {',
+              '    const controller = new AbortController();',
+              '    const timeout = setTimeout(() => controller.abort(), 2500);',
+              '    try {',
+              '      const res = await fetch(url, { signal: controller.signal, cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);',
+              '      if (!res.ok) continue;',
+              '      const rows = await res.json() as unknown;',
+              '      if (!Array.isArray(rows)) continue;',
+              '      const now = Date.now();',
+              '      const history: CandleHistoryBar[] = [];',
+              '      for (const row of rows) {',
+              '        if (!Array.isArray(row)) continue;',
+              '        const time = Number(row[0]);',
+              '        const open = Number(row[1]);',
+              '        const high = Number(row[2]);',
+              '        const low = Number(row[3]);',
+              '        const close = Number(row[4]);',
+              '        const closeTime = Number(row[6]);',
+              '        if (![time, open, high, low, close, closeTime].every((value) => Number.isFinite(value) && value > 0)) continue;',
+              '        if (closeTime >= now || high < Math.max(open, close) || low > Math.min(open, close) || high < low) continue;',
+              '        history.push({ time, open, high, low, close });',
+              '      }',
+              '      if (history.length >= 2) return history.slice(-12);',
+              '    } catch {',
+              '      // Try the next already-approved market-data source.',
+              '    } finally {',
+              '      clearTimeout(timeout);',
+              '    }',
+              '  }',
+              '  return [];',
+              '}',
+          ]
+          replacement = '\n'.join(lines)
+          path.write_text(text[:start] + replacement + text[end:])
           PY
           git diff --check
       - name: Verify fallback and Predict scope
@@ -111,12 +94,12 @@ jobs:
             if(!Array.isArray(rows)||rows.length<12) throw new Error(`Aster ${interval}: insufficient candle history`);
           }
           NODE
-          git diff --name-only 8d742141cbe066f2d92a03dc7d26aa4729201264...HEAD | grep -vx '.github/workflows/_temp-predict-candle-fallback.yml' | grep -qx 'src/predict-routes.ts' || true
       - name: Commit scoped fix and remove temporary workflow
         shell: bash
         run: |
           set -euo pipefail
           rm .github/workflows/_temp-predict-candle-fallback.yml
+          git diff --check
           git add src/predict-routes.ts .github/workflows/_temp-predict-candle-fallback.yml
           git config user.name "NimaMohammadii"
           git config user.email "nima.mohammadi084@gmail.com"

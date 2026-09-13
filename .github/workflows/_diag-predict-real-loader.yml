@@ -1,0 +1,46 @@
+name: Temporary actual Predict loader diagnostics
+
+on:
+  push:
+    branches:
+      - diag/predict-timeframes-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Run actual source loader
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const source=fs.readFileSync('src/predict-polymarket.ts','utf8');
+          const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler},fileName:'src/predict-polymarket.ts'}).outputText;
+          fs.writeFileSync('src/__diag-predict-polymarket.mjs',compiled);
+          const mod=await import(new URL('./src/__diag-predict-polymarket.mjs',import.meta.url));
+          const durations={ '5m':300000,'15m':900000,'1h':3600000 };
+          const now=Date.now();
+          for(const tf of ['5m','15m','1h']){
+            const start=Math.floor(now/durations[tf])*durations[tf];
+            const t=Date.now();
+            try{
+              const m=await mod.loadPolymarketBitcoinMarket(start,tf);
+              console.log('LOADER_OK',tf,Date.now()-t,JSON.stringify({slug:m.slug,startPrice:m.startPrice,rtdsTopic:m.rtdsTopic,rtdsSymbol:m.rtdsSymbol,upToken:!!m.upTokenId,downToken:!!m.downTokenId}));
+            }catch(e){
+              console.log('LOADER_ERR',tf,Date.now()-t,String(e?.stack||e));
+              process.exitCode=1;
+            }
+          }
+          fs.unlinkSync('src/__diag-predict-polymarket.mjs');
+          NODE

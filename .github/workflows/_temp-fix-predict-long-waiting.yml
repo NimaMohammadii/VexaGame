@@ -1,0 +1,190 @@
+name: Temporary Predict long-timeframe root fix
+on:
+  push:
+    branches:
+      - fix/predict-long-timeframe-waiting-root
+permissions:
+  contents: write
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Patch authoritative Predict paths only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          # 1) Shared realtime transport already owns Predict round-sync validation.
+          p=Path('src/miniapp/section-access-script.ts')
+          s=p.read_text()
+          old="function cleanPredictRoundSync(detail){var market=String(detail&&detail.market||'').toLowerCase(),roundId=String(detail&&detail.roundId||'').trim();if(market!=='bitcoin'&&market!=='gold'&&market!=='oil')return null;if(!(new RegExp('^pr_'+market+'_\\\\\\\\d+$')).test(roundId))return null;return{market:market,roundId:roundId}}"
+          new="function cleanPredictRoundSync(detail){var market=String(detail&&detail.market||'').toLowerCase(),roundId=String(detail&&detail.roundId||'').trim(),suffix=market==='bitcoin'?'(?:(?:15m|1h)_)?':'';if(market!=='bitcoin'&&market!=='gold'&&market!=='oil')return null;if(!(new RegExp('^pr_'+market+'_'+suffix+'\\\\\\\\d+$')).test(roundId))return null;return{market:market,roundId:roundId}}"
+          if s.count(old)!=1: raise SystemExit(f'section-access target count={s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+
+          # 2) Hidden Home preparation must keep retrying round sync while canLoadPredict() is true.
+          p=Path('src/miniapp/predict-zone.ts')
+          s=p.read_text()
+          replacements=[
+            ("if(my!==seq||id!==market||eventMode||!isActive())return;\n      var wait=", "if(my!==seq||id!==market||eventMode||!canLoadPredict())return;\n      var wait="),
+            ("if(!roundSyncAwaitingFeed||roundSyncPending||Date.now()<roundRetryAt||my!==seq||id!==market||eventMode||!isActive())return;", "if(!roundSyncAwaitingFeed||roundSyncPending||Date.now()<roundRetryAt||my!==seq||id!==market||eventMode||!canLoadPredict())return;"),
+            ("if(roundSyncPending||my!==seq||id!==market||eventMode||!isActive()||Date.now()<roundRetryAt)return;", "if(roundSyncPending||my!==seq||id!==market||eventMode||!canLoadPredict()||Date.now()<roundRetryAt)return;"),
+          ]
+          for old,new in replacements:
+            if s.count(old)!=1: raise SystemExit(f'predict-zone target count={s.count(old)} for {old[:60]}')
+            s=s.replace(old,new,1)
+          p.write_text(s)
+
+          # 3) Keep long-timeframe preparation inside one server helper, never leak a long
+          # PredictRoundStartingError through a 5m response, and retry from the existing cron.
+          p=Path('src/predict-routes.ts')
+          s=p.read_text()
+          old="""    if (market === 'bitcoin' && timeframe === '5m') {
+      // Home prepares the default Bitcoin round before Predict opens. Use that
+      // same existing bootstrap path for the longer rounds. Home preparation
+      // waits for it; normal 5m requests keep the warm-up in the background.
+      const warmLongTimeframes = Promise.all((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
+        getOrCreateCurrentRound(c.env, 'bitcoin', 0, warmTimeframe),
+      )).then(() => undefined);
+      if (c.req.query('prepare') === '1') await warmLongTimeframes;
+      else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
+    }
+"""
+          new="""    if (market === 'bitcoin' && timeframe === '5m') {
+      // Home preparation waits for the same authoritative long-round bootstrap.
+      // Normal requests only warm it in the background.
+      const prepareLongTimeframes = c.req.query('prepare') === '1';
+      const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(c.env, prepareLongTimeframes);
+      if (prepareLongTimeframes) await warmLongTimeframes;
+      else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
+    }
+"""
+          if s.count(old)!=1: raise SystemExit(f'predict route warm target count={s.count(old)}')
+          s=s.replace(old,new,1)
+          marker="export async function runPredictScheduledSettlement(env: Env): Promise<void> {\n"
+          helper="""async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {
+  const deadline = waitForReady ? Date.now() + 10_000 : 0;
+  const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
+    for (;;) {
+      try {
+        await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+        return;
+      } catch (error) {
+        if (!(error instanceof PredictRoundStartingError)) throw error;
+        if (!waitForReady) return;
+        const remaining = deadline - Date.now();
+        if (remaining <= 300) throw new Error(`Bitcoin ${timeframe} round preparation timed out`);
+        const delay = Math.min(remaining - 100, Math.max(250, Math.min(2_000, error.retryAfterMs)));
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  };
+  const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(warmOne));
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
+}
+
+"""
+          if s.count(marker)!=1: raise SystemExit(f'scheduled marker count={s.count(marker)}')
+          s=s.replace(marker,helper+marker,1)
+          old_sched="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
+  let firstError: unknown = null;
+  try {
+    await reconcilePendingPolymarketBets(env);
+"""
+          new_sched="""export async function runPredictScheduledSettlement(env: Env): Promise<void> {
+  let firstError: unknown = null;
+  try {
+    await warmCurrentBitcoinLongTimeframes(env, false);
+  } catch (error) {
+    firstError = error;
+    console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
+  }
+  try {
+    await reconcilePendingPolymarketBets(env);
+"""
+          if s.count(old_sched)!=1: raise SystemExit(f'scheduled body target count={s.count(old_sched)}')
+          s=s.replace(old_sched,new_sched,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          printf '%s\n' "$(git diff --name-only)"
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/miniapp/predict-zone.ts src/miniapp/section-access-script.ts src/predict-routes.ts | sort)"
+      - name: Verify runtime protocol and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          async function compileModule(file,out){
+            const source=fs.readFileSync(file,'utf8');
+            const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler},reportDiagnostics:true,fileName:file});
+            const errors=(compiled.diagnostics||[]).filter(x=>x.category===ts.DiagnosticCategory.Error);
+            if(errors.length)throw new Error(errors.map(x=>ts.flattenDiagnosticMessageText(x.messageText,'\n')).join('\n'));
+            fs.writeFileSync(out,compiled.outputText); return source;
+          }
+          const sectionSource=await compileModule('src/miniapp/section-access-script.ts','src/__tmp-section-access.mjs');
+          const section=await import(new URL('./src/__tmp-section-access.mjs',import.meta.url));
+          new Function(section.SECTION_ACCESS_SCRIPT);
+          const start=section.SECTION_ACCESS_SCRIPT.indexOf('function cleanPredictRoundSync(detail)');
+          const end=section.SECTION_ACCESS_SCRIPT.indexOf('\n  function requestPredictRoundSync',start);
+          if(start<0||end<0)throw new Error('cleanPredictRoundSync runtime function not found');
+          const clean=new Function('return ('+section.SECTION_ACCESS_SCRIPT.slice(start,end)+')')();
+          const good=['pr_bitcoin_1789326000000','pr_bitcoin_15m_1789326000000','pr_bitcoin_1h_1789326000000'];
+          for(const id of good)if(!clean({market:'bitcoin',roundId:id}))throw new Error('realtime rejected '+id);
+          for(const id of ['pr_bitcoin_30m_1789326000000','pr_bitcoin_15m_bad','pr_gold_15m_123'])if(clean({market:id.startsWith('pr_gold')?'gold':'bitcoin',roundId:id}))throw new Error('realtime accepted invalid '+id);
+          fs.unlinkSync('src/__tmp-section-access.mjs');
+
+          const predictSource=await compileModule('src/miniapp/predict-zone.ts','src/__tmp-predict-zone.mjs');
+          const predict=await import(new URL('./src/__tmp-predict-zone.mjs',import.meta.url));
+          new Function(predict.PREDICT_ZONE_SCRIPT);
+          if((predictSource.match(/!canLoadPredict\(\)/g)||[]).length < 4)throw new Error('hidden Predict retry guards not updated');
+          fs.unlinkSync('src/__tmp-predict-zone.mjs');
+
+          const routeSource=await compileModule('src/predict-routes.ts','src/__tmp-predict-routes.mjs');
+          if(!routeSource.includes('warmCurrentBitcoinLongTimeframes(env, false)'))throw new Error('scheduled long-round recovery missing');
+          if(!routeSource.includes('Bitcoin ${timeframe} round preparation timed out'))throw new Error('prepare timeout isolation missing');
+          fs.unlinkSync('src/__tmp-predict-routes.mjs');
+          console.log('TARGETED_RUNTIME_OK');
+          NODE
+      - name: Re-run live Polymarket loaders
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const source=fs.readFileSync('src/predict-polymarket.ts','utf8');
+          const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler}}).outputText;
+          fs.writeFileSync('src/__tmp-poly.mjs',compiled);
+          const mod=await import(new URL('./src/__tmp-poly.mjs',import.meta.url));
+          const durations={'15m':900000,'1h':3600000};
+          for(const tf of ['15m','1h']){
+            const start=Math.floor(Date.now()/durations[tf])*durations[tf];
+            const m=await mod.loadPolymarketBitcoinMarket(start,tf);
+            if(!(Number(m.startPrice)>0)||!m.upTokenId||!m.downTokenId||!m.rtdsTopic)throw new Error(tf+' loader incomplete');
+            console.log('LOADER_OK',tf,m.slug,m.startPrice,m.rtdsTopic);
+          }
+          fs.unlinkSync('src/__tmp-poly.mjs');
+          NODE
+      - name: Commit scoped fix and remove verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-fix-predict-long-waiting.yml
+          git add src/miniapp/predict-zone.ts src/miniapp/section-access-script.ts src/predict-routes.ts .github/workflows/_temp-fix-predict-long-waiting.yml
+          git config user.name "NimaMohammadii"
+          git config user.email "nima.mohammadi084@gmail.com"
+          git commit -m "Fix Predict long-timeframe round synchronization"
+          git push origin HEAD:fix/predict-long-timeframe-waiting-root

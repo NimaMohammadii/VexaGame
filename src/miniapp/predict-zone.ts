@@ -293,7 +293,7 @@ export const PREDICT_ZONE_SCRIPT = `
         var socket=new WebSocket(stream);ws=socket;
         socket.onopen=function(){
           if(my!==seq||id!==market||ws!==socket)return;
-          if(usePolymarket){socket.send(JSON.stringify({action:'subscribe',subscriptions:[{topic:topic,type:topic==='crypto_prices_chainlink'?'*':'update',filters:topic==='crypto_prices'?symbol:JSON.stringify({symbol:symbol})}]}));feedHeartbeat=setInterval(function(){if(ws===socket&&socket.readyState===1)try{socket.send('PING')}catch(e){}},5000)}
+          if(usePolymarket){socket.send(JSON.stringify({action:'subscribe',subscriptions:[{topic:topic,type:topic==='crypto_prices_chainlink'?'*':'update',filters:JSON.stringify({symbol:symbol})}]}));feedHeartbeat=setInterval(function(){if(ws===socket&&socket.readyState===1)try{socket.send('PING')}catch(e){}},5000)}
           armFeedWatchdog(my,id,socket)
         };
         socket.onmessage=function(e){

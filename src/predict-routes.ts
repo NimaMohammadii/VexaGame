@@ -6,7 +6,7 @@ import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, pub
 import { gameBotToken, validateTelegramInitData } from './utils';
 import { getSectionAccess, isMiniAppAdmin } from './section-access';
 import { getStarsGramRate } from './stars-deposits';
-import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, reconcilePolymarketBitcoinBet, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider } from './predict-polymarket';
+import { ensurePredictProviderTables, executePolymarketBitcoinBet, getPolymarketBetExecution, getPolymarketBetStatus, getPredictProviderState, getPredictRoundProvider, getRequestedPredictProvider, loadPolymarketBitcoinMarket, persistPolymarketRound, POLYMARKET_RTDS_URL, reconcilePolymarketBitcoinBet, rememberPredictRoundProvider, resolvePolymarketBitcoinRound, type PredictProvider, type BitcoinTimeframe, normalizeBitcoinTimeframe, bitcoinRoundMs } from './predict-polymarket';
 
 const CACHE_LONG = 'public, max-age=31536000, immutable';
 const CACHE_NONE = 'no-store';
@@ -82,8 +82,9 @@ app.get('/app/api/predict-round', async (c) => {
   let userId = '';
   try {
     market = normalizeTradeMarket(String(c.req.query('market') || 'bitcoin'));
+    const timeframe = market === 'bitcoin' ? normalizeBitcoinTimeframe(c.req.query('timeframe')) : '5m';
     userId = await authenticateUser(c.env, c.req.query('userId'), c.req.header('x-telegram-init-data'));
-    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env, timeframe) : null;
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     if (providerState === 'polymarket') {
@@ -95,7 +96,7 @@ app.get('/app/api/predict-round', async (c) => {
         console.error('Predict background settlement failed', messageOf(error));
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);
-    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
+    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history };
     c.executionCtx.waitUntil(reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined));
     return c.json(response, 200, { 'cache-control': CACHE_NONE });
@@ -114,6 +115,7 @@ app.get('/app/api/predict-round', async (c) => {
         round: {
           id: error.roundId,
           market: 'bitcoin',
+          timeframe: bitcoinTimeframeForWindow(error.startsAt, error.endsAt),
           provider: 'polymarket',
           polymarket: null,
           startsAt: error.startsAt,
@@ -149,6 +151,7 @@ app.post('/app/api/predict-bet', async (c) => {
   try {
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
     market = normalizeTradeMarket(String(body.market || 'bitcoin'));
+    const timeframe = market === 'bitcoin' ? normalizeBitcoinTimeframe(body.timeframe) : '5m';
     const side = normalizeSide(body.side);
     userId = await authenticateUser(c.env, body.userId, body.initData);
     if (!isMiniAppAdmin(c.env, userId) && (await getSectionAccess(c.env)).some((lock) => lock.sectionId === `predict-${market}`)) {
@@ -156,7 +159,7 @@ app.post('/app/api/predict-bet', async (c) => {
     }
     stakeNano = tonToNano(body.stakeTon);
     if (stakeNano <= 0) throw new Error('Enter a valid GRAM amount');
-    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env) : null;
+    const providerState = market === 'bitcoin' ? await getPredictProviderStateForRound(c.env, timeframe) : null;
     const minimumGramUsd = await fetchGramUsdPrice();
     const minimumStakeNano = minimumPredictStakeNano(minimumGramUsd);
     if (stakeNano < minimumStakeNano) throw new Error(`This amount is below the minimum for this market. Minimum prediction is ${nanoToTon(minimumStakeNano)} GRAM ($1).`);
@@ -164,8 +167,9 @@ app.post('/app/api/predict-bet', async (c) => {
     const snapshot = providerState === 'polymarket' ? { price: 0, history: [] } : await fetchMarketSnapshot(market);
     if (snapshot.price > 0) await notePredictFeedSuccess(c.env, market, snapshot.price).catch(() => undefined);
     await settleDueRounds(c.env, market, false, snapshot.price);
-    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price);
+    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     const roundId = cleanDbText(round.id, 'Prediction round is not ready');
+    if (market === 'bitcoin' && body.roundId != null && String(body.roundId) !== roundId) throw new Error('This prediction round changed. Please select your prediction again.');
     if (round.status !== 'open' || Date.now() >= betLockAtMs(round)) throw new Error('This prediction is closed. Wait for the next round.');
     await ensurePredictTables(c.env);
 
@@ -179,9 +183,9 @@ app.post('/app/api/predict-bet', async (c) => {
         throw new Error('A previous prediction is still processing. Retry the same prediction.');
       }
       betId = cleanDbText(existing.id, 'Prediction bet is not ready');
-      guard = await assertPredictBettingAvailable(c.env, market, userId, stakeNano, true);
+      guard = await assertPredictBettingAvailable(c.env, market, userId, stakeNano, true, timeframe);
     } else {
-      guard = await assertPredictBettingAvailable(c.env, market, userId, stakeNano, false);
+      guard = await assertPredictBettingAvailable(c.env, market, userId, stakeNano, false, timeframe);
       const controls = await getUserControls(c.env, userId);
       if (Number(controls.tonBalanceNano || 0) < stakeNano) throw new Error('Insufficient balance');
       betId = 'pbet_' + crypto.randomUUID().replace(/-/g, '').slice(0, 22);
@@ -200,14 +204,14 @@ app.post('/app/api/predict-bet', async (c) => {
           .bind(roundId, userId)
           .first<BetRow>();
         if (!existing) {
-          await assertPredictBettingAvailable(c.env, market, userId, stakeNano, false);
+          await assertPredictBettingAvailable(c.env, market, userId, stakeNano, false, timeframe);
           throw new Error('Prediction could not be reserved. Please try again.');
         }
         if (existing.status !== 'pending' || existing.market !== market || existing.side !== side || Number(existing.stake_nano || 0) !== stakeNano) {
           throw new Error('You already placed a prediction in this round. Wait for the next round.');
         }
         betId = cleanDbText(existing.id, 'Prediction bet is not ready');
-        guard = await assertPredictBettingAvailable(c.env, market, userId, stakeNano, true);
+        guard = await assertPredictBettingAvailable(c.env, market, userId, stakeNano, true, timeframe);
       }
     }
 
@@ -294,13 +298,14 @@ async function publicRoundJson(env: Env, round: RoundRow, userId: string, livePr
     upTokenId: String(polymarketRow.up_token_id || ''),
     downTokenId: String(polymarketRow.down_token_id || ''),
     rtdsTopic: String(polymarketRow.rtds_topic || ''),
+    rtdsSymbol: polymarketRow.rtds_topic === 'crypto_prices' ? 'btcusdt' : 'btc/usd',
     rtdsUrl: POLYMARKET_RTDS_URL,
     clobWsUrl: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
     takerFeeRate: 0.07,
     platformFeeRate: POLYMARKET_PLATFORM_FEE_BPS / 10_000,
   } : null;
   const now = Date.now();
-  return { ok: true, serverTime: now, userControls, round: { id: roundId, market: String(round.market || ''), provider, polymarket, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
+  return { ok: true, serverTime: now, userControls, round: { id: roundId, market: String(round.market || ''), ...(round.market === 'bitcoin' ? { timeframe: bitcoinTimeframeForWindow(round.starts_at, round.ends_at) } : {}), provider, polymarket, startsAt: String(round.starts_at || ''), endsAt: String(round.ends_at || ''), startPrice: Number(round.start_price || 0), livePrice: Number(livePrice) > 0 ? Number(livePrice) : null, endPrice: round.end_price == null ? null : Number(round.end_price), status: now >= lockAt && round.status === 'open' ? 'locked' : String(round.status || 'open'), result: round.result || null, remainingMs: Math.max(0, ends - now), lockRemainingMs: Math.max(0, lockAt - now), pools, userBets, recentUserBets } };
 }
 async function ensurePredictTables(env: Env): Promise<void> {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_rounds (id TEXT PRIMARY KEY, market TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, start_price REAL NOT NULL, end_price REAL, status TEXT NOT NULL DEFAULT 'open', result TEXT, settled_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
@@ -310,8 +315,14 @@ async function ensurePredictTables(env: Env): Promise<void> {
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_predict_bets_user_round ON predict_bets(user_id, round_id)').run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS predict_round_bootstrap (round_id TEXT PRIMARY KEY, market TEXT NOT NULL, lease_until_ms INTEGER NOT NULL DEFAULT 0, retry_after_ms INTEGER NOT NULL DEFAULT 0, last_error TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
 }
-async function getPredictProviderStateForRound(env: Env): Promise<PredictProvider> {
-  const state = await getPredictProviderState(env);
+function bitcoinTimeframeForWindow(startsAt: string, endsAt: string): BitcoinTimeframe {
+  const duration = Date.parse(endsAt) - Date.parse(startsAt);
+  if (duration === 3_600_000) return '1h';
+  if (duration === 900_000) return '15m';
+  return '5m';
+}
+async function getPredictProviderStateForRound(env: Env, timeframe: BitcoinTimeframe = '5m'): Promise<PredictProvider> {
+  const state = await getPredictProviderState(env, timeframe);
   return state.active || state.requested;
 }
 async function claimPredictRoundBootstrap(env: Env, roundId: string, market: TradeMarket): Promise<{ claimed: boolean; retryAfterMs: number }> {
@@ -339,11 +350,12 @@ async function deferPredictRoundBootstrap(env: Env, roundId: string, error: unkn
 async function clearPredictRoundBootstrap(env: Env, roundId: string): Promise<void> {
   await env.DB.prepare('DELETE FROM predict_round_bootstrap WHERE round_id = ?').bind(roundId).run();
 }
-async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPrice = 0): Promise<RoundRow> {
+async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPrice = 0, timeframe: BitcoinTimeframe = '5m'): Promise<RoundRow> {
   await ensurePredictTables(env);
   const now = Date.now();
   if (market === 'bitcoin') {
-    let existing = await env.DB.prepare(`SELECT * FROM predict_rounds WHERE market = ? AND datetime(starts_at) <= datetime('now') AND datetime(ends_at) > datetime('now') ORDER BY datetime(starts_at) DESC LIMIT 1`).bind(market).first<RoundRow>();
+    const durationMs = bitcoinRoundMs(timeframe);
+    let existing = await env.DB.prepare(`SELECT * FROM predict_rounds WHERE market = ? AND datetime(starts_at) <= datetime('now') AND datetime(ends_at) > datetime('now') AND CAST(strftime('%s', ends_at) AS INTEGER) - CAST(strftime('%s', starts_at) AS INTEGER) = ? ORDER BY datetime(starts_at) DESC LIMIT 1`).bind(market, durationMs / 1000).first<RoundRow>();
     if (existing) {
       const provider = await getPredictRoundProvider(env, existing.id);
       if (provider === 'polymarket') {
@@ -360,7 +372,7 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
         if (!bootstrap.claimed) throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, bootstrap.retryAfterMs);
         let polymarketRound: Awaited<ReturnType<typeof loadPolymarketBitcoinMarket>>;
         try {
-          polymarketRound = await loadPolymarketBitcoinMarket(startMs);
+          polymarketRound = await loadPolymarketBitcoinMarket(startMs, timeframe);
         } catch (error) {
           const retryMs = await deferPredictRoundBootstrap(env, existing.id, error).catch(() => ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
           throw new PredictRoundStartingError(existing.id, existing.starts_at, existing.ends_at, retryMs);
@@ -382,10 +394,10 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
       if (!repaired) throw new Error('Could not repair prediction round');
       return repaired;
     }
-    const startMs = Math.floor(now / ROUND_MS) * ROUND_MS;
+    const startMs = Math.floor(now / durationMs) * durationMs;
     const startsAt = new Date(startMs).toISOString();
-    const endsAt = new Date(startMs + ROUND_MS).toISOString();
-    const id = `pr_${market}_${startMs}`;
+    const endsAt = new Date(startMs + durationMs).toISOString();
+    const id = timeframe === '5m' ? `pr_${market}_${startMs}` : `pr_${market}_${timeframe}_${startMs}`;
     const requestedProvider: PredictProvider = await getRequestedPredictProvider(env);
     const provider = await rememberPredictRoundProvider(env, id, requestedProvider);
     let startPrice = 0;
@@ -394,7 +406,7 @@ async function getOrCreateCurrentRound(env: Env, market: TradeMarket, latestPric
       const bootstrap = await claimPredictRoundBootstrap(env, id, market);
       if (!bootstrap.claimed) throw new PredictRoundStartingError(id, startsAt, endsAt, bootstrap.retryAfterMs);
       try {
-        polymarketRound = await loadPolymarketBitcoinMarket(startMs);
+        polymarketRound = await loadPolymarketBitcoinMarket(startMs, timeframe);
       } catch (error) {
         const retryMs = await deferPredictRoundBootstrap(env, id, error).catch(() => ROUND_BOOTSTRAP_DEFAULT_RETRY_MS);
         throw new PredictRoundStartingError(id, startsAt, endsAt, retryMs);
@@ -1010,13 +1022,13 @@ async function predictOpsRoundView(env: Env, row: RoundRow): Promise<PredictOpsR
   return { id: String(row.id || ''), market, startsAt: String(row.starts_at || ''), endsAt: String(row.ends_at || ''), startPrice: Number(row.start_price || 0), endPrice: row.end_price == null ? null : Number(row.end_price), status, result: row.result == null ? null : String(row.result), settledAt: row.settled_at == null ? null : String(row.settled_at), createdAt: String(row.created_at || ''), due: status !== 'refunding' && status !== 'refunded' && Number.isFinite(Date.parse(String(row.ends_at || ''))) && Date.parse(String(row.ends_at || '')) <= Date.now() && (status !== 'settled' || Number(counts.active || 0) + Number(counts.settling_payment || 0) > 0), totalBets, totalStakeNano, counts };
 }
 
-async function assertPredictBettingAvailable(env: Env, market: TradeMarket, userId: string, stakeNano: number, alreadyReserved: boolean): Promise<PredictBetGuard> {
+async function assertPredictBettingAvailable(env: Env, market: TradeMarket, userId: string, stakeNano: number, alreadyReserved: boolean, timeframe: BitcoinTimeframe = '5m'): Promise<PredictBetGuard> {
   const [control, feed, userControls, userLimits, provider] = await Promise.all([
     readPredictOpsControl(env),
     readPredictOpsFeed(env, market),
     getUserControls(env, userId),
     getPredictUserLimits(env, userId),
-    market === 'bitcoin' ? getPredictProviderStateForRound(env) : Promise.resolve('vexa' as PredictProvider),
+    market === 'bitcoin' ? getPredictProviderStateForRound(env, timeframe) : Promise.resolve('vexa' as PredictProvider),
   ]);
   if (userControls.blockedSections.includes(`predict-${market}`)) throw new Error(USER_MARKET_BLOCK_MESSAGE);
   if (control.emergencyPaused) throw new Error(control.maintenanceMessage || DEFAULT_PREDICT_MAINTENANCE);
@@ -1233,7 +1245,7 @@ function realtimeMarketState(dashboard: PredictOpsDashboard, market: PredictOpsM
   return { manualPaused: status.manualPaused, circuitOpen: status.circuitOpen, circuitReason: status.circuitReason, capacityReached: status.capacityReached };
 }
 
-function cleanPredictRoundId(value: unknown): string { const id = String(value || '').trim(); if (!/^pr_(bitcoin|gold|oil)_\d+$/.test(id)) throw new Error('Invalid prediction round id.'); return id; }
+function cleanPredictRoundId(value: unknown): string { const id = String(value || '').trim(); if (!/^pr_(?:bitcoin_(?:(?:15m|1h)_)?|(?:gold|oil)_)\d+$/.test(id)) throw new Error('Invalid prediction round id.'); return id; }
 function cleanPredictBetId(value: unknown): string { const id = String(value || '').trim(); if (!/^pbet_[0-9A-Za-z_-]{8,40}$/.test(id)) throw new Error('Invalid prediction bet id.'); return id; }
 function normalizePredictOpsMarketOrNull(value: unknown): TradeMarket | null { try { return normalizeTradeMarket(String(value || '')); } catch { return null; } }
 function marketLabel(market: TradeMarket): string { return market === 'bitcoin' ? 'Bitcoin' : market === 'gold' ? 'Gold' : 'Oil'; }

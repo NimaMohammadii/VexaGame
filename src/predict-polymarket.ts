@@ -25,7 +25,21 @@ const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 const CLOB_BASE = 'https://clob.polymarket.com';
 const BRIDGE_BASE = 'https://bridge.polymarket.com';
 const GEOBLOCK_URL = `${POLYMARKET_WEB_BASE}/api/geoblock`;
-const POLYMARKET_ROUND_MS = 5 * 60 * 1000;
+export type BitcoinTimeframe = '5m' | '15m' | '1h';
+export function normalizeBitcoinTimeframe(value: unknown): BitcoinTimeframe {
+  if (value == null || value === '') return '5m';
+  if (value === '5m' || value === '15m' || value === '1h') return value;
+  throw new Error('Invalid Bitcoin timeframe');
+}
+export function bitcoinRoundMs(timeframe: BitcoinTimeframe = '5m'): number {
+  return timeframe === '1h' ? 3_600_000 : timeframe === '15m' ? 900_000 : 300_000;
+}
+function bitcoinMarketSlug(startMs: number, timeframe: BitcoinTimeframe): string {
+  if (timeframe !== '1h') return `btc-updown-${timeframe}-${Math.floor(startMs / 1000)}`;
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', hour12: true }).formatToParts(new Date(startMs));
+  const part = (type: string) => String(parts.find((item) => item.type === type)?.value || '').toLowerCase();
+  return `bitcoin-up-or-down-${part('month')}-${part('day')}-${part('year')}-${part('hour')}${part('dayPeriod')}-et`;
+}
 const PUSD_SCALE = 1_000_000;
 const PUSD_SCALE_BIGINT = 1_000_000n;
 const PUSD_TOKEN_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
@@ -151,7 +165,7 @@ export type PolymarketMarketView = {
   finalPrice: number | null;
   resolutionSource: string;
   rtdsTopic: string;
-  rtdsSymbol: 'btc/usd';
+  rtdsSymbol: 'btc/usd' | 'btcusdt';
   rtdsUrl: string;
 };
 
@@ -304,12 +318,13 @@ export async function getPredictRoundProvider(env: Env, roundId: string): Promis
   return rememberPredictRoundProvider(env, roundId, 'vexa');
 }
 
-export async function getPredictProviderState(env: Env): Promise<PredictProviderState> {
+export async function getPredictProviderState(env: Env, timeframe: BitcoinTimeframe = '5m'): Promise<PredictProviderState> {
   const requested = await getRequestedPredictProvider(env);
   await ensurePredictProviderTables(env);
   const row = await env.DB.prepare(`SELECT id FROM predict_rounds
     WHERE market = 'bitcoin' AND datetime(starts_at) <= datetime('now') AND datetime(ends_at) > datetime('now')
-    ORDER BY datetime(starts_at) DESC LIMIT 1`).first<{ id: string }>().catch(() => null);
+      AND CAST(strftime('%s', ends_at) AS INTEGER) - CAST(strftime('%s', starts_at) AS INTEGER) = ?
+    ORDER BY datetime(starts_at) DESC LIMIT 1`).bind(bitcoinRoundMs(timeframe) / 1000).first<{ id: string }>().catch(() => null);
   const active = row?.id ? await getPredictRoundProvider(env, row.id) : null;
   return {
     requested,
@@ -502,18 +517,23 @@ export async function executePolymarketWithdrawal(env: Env, requestIdInput: unkn
   }
 }
 
-export async function loadPolymarketBitcoinMarket(startMs: number): Promise<PolymarketMarketView> {
-  const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
+export async function loadPolymarketBitcoinMarket(startMs: number, timeframe: BitcoinTimeframe = '5m'): Promise<PolymarketMarketView> {
+  const normalizedStart = Math.floor(Number(startMs) / bitcoinRoundMs(timeframe)) * bitcoinRoundMs(timeframe);
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
-  const slug = `btc-updown-5m-${Math.floor(normalizedStart / 1000)}`;
-  return loadPolymarketBitcoinMarketBySlug(slug, undefined, false);
+  const slug = bitcoinMarketSlug(normalizedStart, timeframe);
+  return loadPolymarketBitcoinMarketBySlug(slug, undefined, false, normalizedStart, timeframe);
 }
 
-async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice?: number, refreshBooks = true): Promise<PolymarketMarketView> {
+async function loadPolymarketBitcoinMarketBySlug(slug: string, startPrice?: number, refreshBooks = true, expectedStartMs?: number, timeframe: BitcoinTimeframe = '5m'): Promise<PolymarketMarketView> {
   const [market, event] = await Promise.all([fetchGammaMarketBySlug(slug), fetchGammaEventBySlug(slug)]);
+  if (expectedStartMs !== undefined) {
+    const actualStart = Date.parse(String(market.eventStartTime || ''));
+    const actualEnd = Date.parse(String(market.endDate || event.endDate || ''));
+    if (String(market.slug || '') !== slug || String(event.slug || '') !== slug || actualStart !== expectedStartMs || actualEnd !== expectedStartMs + bitcoinRoundMs(timeframe)) throw new Error('Polymarket returned the wrong Bitcoin time window');
+  }
   if (startPrice === undefined) {
-    const startMs = Number(slug.split('-').pop()) * 1000;
-    startPrice = await fetchPolymarketBitcoinStartPrice(startMs, bitcoinRtdsTopic(market, event));
+    if (expectedStartMs === undefined) throw new Error('Missing Polymarket Bitcoin round start');
+    startPrice = await fetchPolymarketBitcoinStartPrice(expectedStartMs, bitcoinRtdsTopic(market, event), timeframe);
   }
   const parsed = parseGammaBitcoinMarket(market, event, slug, startPrice);
   // Round readiness needs the reference price and token IDs. Executing a bet
@@ -969,14 +989,14 @@ async function assertPolymarketTradingAllowed(): Promise<GeoBlockState> {
   return geo;
 }
 
-export async function fetchPolymarketBitcoinStartPrice(startMs: number, rtdsTopic: string): Promise<number> {
-  const normalizedStart = Math.floor(Number(startMs) / POLYMARKET_ROUND_MS) * POLYMARKET_ROUND_MS;
+export async function fetchPolymarketBitcoinStartPrice(startMs: number, rtdsTopic: string, timeframe: BitcoinTimeframe = '5m'): Promise<number> {
+  const normalizedStart = Math.floor(Number(startMs) / bitcoinRoundMs(timeframe)) * bitcoinRoundMs(timeframe);
   if (!Number.isFinite(normalizedStart) || normalizedStart <= 0) throw new Error('Invalid Polymarket Bitcoin round start');
-  if (!['crypto_prices_chainlink', 'crypto_prices_twap_thirty', 'crypto_prices_twap_sixty'].includes(rtdsTopic)) throw new Error('Unsupported Polymarket Bitcoin reference feed');
-  const key = `${normalizedStart}:${rtdsTopic}`;
+  if (!(timeframe === '1h' ? rtdsTopic === 'crypto_prices' : ['crypto_prices_chainlink', 'crypto_prices_twap_thirty', 'crypto_prices_twap_sixty'].includes(rtdsTopic))) throw new Error('Unsupported Polymarket Bitcoin reference feed');
+  const key = `${normalizedStart}:${timeframe}:${rtdsTopic}`;
   const inFlight = startPriceRequests.get(key);
   if (inFlight) return inFlight;
-  const request = fetchPolymarketBitcoinStartPriceOnce(normalizedStart, rtdsTopic).catch((error) => {
+  const request = fetchPolymarketBitcoinStartPriceOnce(normalizedStart, rtdsTopic, timeframe).catch((error) => {
     startPriceRequests.delete(key);
     throw error;
   });
@@ -987,12 +1007,23 @@ export async function fetchPolymarketBitcoinStartPrice(startMs: number, rtdsTopi
   return request;
 }
 
-async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number, rtdsTopic: string): Promise<number> {
+async function fetchPolymarketBitcoinStartPriceOnce(normalizedStart: number, rtdsTopic: string, timeframe: BitcoinTimeframe): Promise<number> {
+  if (timeframe === '1h') {
+    // Hourly Polymarket rules use the Binance BTC/USDT candle open.
+    const query = new URLSearchParams({ symbol: 'BTCUSDT', interval: '1h', startTime: String(normalizedStart), limit: '1' });
+    const response = await fetch(`https://data-api.binance.vision/api/v3/klines?${query}`, { signal: AbortSignal.timeout(6_000) });
+    if (!response.ok) throw new Error(`Binance Bitcoin opening price is unavailable: HTTP ${response.status}`);
+    const rows = await response.json() as unknown;
+    const candle = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : [];
+    const open = Number(candle[1]);
+    if (Number(candle[0]) !== normalizedStart || !Number.isFinite(open) || open <= 0) throw new Error('Binance returned the wrong Bitcoin hourly candle');
+    return open;
+  }
   const query = new URLSearchParams({
     symbol: 'BTC',
     eventStartTime: new Date(normalizedStart).toISOString(),
-    variant: 'fiveminute',
-    endDate: new Date(normalizedStart + POLYMARKET_ROUND_MS).toISOString(),
+    variant: timeframe === '15m' ? 'fifteen' : 'fiveminute',
+    endDate: new Date(normalizedStart + bitcoinRoundMs(timeframe)).toISOString(),
   });
   if (rtdsTopic !== 'crypto_prices_chainlink') {
     query.set('twapEnabled', 'true');
@@ -1075,7 +1106,7 @@ async function fetchGammaEventBySlug(slug: string): Promise<GammaRecord> {
 
 function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expectedSlug: string, startPrice: number): PolymarketMarketView {
   const slug = String(market.slug || event.slug || '').trim();
-  if (slug !== expectedSlug || !/^btc-updown-5m-\d{10}$/.test(slug)) throw new Error('Polymarket returned the wrong Bitcoin 5-minute market');
+  if (slug !== expectedSlug || !/^(?:btc-updown-(?:5m|15m)-\d{10}|bitcoin-up-or-down-[a-z]+-\d{1,2}-\d{4}-\d{1,2}(?:am|pm)-et)$/.test(slug)) throw new Error('Polymarket returned the wrong Bitcoin market');
   if (market.closed === true || market.active === false || market.enableOrderBook === false || market.acceptingOrders === false) throw new Error('Polymarket Bitcoin market is not accepting orders');
   const secondsDelay = Number(market.secondsDelay ?? market.seconds_delay ?? 0);
   if (Number.isFinite(secondsDelay) && secondsDelay > 0) throw new Error('Polymarket Bitcoin market uses delayed execution and cannot be used for Vexa Predict');
@@ -1108,7 +1139,7 @@ function parseGammaBitcoinMarket(market: GammaRecord, event: GammaRecord, expect
     finalPrice: metadataFinalPrice(event, market),
     resolutionSource,
     rtdsTopic,
-    rtdsSymbol: 'btc/usd',
+    rtdsSymbol: rtdsTopic === 'crypto_prices' ? 'btcusdt' : 'btc/usd',
     rtdsUrl: RTDS_URL,
   };
 }
@@ -1125,6 +1156,7 @@ function bitcoinRtdsTopic(market: GammaRecord, event: GammaRecord): string {
   if (/twap[-_ ]?60s|60[- ]second/.test(source)) return 'crypto_prices_twap_sixty';
   if (/twap|time-weighted/.test(source)) throw new Error('Unsupported Polymarket Bitcoin TWAP window');
   if (/chain\.link|chainlink/.test(source)) return 'crypto_prices_chainlink';
+  if (/binance\.com/.test(source) && /btc[_/]?usdt/.test(source)) return 'crypto_prices';
   throw new Error('Unsupported Polymarket Bitcoin reference feed');
 }
 

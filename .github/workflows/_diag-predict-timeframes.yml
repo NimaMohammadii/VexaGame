@@ -1,0 +1,118 @@
+name: Temporary Predict timeframe diagnostics
+
+on:
+  push:
+    branches:
+      - diag/predict-timeframes-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe current Polymarket Bitcoin timeframes
+        shell: bash
+        run: |
+          node <<'NODE'
+          const GAMMA='https://gamma-api.polymarket.com';
+          const RTDS='wss://ws-live-data.polymarket.com';
+          const roundMs={ '5m':300000, '15m':900000, '1h':3600000 };
+          const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+          const iso=(ms)=>new Date(ms).toISOString();
+          function hourSlug(ms,withYear=true){
+            const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'long',day:'numeric',year:'numeric',hour:'numeric',hour12:true}).formatToParts(new Date(ms));
+            const part=(type)=>String(parts.find(x=>x.type===type)?.value||'').toLowerCase();
+            return withYear
+              ? `bitcoin-up-or-down-${part('month')}-${part('day')}-${part('year')}-${part('hour')}${part('dayPeriod')}-et`
+              : `bitcoin-up-or-down-${part('month')}-${part('day')}-${part('hour')}${part('dayPeriod')}-et`;
+          }
+          async function json(url){
+            const r=await fetch(url,{headers:{'user-agent':'Mozilla/5.0'}});
+            let body=null; try{body=await r.json()}catch{body=await r.text().catch(()=>null)}
+            return {status:r.status,ok:r.ok,body};
+          }
+          function record(x){return x&&typeof x==='object'&&!Array.isArray(x)?x:{};}
+          function parseConfig(m,e){return record(m?.cryptoMarketConfig ?? e?.cryptoMarketConfig);}
+          function topicFor(m,e){
+            const config=parseConfig(m,e);
+            if(config.twapEnabled===true){
+              if(Number(config.twapLookbackSeconds)===30)return 'crypto_prices_twap_thirty';
+              if(Number(config.twapLookbackSeconds)===60)return 'crypto_prices_twap_sixty';
+              return `unsupported_twap_${config.twapLookbackSeconds}`;
+            }
+            const source=`${m?.resolutionSource||e?.resolutionSource||''} ${m?.description||e?.description||''}`.toLowerCase();
+            if(/twap[-_ ]?30s|30[- ]second/.test(source))return 'crypto_prices_twap_thirty';
+            if(/twap[-_ ]?60s|60[- ]second/.test(source))return 'crypto_prices_twap_sixty';
+            if(/chain\.link|chainlink/.test(source))return 'crypto_prices_chainlink';
+            if(/binance\.com/.test(source)&&/btc[_\/]?usdt/.test(source))return 'crypto_prices';
+            return 'unknown';
+          }
+          async function wsProbe(label,subscription,ms=7000){
+            return await new Promise((resolve)=>{
+              const out={label,subscription,opened:false,frames:[]};
+              let done=false;
+              const finish=()=>{if(done)return;done=true;try{ws.close()}catch{};resolve(out)};
+              const ws=new WebSocket(RTDS);
+              const timer=setTimeout(finish,ms);
+              ws.onopen=()=>{out.opened=true;ws.send(JSON.stringify({action:'subscribe',subscriptions:[subscription]}));};
+              ws.onmessage=(ev)=>{const s=String(ev.data);if(s==='PONG')return;out.frames.push(s.slice(0,800));if(out.frames.length>=3){clearTimeout(timer);finish();}};
+              ws.onerror=(e)=>{out.error=String(e?.message||'websocket error');};
+              ws.onclose=(e)=>{out.close={code:e.code,reason:e.reason};clearTimeout(timer);finish();};
+            });
+          }
+          const now=Date.now();
+          console.log('NOW',new Date(now).toISOString());
+          for(const tf of ['5m','15m','1h']){
+            const start=Math.floor(now/roundMs[tf])*roundMs[tf];
+            const slugs=tf==='1h'?[hourSlug(start,true),hourSlug(start,false)]:[`btc-updown-${tf}-${Math.floor(start/1000)}`];
+            console.log('\n===',tf,'start',iso(start),'end',iso(start+roundMs[tf]),'slugs',slugs,'===');
+            let chosen=null;
+            for(const slug of slugs){
+              const [evRes,mRes]=await Promise.all([
+                json(`${GAMMA}/events?slug=${encodeURIComponent(slug)}`),
+                json(`${GAMMA}/markets?slug=${encodeURIComponent(slug)}`),
+              ]);
+              const ev=Array.isArray(evRes.body)?evRes.body[0]:null;
+              const m=Array.isArray(mRes.body)?mRes.body[0]:null;
+              console.log('SLUG',slug,'events',evRes.status,Array.isArray(evRes.body)?evRes.body.length:'nonarray','markets',mRes.status,Array.isArray(mRes.body)?mRes.body.length:'nonarray');
+              if(ev||m){
+                const mm=m||ev?.markets?.[0]||null;
+                console.log('EVENT_META',JSON.stringify({slug:ev?.slug,startDate:ev?.startDate,endDate:ev?.endDate,active:ev?.active,closed:ev?.closed,resolutionSource:ev?.resolutionSource}));
+                console.log('MARKET_META',JSON.stringify({slug:mm?.slug,eventStartTime:mm?.eventStartTime,startDate:mm?.startDate,endDate:mm?.endDate,active:mm?.active,closed:mm?.closed,acceptingOrders:mm?.acceptingOrders,cryptoMarketConfig:mm?.cryptoMarketConfig,resolutionSource:mm?.resolutionSource,question:mm?.question}));
+                chosen={slug,event:ev||{},market:mm||{}};break;
+              }
+            }
+            if(!chosen){console.log('NO_MARKET_FOUND');continue;}
+            const topic=topicFor(chosen.market,chosen.event);
+            const symbol=topic==='crypto_prices'?'btcusdt':'btc/usd';
+            console.log('DETECTED_TOPIC',topic,'symbol',symbol);
+            if(tf==='1h'){
+              const b=await json(`https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1h&startTime=${start}&limit=1`);
+              console.log('START_PRICE_BINANCE',b.status,Array.isArray(b.body)?JSON.stringify(b.body[0]?.slice?.(0,7)):JSON.stringify(b.body).slice(0,500));
+            } else {
+              const cfg=parseConfig(chosen.market,chosen.event);
+              const q=new URLSearchParams({symbol:'BTC',eventStartTime:iso(start),variant:tf==='15m'?'fifteen':'fiveminute',endDate:iso(start+roundMs[tf])});
+              if(topic!=='crypto_prices_chainlink'){
+                q.set('twapEnabled','true');
+                q.set('twapLookbackSeconds',topic==='crypto_prices_twap_thirty'?'30':'60');
+              }
+              const p=await json(`https://polymarket.com/api/crypto/crypto-price?${q}`);
+              console.log('START_PRICE_POLY',p.status,JSON.stringify(p.body).slice(0,1000));
+            }
+            if(topic==='unknown'||topic.startsWith('unsupported'))continue;
+            const current={topic,type:topic==='crypto_prices_chainlink'?'*':'update',filters:JSON.stringify({symbol})};
+            console.log('WS_VEXA',JSON.stringify(await wsProbe(`${tf}-vexa`,current)));
+            if(topic==='crypto_prices'){
+              console.log('WS_BINANCE_STRING',JSON.stringify(await wsProbe(`${tf}-binance-string`,{topic,type:'update',filters:symbol})));
+              console.log('WS_BINANCE_ARRAY_STRING',JSON.stringify(await wsProbe(`${tf}-binance-array`,{topic,type:'update',filters:JSON.stringify([symbol])})));
+            }
+            await sleep(200);
+          }
+          NODE

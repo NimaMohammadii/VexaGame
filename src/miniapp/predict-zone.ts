@@ -265,6 +265,20 @@ export const PREDICT_ZONE_SCRIPT = `
     }
     function candleIntervalMs(){if(market!=='bitcoin')return 5000;return bitcoinTimeframe==='1h'?3600000:bitcoinTimeframe==='15m'?900000:300000}
     function candleIntervalLabel(){if(market!=='bitcoin')return '5s';return bitcoinTimeframe==='1h'?'1h':bitcoinTimeframe}
+    function hydrateCandleHistory(source){
+      if(market!=='bitcoin'||candles.length||!Array.isArray(source))return false;
+      var interval=candleIntervalMs(),now=Date.now(),next=[];
+      source.forEach(function(item){
+        var time=Number(item&&item.time),open=Number(item&&item.open),high=Number(item&&item.high),low=Number(item&&item.low),close=Number(item&&item.close);
+        if(!isFinite(time)||time<=0||!isFinite(open)||open<=0||!isFinite(high)||high<=0||!isFinite(low)||low<=0||!isFinite(close)||close<=0)return;
+        var bucket=Math.floor(time/interval)*interval;
+        if(bucket+interval>now||high<Math.max(open,close)||low>Math.min(open,close)||high<low)return;
+        next.push({time:bucket,first:bucket,last:bucket+interval-1,open:open,high:high,low:low,close:close,backfill:1})
+      });
+      next.sort(function(a,b){return a.time-b.time});
+      candles=next.filter(function(bar,index,list){return index===0||bar.time!==list[index-1].time}).slice(-CANDLE_VISIBLE_BARS);
+      return candles.length>0
+    }
     // OHLC uses source observations only. Never use interpolated frames or invent missing bars.
     function recordCandlePrices(observations){
       var latest=0,interval=candleIntervalMs();
@@ -284,8 +298,8 @@ export const PREDICT_ZONE_SCRIPT = `
     }
     function drawCandles(now){
       if(!candleLayer)return null;
-      var source=market==='bitcoin'?(priceProvider==='polymarket'?(priceRtdsTopic==='crypto_prices'?'Binance':'Chainlink TWAP'):'Mark price'):'Mark price',interval=candleIntervalMs(),intervalLabel=candleIntervalLabel();
-      if(candleNote){var note=intervalLabel+' · '+source;if(candleNote.textContent!==note)candleNote.textContent=note;candleNote.title=intervalLabel+' OHLC of received '+source+' prices. First or interrupted candles may be partial; missing intervals are not filled.'}
+      var source=market==='bitcoin'?(priceProvider==='polymarket'?(priceRtdsTopic==='crypto_prices'?'Binance':'Chainlink TWAP'):'Mark price'):'Mark price',interval=candleIntervalMs(),intervalLabel=candleIntervalLabel(),hasBackfill=candles.some(function(bar){return bar&&bar.backfill===1});
+      if(candleNote){var note=intervalLabel+' · '+source+(hasBackfill&&source!=='Binance'?' live':'');if(candleNote.textContent!==note)candleNote.textContent=note;candleNote.title=intervalLabel+' OHLC. '+(hasBackfill?'Completed history uses Binance BTCUSDT; ':'')+'the live candle uses received '+source+' prices. First or interrupted candles may be partial; missing intervals are not filled.'}
       var right=W-R,rate=(right-L)/(CANDLE_VISIBLE_BARS*interval),width=interval*rate*.62,stamp=now+(candleClockOffset||0),shown=candles.filter(function(bar){var x=right-width/2-(stamp-bar.time)*rate;return x+width/2>=L&&x-width/2<=right}),prices=[];
       shown.forEach(function(bar){prices.push(bar.low,bar.high)});
       if(!prices.length){candleLayer.textContent='';if(guide)guide.style.opacity='0';return null}
@@ -464,6 +478,7 @@ export const PREDICT_ZONE_SCRIPT = `
         priceProvider=nextProvider;priceRtdsTopic=nextTopic;currentRound=round;roundSyncedAt=receivedAt;
         if(previousRoundId&&previousRoundId!==String(round.id||''))clearBetSide();
         historyValues=(Array.isArray(d.history)?d.history:[]).map(Number).filter(function(v){return isFinite(v)&&v>0}).slice(-HISTORY);
+        if(!candles.length&&Array.isArray(d.candleHistory))hydrateCandleHistory(d.candleHistory);
         if(readyPrice&&!historyHydrated&&historyValues.length)hydrateChartHistory(historyValues,chartNow());
         if(!ws&&!reconnectTimer)connectFeed(my,id);
         var cachedGramUsd=readGramUsd();if(cachedGramUsd>0)gramUsd=cachedGramUsd;

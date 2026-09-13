@@ -102,6 +102,14 @@ app.get('/app/api/predict-round', async (c) => {
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);
     const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
+    if (market === 'bitcoin' && timeframe === '5m') {
+      // Home prepares the default Bitcoin round before Predict opens. Use that
+      // same successful request to warm the longer rounds through the existing
+      // round bootstrap path, so switching timeframes never owns first bootstrap.
+      c.executionCtx.waitUntil(Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map((warmTimeframe) =>
+        getOrCreateCurrentRound(c.env, 'bitcoin', 0, warmTimeframe),
+      )).then(() => undefined));
+    }
     const response = { ...(await publicRoundJson(c.env, round, userId, snapshot.price)), history: snapshot.history, candleHistory: await candleHistoryPromise };
     c.executionCtx.waitUntil(reportPredictOpsRuntimeRecovered(c.env, 'round_request_failed', market, 'Predict round API completed successfully.').catch(() => undefined));
     return c.json(response, 200, { 'cache-control': CACHE_NONE });

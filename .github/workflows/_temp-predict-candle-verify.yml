@@ -1,0 +1,67 @@
+name: Temporary Predict candle verification
+
+on:
+  push:
+    branches:
+      - verify/predict-candle-timeframes-machine
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-package-lock --legacy-peer-deps
+      - name: Verify runtime architecture
+        run: npm run guard:runtime
+      - name: Parse Predict TypeScript and embedded runtime JavaScript
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const vm = require('vm');
+          const ts = require('typescript');
+          const filename = 'src/miniapp/predict-zone.ts';
+          const source = fs.readFileSync(filename, 'utf8');
+          const compiled = ts.transpileModule(source, {
+            compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+            reportDiagnostics: true,
+            fileName: filename,
+          });
+          const syntaxErrors = (compiled.diagnostics || []).filter(d => d.category === ts.DiagnosticCategory.Error);
+          if (syntaxErrors.length) {
+            throw new Error('Predict TypeScript syntax diagnostics: ' + syntaxErrors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join(' | '));
+          }
+          const module = { exports: {} };
+          const context = vm.createContext({ module, exports: module.exports, require, console });
+          new vm.Script(compiled.outputText, { filename: 'predict-zone.compiled.js' }).runInContext(context);
+          const runtime = module.exports.PREDICT_ZONE_SCRIPT;
+          if (typeof runtime !== 'string' || !runtime.length) throw new Error('PREDICT_ZONE_SCRIPT was not exported as a string');
+          new Function(runtime);
+          const required = [
+            "function candleIntervalMs(){if(market!=='bitcoin')return 5000;return bitcoinTimeframe==='1h'?3600000:bitcoinTimeframe==='15m'?900000:300000}",
+            'CANDLE_VISIBLE_BARS=12',
+            'rate=(right-L)/(CANDLE_VISIBLE_BARS*interval)',
+            'bucket=Math.floor(t/interval)*interval'
+          ];
+          for (const token of required) if (!runtime.includes(token)) throw new Error('Missing expected candle token: ' + token);
+          if (runtime.includes('CANDLE_MS=5000')) throw new Error('Legacy fixed candle interval is still active');
+          console.log('Predict candle runtime syntax and selected-timeframe wiring verified.');
+          NODE
+      - name: Remove temporary verification workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/_temp-predict-candle-verify.yml
+          git config user.name "Vexa Verify Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Remove temporary Predict verification workflow"
+          git push origin HEAD:verify/predict-candle-timeframes-machine

@@ -1,4 +1,4 @@
-name: Temporary Predict scheduled recovery diagnostics
+name: Temporary Predict timeframe invariant diagnostics
 on:
   push:
     branches:
@@ -11,10 +11,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect scheduled Predict owner path
+      - name: Inspect every Bitcoin timeframe and long round assumption
         shell: bash
         run: |
           set -euo pipefail
-          grep -n "runPredictScheduledSettlement" src/predict-routes.ts src/index-with-plinko-live.ts || true
-          LINE=$(grep -n "runPredictScheduledSettlement" src/predict-routes.ts | head -1 | cut -d: -f1 || true)
-          if [ -n "$LINE" ]; then START=$((LINE-20)); [ "$START" -lt 1 ] && START=1; END=$((LINE+70)); sed -n "${START},${END}p" src/predict-routes.ts; fi
+          echo '=== CLIENT bitcoinTimeframe ==='
+          grep -n "bitcoinTimeframe" src/miniapp/predict-zone.ts || true
+          echo '=== SERVER timeframe helpers ==='
+          grep -n "normalizeBitcoinTimeframe\|bitcoinRoundMs\|bitcoinTimeframeForWindow\|pr_bitcoin_\|15m\|1h" src/predict-routes.ts | head -220 || true
+          echo '=== OTHER ROUND-ID ASSUMPTIONS ==='
+          grep -RIn "pr_bitcoin_\|cleanPredictRoundId\|roundId.*bitcoin" src --exclude='predict-routes.ts' --exclude='predict-zone.ts' | head -220 || true

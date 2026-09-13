@@ -1,0 +1,66 @@
+name: Temporary Predict candle history timeout
+
+on:
+  push:
+    branches:
+      - verify/predict-candle-history-backfill
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Add fail-open timeout to candle history only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path=Path('src/predict-routes.ts')
+          text=path.read_text()
+          old="const res = await fetch(`${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${encodeURIComponent(timeframe)}&limit=16`, { cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);"
+          new="const res = await fetch(`${BINANCE_PUBLIC_REST_BASE}/api/v3/klines?symbol=BTCUSDT&interval=${encodeURIComponent(timeframe)}&limit=16`, { signal: AbortSignal.timeout(2500), cf: { cacheTtl: 15, cacheEverything: true } } as RequestInit);"
+          if text.count(old)!=1: raise SystemExit(f'expected one candle history fetch, found {text.count(old)}')
+          path.write_text(text.replace(old,new,1))
+          PY
+          git diff --check
+      - name: Verify scoped timeout and Predict code
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node -e "if (typeof AbortSignal.timeout !== 'function') throw new Error('AbortSignal.timeout unavailable')"
+          node <<'NODE'
+          const fs=require('fs'),ts=require('typescript');
+          for(const file of ['src/predict-routes.ts','src/miniapp/predict-zone.ts']){
+            const out=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext},reportDiagnostics:true});
+            const errors=(out.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error);
+            if(errors.length) throw new Error(file+': '+errors.map(d=>ts.flattenDiagnosticMessageText(d.messageText,'\n')).join('\n'));
+          }
+          for(const interval of ['5m','15m','1h']){
+            const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=3`,{signal:AbortSignal.timeout(2500)});
+            if(!r.ok) throw new Error(`Binance ${interval}: HTTP ${r.status}`);
+            const rows=await r.json();
+            if(!Array.isArray(rows)||rows.length<2) throw new Error(`Binance ${interval}: invalid history`);
+          }
+          NODE
+      - name: Commit scoped hardening and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-predict-candle-history-timeout.yml
+          git add src/predict-routes.ts .github/workflows/_temp-predict-candle-history-timeout.yml
+          git config user.name "NimaMohammadii"
+          git config user.email "nima.mohammadi084@gmail.com"
+          git commit -m "Bound Predict candle history fetch"
+          git push origin HEAD:verify/predict-candle-history-backfill

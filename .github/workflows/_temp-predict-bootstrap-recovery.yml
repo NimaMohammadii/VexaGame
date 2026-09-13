@@ -1,0 +1,124 @@
+name: Temporary Predict Bootstrap Recovery
+
+'on':
+  push:
+    branches:
+      - fix/predict-bootstrap-recovery
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Patch Predict bootstrap lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path('src/predict-routes.ts')
+          s=p.read_text()
+
+          old="""    const round = market === 'bitcoin' && timeframe !== '5m'
+              ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, 10_000)
+              : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);"""
+          new="""    const round = market === 'bitcoin' && timeframe !== '5m'
+              ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, ROUND_BOOTSTRAP_LEASE_MS + 10_000)
+              : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);"""
+          if s.count(old)!=1: raise SystemExit(f'direct wait target count={s.count(old)}')
+          s=s.replace(old,new,1)
+
+          old="""    if (market === 'bitcoin' && timeframe === '5m') {
+              // Home preparation waits for the same authoritative long-round bootstrap.
+              // Normal requests only warm it in the background.
+              const prepareLongTimeframes = c.req.query('prepare') === '1';
+              const warmLongTimeframes = warmCurrentBitcoinLongTimeframes(c.env, prepareLongTimeframes);
+              if (prepareLongTimeframes) await warmLongTimeframes;
+              else c.executionCtx.waitUntil(warmLongTimeframes.catch(() => undefined));
+            }"""
+          new="""    if (market === 'bitcoin' && timeframe === '5m') {
+              // Long-timeframe preparation is best-effort only. A slow or unavailable
+              // 15m/1h provider must never block or fail the authoritative 5m/Home response.
+              c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
+                console.warn('Predict long-timeframe background preparation failed', messageOf(error));
+              }));
+            }"""
+          if s.count(old)!=1: raise SystemExit(f'home warm target count={s.count(old)}')
+          s=s.replace(old,new,1)
+
+          start=s.index("async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {")
+          end=s.index("\nexport async function runPredictScheduledSettlement", start)
+          new="""async function warmCurrentBitcoinLongTimeframes(env: Env): Promise<void> {
+            const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(async (timeframe) => {
+              try {
+                await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+              } catch (error) {
+                // Another request/worker may own the bootstrap lease. Background warming
+                // should never turn that normal coordination state into an app/runtime error.
+                if (error instanceof PredictRoundStartingError) return;
+                throw error;
+              }
+            }));
+            for (const result of results) if (result.status === 'rejected') throw result.reason;
+          }
+          """
+          s=s[:start]+new+s[end:]
+
+          old="""  try {
+              await warmCurrentBitcoinLongTimeframes(env, true);
+            } catch (error) {
+              firstError = error;
+              console.error('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
+            }"""
+          new="""  try {
+              await warmCurrentBitcoinLongTimeframes(env);
+            } catch (error) {
+              console.warn('Scheduled Bitcoin long-timeframe preparation failed', messageOf(error));
+            }"""
+          if s.count(old)!=1: raise SystemExit(f'scheduled warm target count={s.count(old)}')
+          s=s.replace(old,new,1)
+
+          p.write_text(s)
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/predict-routes.ts"
+      - name: Verify runtime guard and invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const file='src/predict-routes.ts';
+          const source=fs.readFileSync(file,'utf8');
+          const out=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler},reportDiagnostics:true,fileName:file});
+          const errors=(out.diagnostics||[]).filter(x=>x.category===ts.DiagnosticCategory.Error);
+          if(errors.length)throw new Error(errors.map(x=>ts.flattenDiagnosticMessageText(x.messageText,'\n')).join('\n'));
+          if(!source.includes('ROUND_BOOTSTRAP_LEASE_MS + 10_000'))throw new Error('direct wait does not outlive bootstrap lease');
+          if(source.includes("warmCurrentBitcoinLongTimeframes(c.env, prepareLongTimeframes)"))throw new Error('blocking Home warm still present');
+          if(!source.includes('c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env)'))throw new Error('Home warm is not background-only');
+          if(!source.includes('await warmCurrentBitcoinLongTimeframes(env);'))throw new Error('scheduled warm missing');
+          if((source.match(/const round = await getOrCreateCurrentRound\(c\.env, market, snapshot\.price, timeframe\);/g)||[]).length!==1)throw new Error('bet path changed unexpectedly');
+          NODE
+      - name: Commit scoped fix and remove verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-predict-bootstrap-recovery.yml
+          git add src/predict-routes.ts .github/workflows/_temp-predict-bootstrap-recovery.yml
+          git config user.name 'NimaMohammadii'
+          git config user.email 'nima.mohammadi084@gmail.com'
+          git commit -m 'Make Predict long-frame bootstrap non-blocking'
+          git push origin HEAD:fix/predict-bootstrap-recovery

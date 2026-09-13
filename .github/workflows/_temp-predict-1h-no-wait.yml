@@ -1,0 +1,202 @@
+name: Temporary Predict 1h No Wait
+
+on:
+  push:
+    branches:
+      - fix/predict-1h-no-transient-wait
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+      - name: Patch authoritative Predict bootstrap path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          routes=Path('src/predict-routes.ts')
+          s=routes.read_text()
+
+          old="    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);"
+          new="    const round = market === 'bitcoin' && timeframe !== '5m'\n      ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, 10_000)\n      : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);"
+          if s.count(old)!=1:
+            raise SystemExit(f'route round target count: {s.count(old)}')
+          s=s.replace(old,new,1)
+
+          old_helper="""async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {
+  const deadline = waitForReady ? Date.now() + 10_000 : 0;
+  const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
+    for (;;) {
+      try {
+        await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+        return;
+      } catch (error) {
+        if (!(error instanceof PredictRoundStartingError)) throw error;
+        if (!waitForReady) return;
+        const remaining = deadline - Date.now();
+        if (remaining <= 300) throw new Error(`Bitcoin ${timeframe} round preparation timed out`);
+        const delay = Math.min(remaining - 100, Math.max(250, Math.min(2_000, error.retryAfterMs)));
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  };
+  const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(warmOne));
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
+}
+"""
+          new_helper="""async function getOrCreateBitcoinRoundWithWait(env: Env, timeframe: BitcoinTimeframe, waitMs: number): Promise<RoundRow> {
+  const deadline = Date.now() + Math.max(0, waitMs);
+  for (;;) {
+    try {
+      return await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+    } catch (error) {
+      if (!(error instanceof PredictRoundStartingError) || waitMs <= 0) throw error;
+      const remaining = deadline - Date.now();
+      if (remaining <= 300) throw error;
+      const delay = Math.min(remaining - 100, Math.max(250, Math.min(1_500, error.retryAfterMs)));
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+async function warmCurrentBitcoinLongTimeframes(env: Env, waitForReady: boolean): Promise<void> {
+  const warmOne = async (timeframe: BitcoinTimeframe): Promise<void> => {
+    try {
+      if (waitForReady) await getOrCreateBitcoinRoundWithWait(env, timeframe, 10_000);
+      else await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
+    } catch (error) {
+      if (!waitForReady && error instanceof PredictRoundStartingError) return;
+      throw error;
+    }
+  };
+  const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(warmOne));
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
+}
+"""
+          if s.count(old_helper)!=1:
+            raise SystemExit(f'warm helper target count: {s.count(old_helper)}')
+          s=s.replace(old_helper,new_helper,1)
+
+          old_sched="    await warmCurrentBitcoinLongTimeframes(env, false);"
+          new_sched="    await warmCurrentBitcoinLongTimeframes(env, true);"
+          if s.count(old_sched)!=1:
+            raise SystemExit(f'scheduled target count: {s.count(old_sched)}')
+          s=s.replace(old_sched,new_sched,1)
+          routes.write_text(s)
+
+          poly=Path('src/predict-polymarket.ts')
+          s=poly.read_text()
+          old_hour="""  if (timeframe === '1h') {
+    // Hourly Polymarket rules use the Binance BTC/USDT candle open.
+    const query = new URLSearchParams({ symbol: 'BTCUSDT', interval: '1h', startTime: String(normalizedStart), limit: '1' });
+    const response = await fetch(`https://data-api.binance.vision/api/v3/klines?${query}`, { signal: AbortSignal.timeout(6_000) });
+    if (!response.ok) throw new Error(`Binance Bitcoin opening price is unavailable: HTTP ${response.status}`);
+    const rows = await response.json() as unknown;
+    const candle = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : [];
+    const open = Number(candle[1]);
+    if (Number(candle[0]) !== normalizedStart || !Number.isFinite(open) || open <= 0) throw new Error('Binance returned the wrong Bitcoin hourly candle');
+    return open;
+  }
+"""
+          new_hour="""  if (timeframe === '1h') {
+    // Hourly Polymarket rules use the Binance BTC/USDT candle open. Right on
+    // the hour the new kline can appear a few hundred milliseconds after the
+    // boundary, so absorb that normal propagation delay here instead of
+    // surfacing a temporary starting round to the client.
+    const query = new URLSearchParams({ symbol: 'BTCUSDT', interval: '1h', startTime: String(normalizedStart), limit: '1' });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (attempt > 0) await new Promise<void>((resolve) => setTimeout(resolve, attempt * 250));
+      const response = await fetch(`https://data-api.binance.vision/api/v3/klines?${query}`, { signal: AbortSignal.timeout(6_000) });
+      if (!response.ok) throw new Error(`Binance Bitcoin opening price is unavailable: HTTP ${response.status}`);
+      const rows = await response.json() as unknown;
+      const candle = Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : [];
+      const open = Number(candle[1]);
+      if (Number(candle[0]) === normalizedStart && Number.isFinite(open) && open > 0) return open;
+    }
+    throw new Error('Binance returned the wrong Bitcoin hourly candle');
+  }
+"""
+          if s.count(old_hour)!=1:
+            raise SystemExit(f'1h start price target count: {s.count(old_hour)}')
+          poly.write_text(s.replace(old_hour,new_hour,1))
+          PY
+          git diff --check
+          test "$(git diff --name-only | sort)" = $'src/predict-polymarket.ts\nsrc/predict-routes.ts'
+      - name: Verify architecture and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run guard:runtime
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          for (const file of ['src/predict-routes.ts','src/predict-polymarket.ts']) {
+            const source=fs.readFileSync(file,'utf8');
+            const out=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler},reportDiagnostics:true,fileName:file});
+            const errors=(out.diagnostics||[]).filter(x=>x.category===ts.DiagnosticCategory.Error);
+            if(errors.length)throw new Error(file+'\n'+errors.map(x=>ts.flattenDiagnosticMessageText(x.messageText,'\n')).join('\n'));
+          }
+          const routes=fs.readFileSync('src/predict-routes.ts','utf8');
+          if(!routes.includes("timeframe !== '5m'\n      ? await getOrCreateBitcoinRoundWithWait"))throw new Error('direct long-timeframe join missing');
+          if(!routes.includes('await warmCurrentBitcoinLongTimeframes(env, true);'))throw new Error('scheduled long-timeframe wait missing');
+          const poly=fs.readFileSync('src/predict-polymarket.ts','utf8');
+          if(!poly.includes('attempt < 4'))throw new Error('hourly opening-price retry missing');
+          NODE
+      - name: Verify hourly retry and live loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import ts from 'typescript';
+          const source=fs.readFileSync('src/predict-polymarket.ts','utf8');
+          const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler}}).outputText;
+          fs.writeFileSync('src/__tmp-predict-polymarket.mjs',compiled);
+          const mod=await import(new URL('./src/__tmp-predict-polymarket.mjs',import.meta.url));
+
+          const originalFetch=globalThis.fetch;
+          const futureStart=Math.floor(Date.now()/3600000)*3600000+7200000;
+          let calls=0;
+          globalThis.fetch=async (input,init)=>{
+            const url=String(input);
+            if(url.includes('data-api.binance.vision/api/v3/klines')){
+              calls+=1;
+              const body=calls<3?[]:[[futureStart,'12345.67']];
+              return new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});
+            }
+            return originalFetch(input,init);
+          };
+          const mocked=await mod.fetchPolymarketBitcoinStartPrice(futureStart,'crypto_prices','1h');
+          if(mocked!==12345.67||calls!==3)throw new Error(`hourly retry failed price=${mocked} calls=${calls}`);
+          globalThis.fetch=originalFetch;
+
+          const currentStart=Math.floor(Date.now()/3600000)*3600000;
+          const market=await mod.loadPolymarketBitcoinMarket(currentStart,'1h');
+          if(!(Number(market.startPrice)>0)||!market.upTokenId||!market.downTokenId||market.rtdsTopic!=='crypto_prices')throw new Error('live 1h loader incomplete');
+          console.log('LIVE_1H_OK',market.slug,market.startPrice,market.rtdsTopic);
+          fs.unlinkSync('src/__tmp-predict-polymarket.mjs');
+          NODE
+      - name: Commit scoped fix and remove verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_temp-predict-1h-no-wait.yml
+          git add src/predict-routes.ts src/predict-polymarket.ts .github/workflows/_temp-predict-1h-no-wait.yml
+          git config user.name "NimaMohammadii"
+          git config user.email "nima.mohammadi084@gmail.com"
+          git commit -m "Eliminate transient Predict hourly waiting"
+          git push origin HEAD:fix/predict-1h-no-transient-wait

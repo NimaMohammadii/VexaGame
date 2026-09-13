@@ -31,8 +31,8 @@ export const PREDICT_ZONE_SECTION = `<section id="predictzone" class="view predi
       <div class="predict-zone-chart-preview" data-predict-chart aria-label="Live chart preview">
         <div class="predict-zone-chart-modes" role="group" aria-label="Chart style">
           <button type="button" data-predict-chart-mode="line" aria-label="Line chart" aria-pressed="true" title="Line chart"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17l5-6 4 3 8-10M3 4v16h18"/></svg></button>
-          <button type="button" data-predict-chart-mode="candles" aria-label="Candlestick chart" aria-pressed="false" title="5-second candles from received price ticks"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v4m0 10v4M17 3v7m0 6v5"/><rect x="4" y="7" width="6" height="10" rx="1"/><rect x="14" y="10" width="6" height="6" rx="1"/></svg></button>
-          <span data-predict-candle-note hidden>5s · feed</span>
+          <button type="button" data-predict-chart-mode="candles" aria-label="Candlestick chart" aria-pressed="false" title="Candles from received price ticks"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v4m0 10v4M17 3v7m0 6v5"/><rect x="4" y="7" width="6" height="10" rx="1"/><rect x="14" y="10" width="6" height="6" rx="1"/></svg></button>
+          <span data-predict-candle-note hidden>5m · feed</span>
         </div>
         <div class="predict-zone-chart-grid" data-predict-grid></div>
         <div class="predict-zone-price-axis" data-predict-price-axis aria-hidden="true"></div>
@@ -171,7 +171,7 @@ export const PREDICT_ZONE_SCRIPT = `
       gold:{label:'Gold',question:'Gold this month: up or down?',stream:'wss://fstream.asterdex.com/ws/xauusdt@markPrice@1s',decimals:2,step:.5,symbol:'Au'}
     };
     var EVENT_CATEGORIES={world:1,tech:1,culture:1},market='bitcoin',bitcoinTimeframe='5m',eventMode=false,currentEvent=null,eventDeadline=0,ws=null,reconnectTimer=0,feedWatchdog=0,feedHeartbeat=0,priceProvider='',priceRtdsTopic='crypto_prices_twap_sixty',lastFeedTimestamp=0,roundServerOffset=0,roundRequest=null,reconnectDelay=6000,quoteWs=null,quoteHeartbeat=0,quoteReconnectTimer=0,quoteReconnectDelay=1500,quoteSeq=0,quoteRoundId='',quoteBooks={up:{tokenId:'',asks:{}},down:{tokenId:'',asks:{}}},settlementWatch=null,settlementRequest=null,chartMotionRaf=0,chartMotionFrame=0,clockTimer=0,seq=0,values=[],sampleTimes=[],historyValues=[],historyHydrated=false,current=0,last=0,raw=0,priceTarget=0,scaleMin=0,scaleMax=0,scaleFrameAt=0,readyPrice=false,entry=0,lastPointAt=0,currentRound=null,roundLockDeadline=0,roundSyncPending=false,roundSyncAwaitingFeed=false,roundRetryAt=0,roundRetryTimer=0,roundSyncedAt=0,balanceNano=0,balanceKnown=false,gramUsd=0,side='',busy=false,images={},trend='flat',runtimeSuspended=true,runtimeStarted=false,tradeFloatLastAt=0,chartSuspendedAt=0,chartResumeEaseUntil=0;
-    var W=360,H=220,L=0,R=80,P=18,HISTORY=23,SAMPLE_MS=2800,VISUAL_SAMPLE_MS=100,CANDLE_MS=5000;
+    var W=360,H=220,L=0,R=80,P=18,HISTORY=23,SAMPLE_MS=2800,VISUAL_SAMPLE_MS=100,CANDLE_VISIBLE_BARS=12;
     var chartMode='line',candles=[],candleClockOffset=null,chartEpoch=Date.now(),chartOrigin=motionNow();
     var candleLayer=root.querySelector('[data-predict-candles]'),candleNote=root.querySelector('[data-predict-candle-note]');
     var requestFrame=window.requestAnimationFrame?window.requestAnimationFrame.bind(window):function(cb){return setTimeout(function(){cb(Date.now())},16)};
@@ -263,14 +263,16 @@ export const PREDICT_ZONE_SCRIPT = `
       if(candleNote)candleNote.hidden=mode!=='candles';
       if(isActive())draw()
     }
+    function candleIntervalMs(){if(market!=='bitcoin')return 5000;return bitcoinTimeframe==='1h'?3600000:bitcoinTimeframe==='15m'?900000:300000}
+    function candleIntervalLabel(){if(market!=='bitcoin')return '5s';return bitcoinTimeframe==='1h'?'1h':bitcoinTimeframe}
     // OHLC uses source observations only. Never use interpolated frames or invent missing bars.
     function recordCandlePrices(observations){
-      var latest=0;
+      var latest=0,interval=candleIntervalMs();
       (observations||[]).forEach(function(item){
         var t=Number(item&&item.timestamp),p=Number(item&&item.value);
         if(!isFinite(t)||t<=0||!isFinite(p)||p<=0)return;
-        var bucket=Math.floor(t/CANDLE_MS)*CANDLE_MS,index=0;
-        if(candles.length&&bucket<candles[candles.length-1].time-CANDLE_MS*63)return;
+        var bucket=Math.floor(t/interval)*interval,index=0;
+        if(candles.length&&bucket<candles[candles.length-1].time-interval*63)return;
         while(index<candles.length&&candles[index].time<bucket)index++;
         var bar=candles[index];
         if(!bar||bar.time!==bucket){bar={time:bucket,first:t,last:t,open:p,high:p,low:p,close:p};candles.splice(index,0,bar)}
@@ -282,9 +284,9 @@ export const PREDICT_ZONE_SCRIPT = `
     }
     function drawCandles(now){
       if(!candleLayer)return null;
-      var source=market==='bitcoin'?(priceProvider==='polymarket'?(priceRtdsTopic==='crypto_prices'?'Binance':'Chainlink TWAP'):'Mark price'):'Mark price';
-      if(candleNote){var note=candles.length?'5s · '+source:'Waiting for ticks';if(candleNote.textContent!==note)candleNote.textContent=note;candleNote.title='5-second OHLC of received '+source+' prices. First or interrupted candles may be partial; missing intervals are not filled.'}
-      var right=W-R,rate=(right-L)/(HISTORY*SAMPLE_MS),width=CANDLE_MS*rate*.62,stamp=now+(candleClockOffset||0),shown=candles.filter(function(bar){var x=right-width/2-(stamp-bar.time)*rate;return x+width/2>=L&&x-width/2<=right}),prices=[];
+      var source=market==='bitcoin'?(priceProvider==='polymarket'?(priceRtdsTopic==='crypto_prices'?'Binance':'Chainlink TWAP'):'Mark price'):'Mark price',interval=candleIntervalMs(),intervalLabel=candleIntervalLabel();
+      if(candleNote){var note=intervalLabel+' · '+source;if(candleNote.textContent!==note)candleNote.textContent=note;candleNote.title=intervalLabel+' OHLC of received '+source+' prices. First or interrupted candles may be partial; missing intervals are not filled.'}
+      var right=W-R,rate=(right-L)/(CANDLE_VISIBLE_BARS*interval),width=interval*rate*.62,stamp=now+(candleClockOffset||0),shown=candles.filter(function(bar){var x=right-width/2-(stamp-bar.time)*rate;return x+width/2>=L&&x-width/2<=right}),prices=[];
       shown.forEach(function(bar){prices.push(bar.low,bar.high)});
       if(!prices.length){candleLayer.textContent='';if(guide)guide.style.opacity='0';return null}
       var scale=autoScale(prices),ns='http://www.w3.org/2000/svg';

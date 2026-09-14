@@ -5,6 +5,7 @@ html,body{margin:0;height:100%;background:#000!important;color:#fff;overflow:hid
 body{height:100dvh}
 button,input,select,textarea{font:inherit;font-family:var(--font-main)}
 button{border:0}
+.vexa-drawer-close{width:32px!important;height:32px!important;min-width:32px!important;padding:0!important;border:0!important;outline:0!important;border-radius:13px!important;background:rgba(255,255,255,.07)!important;color:#fff!important;display:grid!important;place-items:center!important;box-shadow:none!important;font-size:18px!important;font-weight:400!important;line-height:1!important;transition:none!important;-webkit-tap-highlight-color:transparent!important}.vexa-drawer-close:active{transform:none!important}.vexa-drawer-close svg{display:none!important}.vexa-drawer-close:before{content:'×'!important;display:block!important;color:#fff!important;font-size:18px!important;font-weight:400!important;line-height:1!important}
 b,strong,.top-balance-pill b,#crashMultiplier,#minesMultiplier,#plinkoRowsValue,.stat b,.wave-time,.crash-history span,input{font-family:var(--font-num);font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1,"lnum" 1,"kern" 1}
 h1,h2,h3,.brand h1,.hero h2{font-family:var(--font-main);font-weight:850;letter-spacing:-.055em}
 .app{position:relative;width:min(100%,560px);height:100dvh;margin:auto;padding:max(env(safe-area-inset-top),var(--tg-safe-area-inset-top,0px),var(--tg-content-safe-area-inset-top,0px)) 16px calc(76px + env(safe-area-inset-bottom));background:#000!important;overflow:hidden}

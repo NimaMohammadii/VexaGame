@@ -101,9 +101,10 @@ app.get('/app/api/predict-round', async (c) => {
         console.error('Predict background settlement failed', messageOf(error));
       }));
     } else await settleDueRounds(c.env, market, false, snapshot.price);
-    const round = market === 'bitcoin' && timeframe !== '5m'
-      ? await getOrCreateBitcoinRoundWithWait(c.env, timeframe, ROUND_BOOTSTRAP_LEASE_MS + 10_000)
-      : await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
+    // Return a pending bootstrap promptly. The client owns retries and aborts
+    // requests after 15 seconds; waiting out the 20-second lease here loses
+    // the response and hides retryAfterMs, especially after upstream errors.
+    const round = await getOrCreateCurrentRound(c.env, market, snapshot.price, timeframe);
     if (market === 'bitcoin' && timeframe === '5m') {
       c.executionCtx.waitUntil(warmCurrentBitcoinLongTimeframes(c.env).catch((error) => {
         console.warn('Predict long-timeframe background preparation failed', messageOf(error));
@@ -500,20 +501,6 @@ async function reconcilePendingPolymarketBets(env: Env, roundId?: string): Promi
   return changed;
 }
 
-async function getOrCreateBitcoinRoundWithWait(env: Env, timeframe: BitcoinTimeframe, waitMs: number): Promise<RoundRow> {
-  const deadline = Date.now() + Math.max(0, waitMs);
-  for (;;) {
-    try {
-      return await getOrCreateCurrentRound(env, 'bitcoin', 0, timeframe);
-    } catch (error) {
-      if (!(error instanceof PredictRoundStartingError) || waitMs <= 0) throw error;
-      const remaining = deadline - Date.now();
-      if (remaining <= 300) throw error;
-      const delay = Math.min(remaining - 100, Math.max(250, Math.min(1_500, error.retryAfterMs)));
-      await new Promise<void>((resolve) => setTimeout(resolve, delay));
-    }
-  }
-}
 async function warmCurrentBitcoinLongTimeframes(env: Env): Promise<void> {
   const results = await Promise.allSettled((['15m', '1h'] as BitcoinTimeframe[]).map(async (timeframe) => {
     try {

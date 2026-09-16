@@ -9,7 +9,7 @@ import { DEFAULT_VEXA_LOCALE, SHARE_INVITE_BUTTON_TEXT, VEXA_APP_DEEP_LINK, VEXA
 import { makeSimplePdf } from './telegram-pdf';
 
 type TgApi = <T = unknown>(token: string, method: string, payload: unknown) => Promise<T>;
-type AdminUser = Record<string, unknown> & { id?: unknown; firstName?: unknown; username?: unknown; tonBalance?: unknown; tonBalanceNano?: unknown; currentSection?: unknown; status?: unknown; level?: unknown; xp?: unknown; rankName?: unknown; regionCode?: unknown; languageCode?: unknown; regionLabel?: unknown; returnCount?: unknown };
+type AdminUser = Record<string, unknown> & { id?: unknown; firstName?: unknown; username?: unknown; tonBalance?: unknown; tonBalanceNano?: unknown; currentSection?: unknown; status?: unknown; level?: unknown; xp?: unknown; rankName?: unknown; regionCode?: unknown; languageCode?: unknown; regionLabel?: unknown; returnCount?: unknown; botStartedAt?: unknown; appEnteredAt?: unknown };
 type AdminState = {
   mode: 'win' | 'credit' | 'message' | 'broadcast' | 'limit' | 'search' | 'channel-link' | 'channel-destination' | 'channel-button-text' | 'channel-content';
   userId?: string;
@@ -111,7 +111,7 @@ export async function handleBotAdminCallback(env: Env, token: string, q: Telegra
   if (action === 'channelcompose') return beginChannelComposition(env, token, chatId, tg, q.from.id, messageId);
   if (action === 'channeldestination') return chooseChannelDestination(env, token, chatId, tg, q.from.id, pendingState, id, messageId);
   if (action === 'channelbutton') return chooseChannelButton(env, token, chatId, tg, q.from.id, pendingState, id === 'yes', messageId);
-  if (action === 'users') return sendUsersList(env, token, chatId, tg, Number(id) || 0, messageId);
+  if (action === 'users') return sendUsersList(env, token, chatId, tg, Number(id) || 0, messageId, returnListKey(arg));
   if (action === 'returns') return sendReturnUsersMenu(env, token, chatId, tg, messageId);
   if (action === 'asksearch') return promptAdminInput(env, token, chatId, tg, q.from.id, { mode: 'search', list: returnListKey(id) }, searchPrompt(returnListKey(id)), messageId);
   if (action === 'returnusers') return sendUsersList(env, token, chatId, tg, pageArg || 0, messageId, returnListKey(id));
@@ -237,7 +237,8 @@ async function sendUsersList(env: Env, token: string, chatId: number, tg: TgApi,
   if (current > 0) nav.push({ text: 'قبلی', callback_data: `botadmin:page:${current - 1}:${list}` });
   nav.push({ text: '🔎 سرچ کاربر', callback_data: `botadmin:asksearch:${list}` });
   if (current < totalPages - 1) nav.push({ text: 'بعدی', callback_data: `botadmin:page:${current + 1}:${list}` });
-  rows.push(nav, [{ text: list === 'all' ? '⬅️ منوی اصلی' : '⬅️ بخش برگشتی‌ها', callback_data: list === 'all' ? 'botadmin:home' : 'botadmin:returns' }]);
+  const returnList = list !== 'all' && list !== 'app';
+  rows.push(nav, [{ text: returnList ? '⬅️ بخش برگشتی‌ها' : '⬅️ منوی اصلی', callback_data: returnList ? 'botadmin:returns' : 'botadmin:home' }]);
   await upsertMessage(env, token, tg, chatId, messageId, usersListTitle(list, users.length), rows);
   return true;
 }
@@ -350,7 +351,7 @@ async function handleStateMessage(env: Env, token: string, message: TelegramMess
     const data = await adminUsersJson(env);
     const locales = normalizeBroadcastLocales(state.locales || 'ALL');
     let sent = 0;
-    for (const user of (data.users as AdminUser[]).filter((item) => localeMatches(item, locales))) {
+    for (const user of (data.users as AdminUser[]).filter((item) => isAppEnteredUser(item) && localeMatches(item, locales))) {
       const id = cleanId(user.id);
       if (!id) continue;
       try { await copyAdminMessageToChat(token, tg, message, id, state.miniAppButton !== false, broadcastMiniAppButtonText(user)); sent++; } catch (_) { /* ignore blocked users */ }
@@ -367,9 +368,12 @@ async function handleStateMessage(env: Env, token: string, message: TelegramMess
 }
 
 async function sendSearchResults(env: Env, token: string, chatId: number, tg: TgApi, query: string, list: string = 'all', messageId?: number): Promise<true> {
-  const users = usersForList((await adminUsersJson(env)).users as AdminUser[], list).filter((user) => userMatchesSearch(user, query)).slice(0, 25);
-  const rows = users.map((u) => [{ text: userButtonText(u), callback_data: `botadmin:user:${cleanId(u.id)}:0:${returnListKey(list)}` }]);
-  rows.push([{ text: '🔎 سرچ دوباره', callback_data: `botadmin:asksearch:${returnListKey(list)}` }], [{ text: returnListKey(list) === 'all' ? '⬅️ لیست کاربران' : '⬅️ بخش برگشتی‌ها', callback_data: returnListKey(list) === 'all' ? 'botadmin:users:0' : 'botadmin:returns' }]);
+  const key = returnListKey(list);
+  const users = usersForList((await adminUsersJson(env)).users as AdminUser[], key).filter((user) => userMatchesSearch(user, query)).slice(0, 25);
+  const rows = users.map((u) => [{ text: userButtonText(u), callback_data: `botadmin:user:${cleanId(u.id)}:0:${key}` }]);
+  const backText = key === 'app' ? '⬅️ کاربران وارد اپ' : key === 'all' ? '⬅️ لیست کاربران' : '⬅️ بخش برگشتی‌ها';
+  const backData = key === 'app' ? 'botadmin:users:0:app' : key === 'all' ? 'botadmin:users:0' : 'botadmin:returns';
+  rows.push([{ text: '🔎 سرچ دوباره', callback_data: `botadmin:asksearch:${key}` }], [{ text: backText, callback_data: backData }]);
   const text = [`🔎 نتایج جستجوی کاربر`, '', `عبارت: ${cleanText(query, '—')}`, `تعداد نتیجه: ${users.length}`, '', users.length ? 'نتایج در این بخش جدا نمایش داده می‌شوند:' : 'نتیجه‌ای پیدا نشد.'].join('\n');
   await upsertMessage(env, token, tg, chatId, messageId, text, rows);
   return true;
@@ -498,11 +502,27 @@ function parseTonDelta(value: string): number | null {
 }
 function userButtonText(user: AdminUser): string { return `${cleanText(user.firstName, 'بی‌نام')} | ${cleanText(user.username, 'بدون یوزرنیم')} | ${formatTon(user.tonBalanceNano)} TON | ↩️ ${returnCount(user)}`; }
 function returnCount(user: AdminUser): number { return Math.max(1, Math.floor(Number(user.returnCount) || 1)); }
-function returnListKey(value: unknown): string { const key = String(value || 'all').toLowerCase(); return key === 'r2' || key === 'r3' || key === 'r4' || key === 'r5p' ? key : 'all'; }
+function returnListKey(value: unknown): string { const key = String(value || 'all').toLowerCase(); return key === 'app' || key === 'r2' || key === 'r3' || key === 'r4' || key === 'r5p' ? key : 'all'; }
 function returnListKeyByUser(user: AdminUser): string { const count = returnCount(user); return count === 2 ? 'r2' : count === 3 ? 'r3' : count === 4 ? 'r4' : count > 5 ? 'r5p' : 'all'; }
-function usersForList(users: AdminUser[], list: string): AdminUser[] { const key = returnListKey(list); return users.filter((user) => key === 'all' || returnListKeyByUser(user) === key); }
-function usersListTitle(list: string, count: number): string { const labels: Record<string, string> = { r2: 'فقط ۲ بار', r3: 'فقط ۳ بار', r4: 'فقط ۴ بار', r5p: 'بیشتر از ۵ بار' }; return list !== 'all' ? `↩️ کاربران برگشتی ${labels[returnListKey(list)] || ''} (${count} نفر)\nبرای مدیریت هر کاربر روی نام او بزنید.` : '👥 لیست کاربران\nبرای مدیریت هر کاربر روی نام او بزنید.'; }
-function searchPrompt(list: string): string { return `عبارت سرچ را بفرستید: آیدی عددی، یوزرنیم یا اسم کاربر.\nمحدوده جستجو: ${returnListKey(list) === 'all' ? 'همه کاربران' : usersListTitle(list, 0).split(' (')[0]}`; }
+function hasBotStart(user: AdminUser): boolean { return Boolean(String(user.botStartedAt ?? '').trim()); }
+function isAppEnteredUser(user: AdminUser): boolean { return Boolean(String(user.appEnteredAt ?? '').trim()) || !hasBotStart(user); }
+function usersForList(users: AdminUser[], list: string): AdminUser[] {
+  const key = returnListKey(list);
+  if (key === 'all') return users.filter(hasBotStart);
+  if (key === 'app') return users.filter(isAppEnteredUser);
+  return users.filter((user) => returnListKeyByUser(user) === key);
+}
+function usersListTitle(list: string, count: number): string {
+  const key = returnListKey(list);
+  if (key === 'app') return `📱 کاربران وارد اپ (${count} نفر)\nبرای مدیریت هر کاربر روی نام او بزنید.`;
+  const labels: Record<string, string> = { r2: 'فقط ۲ بار', r3: 'فقط ۳ بار', r4: 'فقط ۴ بار', r5p: 'بیشتر از ۵ بار' };
+  return key !== 'all' ? `↩️ کاربران برگشتی ${labels[key] || ''} (${count} نفر)\nبرای مدیریت هر کاربر روی نام او بزنید.` : `👥 لیست کاربران (${count} نفر)\nبرای مدیریت هر کاربر روی نام او بزنید.`;
+}
+function searchPrompt(list: string): string {
+  const key = returnListKey(list);
+  const scope = key === 'all' ? 'کاربرانی که /start زده‌اند' : key === 'app' ? 'کاربران وارد اپ' : usersListTitle(key, 0).split(' (')[0];
+  return `عبارت سرچ را بفرستید: آیدی عددی، یوزرنیم یا اسم کاربر.\nمحدوده جستجو: ${scope}`;
+}
 function normalizedSearch(value: unknown): string { return String(value ?? '').trim().replace(/^@/, '').toLowerCase(); }
 function userMatchesSearch(user: AdminUser, query: string): boolean { const q = normalizedSearch(query); if (!q) return false; return [user.id, user.username, user.firstName].some((value) => normalizedSearch(value).includes(q)); }
 function chunk<T>(items: T[], size: number): T[][] { const rows: T[][] = []; for (let i = 0; i < items.length; i += size) rows.push(items.slice(i, i + size)); return rows; }

@@ -26,6 +26,8 @@ type AdminUserRow = {
   region_mode?: string | null;
   timezone?: string | null;
   return_count?: number | null;
+  bot_started_at?: string | null;
+  app_entered_at?: string | null;
 };
 
 export type UserRegionPreference = {
@@ -41,6 +43,28 @@ const CLIENT_RESET_PREFIX = 'miniapp-client-reset:';
 const CLIENT_RESET_ALL_KEY = 'miniapp-client-reset:all';
 const CLIENT_RESET_TTL_SECONDS = 180 * 24 * 60 * 60;
 
+export async function recordBotStartUser(env: Env, payload: Pick<AppUserActivityPayload, 'userId' | 'username' | 'firstName'>): Promise<void> {
+  const userId = String(payload.userId ?? '').trim();
+  if (!userId) return;
+  const username = cleanText(payload.username, 80);
+  const firstName = cleanText(payload.firstName, 120);
+
+  try {
+    await ensureUserTrackingColumns(env);
+    await env.DB.prepare(`INSERT INTO app_users (telegram_user_id, first_name, username, bot_started_at, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(telegram_user_id) DO UPDATE SET
+        first_name = excluded.first_name,
+        username = excluded.username,
+        bot_started_at = COALESCE(app_users.bot_started_at, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP`)
+      .bind(userId, firstName, username)
+      .run();
+  } catch (error) {
+    console.error('record bot start user failed', error);
+  }
+}
+
 export async function trackAppUser(env: Env, payload: AppUserActivityPayload): Promise<{ ok: true; banned: boolean; tonBalanceNano: number; winChancePercent: number; regionPreference: UserRegionPreference; resetVersion: string; resetAllVersion: string; level: Awaited<ReturnType<typeof getUserLevel>> } | { ok: false; error: string }> {
   const userId = String(payload.userId ?? '').trim();
   if (!userId) return { ok: false, error: 'Missing user id' };
@@ -53,6 +77,7 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
   try {
     await ensureTonBalanceColumn(env);
     await ensureUserRegionColumns(env);
+    await ensureUserTrackingColumns(env);
     await env.DB.prepare('ALTER TABLE app_users ADD COLUMN return_count INTEGER NOT NULL DEFAULT 1').run().catch(() => undefined);
     await env.DB.prepare('ALTER TABLE app_users ADD COLUMN avatar_url TEXT').run().catch(() => undefined);
     const [controls, resetState, level] = await Promise.all([
@@ -61,8 +86,8 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
       getUserLevel(env, userId),
     ]);
     const tonBalanceNano = Math.max(0, Math.floor(Number(controls.tonBalanceNano ?? 0) || 0));
-    await env.DB.prepare(`INSERT INTO app_users (telegram_user_id, first_name, username, avatar_url, current_section, ton_balance_nano, region_code, language_code, last_seen_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    await env.DB.prepare(`INSERT INTO app_users (telegram_user_id, first_name, username, avatar_url, current_section, ton_balance_nano, region_code, language_code, app_entered_at, last_seen_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(telegram_user_id) DO UPDATE SET
         first_name = excluded.first_name,
         username = excluded.username,
@@ -71,9 +96,11 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
         region_code = CASE WHEN COALESCE(app_users.region_mode, 'automatic') = 'manual' THEN app_users.region_code ELSE COALESCE(excluded.region_code, app_users.region_code) END,
         language_code = CASE WHEN COALESCE(app_users.region_mode, 'automatic') = 'manual' THEN app_users.language_code ELSE COALESCE(excluded.language_code, app_users.language_code) END,
         return_count = CASE
-          WHEN datetime(COALESCE(app_users.last_seen_at, app_users.created_at)) < datetime('now', '-30 minutes') THEN COALESCE(app_users.return_count, 1) + 1
+          WHEN (app_users.app_entered_at IS NOT NULL OR app_users.bot_started_at IS NULL)
+            AND datetime(COALESCE(app_users.last_seen_at, app_users.created_at)) < datetime('now', '-30 minutes') THEN COALESCE(app_users.return_count, 1) + 1
           ELSE COALESCE(app_users.return_count, 1)
         END,
+        app_entered_at = COALESCE(app_users.app_entered_at, CURRENT_TIMESTAMP),
         last_seen_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP`)
       .bind(userId, firstName, username, cleanAvatarUrl(payload.avatarUrl), section, tonBalanceNano, regionCode, languageCode)
@@ -128,6 +155,11 @@ async function ensureUserRegionColumns(env: Env): Promise<void> {
   await env.DB.prepare("ALTER TABLE app_users ADD COLUMN region_mode TEXT NOT NULL DEFAULT 'automatic'").run().catch(() => undefined);
 }
 
+async function ensureUserTrackingColumns(env: Env): Promise<void> {
+  await env.DB.prepare('ALTER TABLE app_users ADD COLUMN bot_started_at TEXT').run().catch(() => undefined);
+  await env.DB.prepare('ALTER TABLE app_users ADD COLUMN app_entered_at TEXT').run().catch(() => undefined);
+}
+
 function cleanAvatarUrl(value: unknown): string | null {
   const candidate = String(value || '').trim();
   if (!candidate || candidate.length > 1_500) return null;
@@ -142,14 +174,15 @@ function cleanAvatarUrl(value: unknown): string | null {
 export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<string, unknown>>; stats: Record<string, number> }> {
   await ensureTonBalanceColumn(env);
   await ensureUserRegionColumns(env);
+  await ensureUserTrackingColumns(env);
   await env.DB.prepare('ALTER TABLE app_users ADD COLUMN timezone TEXT').run().catch(() => undefined);
   await env.DB.prepare('ALTER TABLE app_users ADD COLUMN return_count INTEGER NOT NULL DEFAULT 1').run().catch(() => undefined);
   const rows = await env.DB.prepare(`WITH ranked AS (
-      SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, 'game_bot' AS source, region_code, language_code, timezone, return_count,
+      SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, 'game_bot' AS source, region_code, language_code, timezone, return_count, bot_started_at, app_entered_at,
         ROW_NUMBER() OVER (PARTITION BY telegram_user_id ORDER BY datetime(COALESCE(last_seen_at, created_at)) DESC) AS rn
       FROM app_users
     )
-    SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, source, region_code, language_code, timezone, return_count
+    SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, source, region_code, language_code, timezone, return_count, bot_started_at, app_entered_at
     FROM ranked
     WHERE rn = 1
     ORDER BY datetime(COALESCE(last_seen_at, created_at)) DESC
@@ -161,7 +194,8 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
       getUserLevel(env, row.telegram_user_id).catch(() => null),
     ]);
     const lastSeenMs = row.last_seen_at ? Date.parse(row.last_seen_at) : 0;
-    const online = lastSeenMs > 0 && now - lastSeenMs <= 90_000;
+    const appActivityKnown = Boolean(row.app_entered_at) || !row.bot_started_at;
+    const online = appActivityKnown && lastSeenMs > 0 && now - lastSeenMs <= 90_000;
     const tonBalanceNano = Number(controls?.tonBalanceNano ?? row.ton_balance_nano ?? 0);
     return {
       id: row.telegram_user_id,
@@ -178,6 +212,8 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
       rankName: levelInfo?.rankName ?? 'Starter',
       lastSeenAt: row.last_seen_at,
       createdAt: row.created_at,
+      botStartedAt: row.bot_started_at || null,
+      appEnteredAt: row.app_entered_at || null,
       source: row.source || 'unknown',
       sourceLabel: sourceLabel(row.source || 'unknown'),
       regionCode: regionKeyFromRow(row.region_code, row.language_code),

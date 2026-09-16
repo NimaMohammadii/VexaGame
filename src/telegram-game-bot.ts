@@ -1,5 +1,5 @@
 import { handleBotAdminCallback, handleBotAdminMessage } from './telegram-bot-admin-panel';
-import { getUserRegionPreference, setUserRegionPreference } from './admin-users';
+import { getUserRegionPreference, recordBotStartUser, setUserRegionPreference } from './admin-users';
 import { DEFAULT_VEXA_LOCALE, VEXA_LOCALES, VEXA_LOCALE_LABELS, type VexaLocale } from './miniapp/i18n';
 import { handleStarsPreCheckout, handleStarsSuccessfulPayment } from './stars-deposits';
 import type { Env, TelegramUpdate } from './types';
@@ -298,8 +298,15 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
       return;
     }
 
-    if (!/^\/start(?:@[-_a-z0-9]+)?(?:\s+.*)?$/i.test(String(message.text || '').trim())) {
+    const startCommand = isStartCommand(message.text);
+    if (!startCommand) {
       await deleteIncomingMessage(token, message.chat.id, message.message_id);
+    } else if (message.from?.id) {
+      await recordBotStartUser(env, {
+        userId: String(message.from.id),
+        username: message.from.username ?? null,
+        firstName: message.from.first_name ?? null,
+      });
     }
     await sendGameHome(env, token, message.chat.id, menuCommand ? null : undefined, telegramLanguageCode(message.from));
     if (menuCommand) await deletePreviousMenuMessage(token, message.chat.id, previousMenuMessageId);
@@ -344,6 +351,10 @@ async function deleteCurrentMenuMessage(env: Env, token: string, chatId: number)
 
 async function deletePreviousMenuMessage(token: string, chatId: number, messageId: number | undefined): Promise<void> {
   if (messageId) await deleteIncomingMessage(token, chatId, messageId);
+}
+
+function isStartCommand(text: string | undefined): boolean {
+  return /^\/start(?:@[-_a-z0-9]+)?(?:\s+.*)?$/i.test(String(text || '').trim());
 }
 
 function isRegionCommand(text: string | undefined): boolean {

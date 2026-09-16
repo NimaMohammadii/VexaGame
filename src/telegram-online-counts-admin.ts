@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { adminUsersJson } from './admin-users';
 import {
   ONLINE_COUNT_SECTIONS,
   getOnlineUserCountConfig,
@@ -13,6 +14,7 @@ type Callback = { id: string; data?: string; from: { id: number }; message?: { m
 type Update = { message?: Message; callback_query?: Callback };
 type Button = { text: string; callback_data: string };
 type Keyboard = Button[][];
+type AdminUser = Record<string, unknown> & { id?: unknown; firstName?: unknown; username?: unknown; currentSection?: unknown; isActive?: unknown; status?: unknown };
 type OnlineState =
   | { mode: 'base'; sectionId: string }
   | { mode: 'timed-amount'; sectionId: string }
@@ -20,6 +22,7 @@ type OnlineState =
 
 const STATE_PREFIX = 'admin:online-count-input:';
 const MAX_COUNT = 999_999;
+const ONLINE_USERS_PAGE_SIZE = 8;
 
 export async function handleOnlineCountsAdminRequest(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
@@ -45,6 +48,13 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
   const chatId = callback.message?.chat.id ?? callback.from.id;
   const messageId = callback.message?.message_id;
+
+  if (data.startsWith('botadmin:online:users:')) {
+    await clearState(env, callback.from.id);
+    const page = Math.max(0, Math.floor(Number(data.slice('botadmin:online:users:'.length)) || 0));
+    await sendOnlineUsersMenu(env, token, chatId, messageId, page);
+    return ok();
+  }
 
   if (data === 'botadmin:online:list' || data === 'botadmin:online:refresh') {
     await clearState(env, callback.from.id);
@@ -223,6 +233,31 @@ async function handleMessage(env: Env, token: string, message: Message): Promise
   return ok();
 }
 
+async function sendOnlineUsersMenu(env: Env, token: string, chatId: number, messageId: number | undefined, page: number): Promise<void> {
+  const data = await adminUsersJson(env);
+  const users = (data.users as AdminUser[]).filter((user) => user.isActive === true || String(user.status || '').toLowerCase() === 'online');
+  const totalPages = Math.max(1, Math.ceil(users.length / ONLINE_USERS_PAGE_SIZE));
+  const current = Math.min(Math.max(0, page), totalPages - 1);
+  const pageUsers = users.slice(current * ONLINE_USERS_PAGE_SIZE, current * ONLINE_USERS_PAGE_SIZE + ONLINE_USERS_PAGE_SIZE);
+  const rows: Keyboard = pageUsers.map((user) => [{
+    text: onlineUserButtonText(user),
+    callback_data: `botadmin:user:${cleanUserId(user.id)}:0:all`,
+  }]);
+  if (totalPages > 1) {
+    const nav: Button[] = [];
+    if (current > 0) nav.push({ text: '⬅️ قبلی', callback_data: `botadmin:online:users:${current - 1}` });
+    nav.push({ text: `${current + 1}/${totalPages}`, callback_data: `botadmin:online:users:${current}` });
+    if (current < totalPages - 1) nav.push({ text: 'بعدی ➡️', callback_data: `botadmin:online:users:${current + 1}` });
+    rows.push(nav);
+  }
+  rows.push([{ text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' }]);
+  rows.push([{ text: '🔄 رفرش', callback_data: `botadmin:online:users:${current}` }]);
+  const text = users.length
+    ? `🟢 کاربران آنلاین\n\nتعداد کاربران آنلاین: ${users.length} نفر\n\nبرای مدیریت هر کاربر روی دکمهٔ او بزنید.`
+    : '🟢 کاربران آنلاین\n\nدر حال حاضر کاربر آنلاینی ثبت نشده است.';
+  await upsert(env, token, chatId, messageId, text, rows);
+}
+
 async function sendMainMenu(env: Env, token: string, chatId: number, messageId?: number, notice = ''): Promise<void> {
   const config = await getOnlineUserCountConfig(env);
   const rows: Keyboard = [];
@@ -267,6 +302,23 @@ async function sendSectionMenu(env: Env, token: string, chatId: number, sectionI
     `${notice ? notice + '\n\n' : ''}👥 ${sectionLabel(sectionId)} — Online Counts\n\nافزودهٔ دائمی: +${adjustment.permanent}\n${timed ? `افزایش زمان‌دار: +${timed.min === timed.max ? timed.min : `${timed.min} تا ${timed.max}`} (تا ${formatUpdatedAt(timed.expiresAt)})` : 'افزایش زمان‌دار: غیرفعال'}\n\n${isPredict ? 'مقدار پایه: تعداد کاربران واقعاً آنلاین در Predict' : `مقدار پایه: ${base.min} تا ${base.max} + کاربران واقعاً حاضر در بازی`}\n\nعدد نمایشی = مقدار پایه + کاربران واقعی + افزودهٔ دائمی + افزایش زمان‌دار فعال. دکمه‌های ± فقط افزودهٔ دائمی را تغییر می‌دهند.`,
     rows,
   );
+}
+
+function onlineUserButtonText(user: AdminUser): string {
+  const firstName = cleanButtonText(user.firstName, 'بی‌نام');
+  const rawUsername = cleanButtonText(user.username, '').replace(/^@+/, '');
+  const username = rawUsername ? `@${rawUsername}` : 'بدون یوزرنیم';
+  const section = cleanButtonText(user.currentSection, 'unknown');
+  return `🟢 ${firstName} | ${username} | ${section}`.slice(0, 60);
+}
+
+function cleanButtonText(value: unknown, fallback: string): string {
+  const text = String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return text || fallback;
+}
+
+function cleanUserId(value: unknown): string {
+  return String(value ?? '').replace(/[^0-9A-Za-z_-]/g, '').slice(0, 80);
 }
 
 function parseRange(text: string): OnlineCountRange | null {

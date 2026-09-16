@@ -137,6 +137,7 @@ export async function sendAdminHome(env: Env, token: string, chatId: number, mes
         { text: '👥 لیست کاربران', callback_data: 'botadmin:users:0' },
         { text: '↩️ کاربران برگشتی', callback_data: 'botadmin:returns' },
       ],
+      [{ text: '🟢 کاربران آنلاین', callback_data: 'botadmin:online:users:0' }],
       [
         { text: '📊 آمار مالی و آنلاین', callback_data: 'botadmin:financestats' },
         { text: '⚙️ حدود واریز/برداشت', callback_data: 'botadmin:financelimits' },

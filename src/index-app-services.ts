@@ -52,6 +52,16 @@ const playZoneCardVisibilitySchema = z.object({ gameId: z.string().min(1).max(40
 const sectionAccessLockSchema = z.object({ sectionId: z.string().min(1).max(40), minutes: z.number().int().min(1).max(43_200) });
 const sectionAccessUnlockSchema = z.object({ sectionId: z.string().min(1).max(40) });
 
+function adminGeoFromRequest(request: Request): { countryCode: string | null; timezone: string | null } {
+  const cf = (request as Request & { cf?: { country?: unknown; timezone?: unknown } }).cf;
+  const countryCode = String(cf?.country || '').trim().toUpperCase();
+  const timezone = String(cf?.timezone || '').trim().slice(0, 80);
+  return {
+    countryCode: /^[A-Z]{2}$/.test(countryCode) ? countryCode : null,
+    timezone: timezone || null,
+  };
+}
+
 app.get('/setup-webhook', async (c) => {
   const result = await setTelegramWebhook(c.env);
   const menu = await setGameMenuButton(c.env.TELEGRAM_BOT_TOKEN, `${PUBLIC_BASE_URL}/app`);
@@ -60,7 +70,7 @@ app.get('/setup-webhook', async (c) => {
   return new Response(`<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Setup Webhook</title><style>body{margin:0;background:#000;color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif;padding:22px}main{max-width:520px;margin:auto}h1{font-size:28px;margin:0 0 10px}.box{border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:16px;background:#080808}pre{white-space:pre-wrap;word-break:break-word;color:#ddd;font-size:12px}.ok{color:#7CFFB2}.bad{color:#FF8A8A}</style></head><body><main><h1 class="${ok ? 'ok' : 'bad'}">${ok ? 'Webhook updated' : 'Webhook failed'}</h1><div class="box"><p>Webhook URL:</p><pre>${escapeHtml(`${PUBLIC_BASE_URL}/telegram/webhook`)}</pre><p>Mini app:</p><pre>${escapeHtml(`${PUBLIC_BASE_URL}/app`)}</pre><p>Telegram response:</p><pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre></div></main></body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 });
 
-app.post('/app/api/activity', zValidator('json', activitySchema), async (c) => c.json(await trackAppUser(c.env, c.req.valid('json'))));
+app.post('/app/api/activity', zValidator('json', activitySchema), async (c) => c.json(await trackAppUser(c.env, c.req.valid('json'), adminGeoFromRequest(c.req.raw))));
 
 app.get('/app/api/section-backgrounds', async (c) => {
   const adminSections = [

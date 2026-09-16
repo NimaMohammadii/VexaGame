@@ -12,6 +12,11 @@ export type AppUserActivityPayload = {
   countryCode?: string | null;
 };
 
+export type AdminGeoSnapshot = {
+  countryCode?: string | null;
+  timezone?: string | null;
+};
+
 type AdminUserRow = {
   telegram_user_id: string;
   first_name: string | null;
@@ -28,6 +33,8 @@ type AdminUserRow = {
   return_count?: number | null;
   bot_started_at?: string | null;
   app_entered_at?: string | null;
+  server_country_code?: string | null;
+  server_timezone?: string | null;
 };
 
 export type UserRegionPreference = {
@@ -65,7 +72,7 @@ export async function recordBotStartUser(env: Env, payload: Pick<AppUserActivity
   }
 }
 
-export async function trackAppUser(env: Env, payload: AppUserActivityPayload): Promise<{ ok: true; banned: boolean; tonBalanceNano: number; winChancePercent: number; regionPreference: UserRegionPreference; resetVersion: string; resetAllVersion: string; level: Awaited<ReturnType<typeof getUserLevel>> } | { ok: false; error: string }> {
+export async function trackAppUser(env: Env, payload: AppUserActivityPayload, adminGeo: AdminGeoSnapshot = {}): Promise<{ ok: true; banned: boolean; tonBalanceNano: number; winChancePercent: number; regionPreference: UserRegionPreference; resetVersion: string; resetAllVersion: string; level: Awaited<ReturnType<typeof getUserLevel>> } | { ok: false; error: string }> {
   const userId = String(payload.userId ?? '').trim();
   if (!userId) return { ok: false, error: 'Missing user id' };
   const username = cleanText(payload.username, 80);
@@ -73,6 +80,8 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
   const section = cleanSection(payload.section);
   const regionCode = cleanCountryCode(payload.countryCode);
   const languageCode = regionCode ? vexaLocaleForCountry(regionCode) : null;
+  const serverCountryCode = cleanCountryCode(adminGeo.countryCode);
+  const serverTimezone = cleanTimeZone(adminGeo.timezone);
 
   try {
     await ensureTonBalanceColumn(env);
@@ -86,8 +95,8 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
       getUserLevel(env, userId),
     ]);
     const tonBalanceNano = Math.max(0, Math.floor(Number(controls.tonBalanceNano ?? 0) || 0));
-    await env.DB.prepare(`INSERT INTO app_users (telegram_user_id, first_name, username, avatar_url, current_section, ton_balance_nano, region_code, language_code, app_entered_at, last_seen_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    await env.DB.prepare(`INSERT INTO app_users (telegram_user_id, first_name, username, avatar_url, current_section, ton_balance_nano, region_code, language_code, server_country_code, server_timezone, app_entered_at, last_seen_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(telegram_user_id) DO UPDATE SET
         first_name = excluded.first_name,
         username = excluded.username,
@@ -95,6 +104,8 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
         current_section = excluded.current_section,
         region_code = CASE WHEN COALESCE(app_users.region_mode, 'automatic') = 'manual' THEN app_users.region_code ELSE COALESCE(excluded.region_code, app_users.region_code) END,
         language_code = CASE WHEN COALESCE(app_users.region_mode, 'automatic') = 'manual' THEN app_users.language_code ELSE COALESCE(excluded.language_code, app_users.language_code) END,
+        server_country_code = COALESCE(excluded.server_country_code, app_users.server_country_code),
+        server_timezone = COALESCE(app_users.server_timezone, excluded.server_timezone),
         return_count = CASE
           WHEN (app_users.app_entered_at IS NOT NULL OR app_users.bot_started_at IS NULL)
             AND datetime(COALESCE(app_users.last_seen_at, app_users.created_at)) < datetime('now', '-30 minutes') THEN COALESCE(app_users.return_count, 1) + 1
@@ -103,7 +114,7 @@ export async function trackAppUser(env: Env, payload: AppUserActivityPayload): P
         app_entered_at = COALESCE(app_users.app_entered_at, CURRENT_TIMESTAMP),
         last_seen_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP`)
-      .bind(userId, firstName, username, cleanAvatarUrl(payload.avatarUrl), section, tonBalanceNano, regionCode, languageCode)
+      .bind(userId, firstName, username, cleanAvatarUrl(payload.avatarUrl), section, tonBalanceNano, regionCode, languageCode, serverCountryCode, serverTimezone)
       .run();
     const regionPreference = await getUserRegionPreference(env, userId);
     return { ok: true, banned: controls.banned, tonBalanceNano, winChancePercent: controls.winChancePercent, regionPreference, ...resetState, level };
@@ -158,6 +169,8 @@ async function ensureUserRegionColumns(env: Env): Promise<void> {
 async function ensureUserTrackingColumns(env: Env): Promise<void> {
   await env.DB.prepare('ALTER TABLE app_users ADD COLUMN bot_started_at TEXT').run().catch(() => undefined);
   await env.DB.prepare('ALTER TABLE app_users ADD COLUMN app_entered_at TEXT').run().catch(() => undefined);
+  await env.DB.prepare('ALTER TABLE app_users ADD COLUMN server_country_code TEXT').run().catch(() => undefined);
+  await env.DB.prepare('ALTER TABLE app_users ADD COLUMN server_timezone TEXT').run().catch(() => undefined);
 }
 
 function cleanAvatarUrl(value: unknown): string | null {
@@ -178,11 +191,11 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
   await env.DB.prepare('ALTER TABLE app_users ADD COLUMN timezone TEXT').run().catch(() => undefined);
   await env.DB.prepare('ALTER TABLE app_users ADD COLUMN return_count INTEGER NOT NULL DEFAULT 1').run().catch(() => undefined);
   const rows = await env.DB.prepare(`WITH ranked AS (
-      SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, 'game_bot' AS source, region_code, language_code, timezone, return_count, bot_started_at, app_entered_at,
+      SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, 'game_bot' AS source, region_code, language_code, region_mode, timezone, return_count, bot_started_at, app_entered_at, server_country_code, server_timezone,
         ROW_NUMBER() OVER (PARTITION BY telegram_user_id ORDER BY datetime(COALESCE(last_seen_at, created_at)) DESC) AS rn
       FROM app_users
     )
-    SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, source, region_code, language_code, timezone, return_count, bot_started_at, app_entered_at
+    SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, source, region_code, language_code, region_mode, timezone, return_count, bot_started_at, app_entered_at, server_country_code, server_timezone
     FROM ranked
     WHERE rn = 1
     ORDER BY datetime(COALESCE(last_seen_at, created_at)) DESC
@@ -197,6 +210,12 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
     const appActivityKnown = Boolean(row.app_entered_at) || !row.bot_started_at;
     const online = appActivityKnown && lastSeenMs > 0 && now - lastSeenMs <= 90_000;
     const tonBalanceNano = Number(controls?.tonBalanceNano ?? row.ton_balance_nano ?? 0);
+    const selectedRegionCode = String(row.region_mode || '').trim().toLowerCase() === 'manual' ? cleanCountryCode(row.region_code) : null;
+    const serverRegionCode = cleanCountryCode(row.server_country_code);
+    const storedRegionCode = cleanCountryCode(row.region_code);
+    const regionCode = selectedRegionCode || serverRegionCode || storedRegionCode || regionKeyFromRow(row.region_code, row.language_code);
+    const regionSource = selectedRegionCode ? 'انتخاب‌شده' : serverRegionCode ? 'واقعی' : 'ثبت‌شده';
+    const timezone = cleanTimeZone(row.server_timezone) || '';
     return {
       id: row.telegram_user_id,
       username: row.username ? '@' + row.username.replace(/^@+/, '') : '—',
@@ -216,10 +235,11 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
       appEnteredAt: row.app_entered_at || null,
       source: row.source || 'unknown',
       sourceLabel: sourceLabel(row.source || 'unknown'),
-      regionCode: regionKeyFromRow(row.region_code, row.language_code),
-      regionLabel: regionLabel(regionKeyFromRow(row.region_code, row.language_code)),
+      regionCode,
+      regionLabel: `${regionLabel(regionCode)} (${regionCode}) · ${regionSource}\nتایم‌زون: ${timezone || 'نامشخص'}`,
+      regionSource,
       languageCode: row.language_code || '',
-      timezone: row.timezone || '',
+      timezone,
       returnCount: Math.max(1, Math.floor(Number(row.return_count) || 1)),
     };
   }));
@@ -394,6 +414,17 @@ function cleanLocaleCode(value: unknown): string | null {
   return /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(code) ? code : null;
 }
 
+function cleanTimeZone(value: unknown): string | null {
+  const zone = String(value || '').trim().slice(0, 80);
+  if (!zone) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone }).format(0);
+    return zone;
+  } catch {
+    return null;
+  }
+}
+
 function cleanSection(value: unknown): string {
   const text = String(value ?? 'home').replace(/[^a-zA-Z0-9_-]/g, '').trim().slice(0, 40);
   return text || 'home';
@@ -407,7 +438,7 @@ function cleanUserId(value: unknown): string {
 
 function regionKeyFromRow(regionCode: unknown, languageCode: unknown): string {
   const region = String(regionCode || '').toUpperCase();
-  if (region === 'IR' || region === 'TR' || region === 'RU') return region;
+  if (/^[A-Z]{2}$/.test(region)) return region;
   const language = String(languageCode || '').trim().toLowerCase();
   if (language === 'fa') return 'IR';
   if (language === 'tr') return 'TR';
@@ -416,5 +447,10 @@ function regionKeyFromRow(regionCode: unknown, languageCode: unknown): string {
 }
 
 function regionLabel(code: string): string {
-  return ({ EN: 'English / Global', IR: 'Iran / Persian', TR: 'Türkiye / Turkish', RU: 'Russia / Russian' } as Record<string, string>)[code] || code || 'Unknown';
+  if (code === 'EN') return 'English / Global';
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
+  } catch {
+    return code || 'Unknown';
+  }
 }

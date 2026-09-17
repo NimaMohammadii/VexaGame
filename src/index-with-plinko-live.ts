@@ -5,6 +5,8 @@ import { handleGameCardAdminRequest } from './telegram-game-card-admin';
 import { handleGramWithdrawalAdminRequest, notifyAdminGramWithdrawal } from './telegram-gram-withdrawals-admin';
 import { handleLotteryAdminRequest } from './telegram-lottery-admin';
 import { handleOnlineCountsAdminRequest } from './telegram-online-counts-admin';
+import { handleMandatoryChannelAdminRequest } from './telegram-mandatory-channel-admin';
+import { getMandatoryChannelAccess } from './mandatory-channel';
 import { handlePlinkoControlAdminRequest } from './telegram-plinko-control-admin';
 import { handlePlayZoneCardAdminRequest } from './telegram-play-zone-card-admin';
 import { handlePredictionEventsAdminRequest } from './telegram-prediction-events-admin';
@@ -718,6 +720,15 @@ export default {
     }) as Env;
 
     const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/app/api/mandatory-channel/status') {
+      try {
+        const body = await request.json().catch(() => ({})) as { initData?: unknown };
+        const userId = await validateTelegramInitData(String(body.initData || ''), gameBotToken(runtimeEnv));
+        return Response.json({ ok: true, ...(await getMandatoryChannelAccess(runtimeEnv, userId)) }, { headers: { 'cache-control': 'no-store' } });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : 'Could not verify channel membership' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/app/api/crash/live/ws') {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return Response.json({ error: 'Expected websocket.' }, { status: 426, headers: { 'cache-control': 'no-store' } });
@@ -807,6 +818,9 @@ export default {
 
     const lotteryResponse = await handleLotteryRequest(request, runtimeEnv);
     if (lotteryResponse) return lotteryResponse;
+
+    const mandatoryChannelAdminResponse = await handleMandatoryChannelAdminRequest(request, runtimeEnv);
+    if (mandatoryChannelAdminResponse) return mandatoryChannelAdminResponse;
 
     const predictionEventsAdminResponse = await handlePredictionEventsAdminRequest(request, runtimeEnv);
     if (predictionEventsAdminResponse) return predictionEventsAdminResponse;

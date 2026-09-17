@@ -6,6 +6,7 @@ import type { Env, TelegramUpdate } from './types';
 import { PUBLIC_BASE_URL } from './utils';
 import { getTelegramMenuMessageId, setTelegramMenuMessageId } from './telegram-menu-state';
 import { getMainMenuMedia } from './share-invite-config';
+import { getMandatoryChannelAccess, MANDATORY_CHANNEL_TEXT } from './mandatory-channel';
 
 type TelegramApi = <T = unknown>(token: string, method: string, payload: unknown) => Promise<T>;
 type TelegramEnvelope<T = unknown> = {
@@ -265,6 +266,7 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
 
   if (update.callback_query) {
     if (await handleBotAdminCallback(env, token, update.callback_query, telegram as TelegramApi)) return;
+    if (await handleMandatoryChannelCallback(env, token, update.callback_query)) return;
     if (await handleUserRegionCallback(env, token, update.callback_query)) return;
     await telegram(token, 'answerCallbackQuery', { callback_query_id: update.callback_query.id }).catch(() => undefined);
     return;
@@ -308,7 +310,13 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
         firstName: message.from.first_name ?? null,
       });
     }
-    await sendGameHome(env, token, message.chat.id, menuCommand ? null : undefined, telegramLanguageCode(message.from));
+    const userId = message.from?.id ?? message.chat.id;
+    const languageCode = telegramLanguageCode(message.from);
+    if (await enforceMandatoryChannelBotGate(env, token, message.chat.id, userId, menuCommand ? null : undefined, languageCode)) {
+      if (menuCommand) await deletePreviousMenuMessage(token, message.chat.id, previousMenuMessageId);
+      return;
+    }
+    await sendGameHome(env, token, message.chat.id, menuCommand ? null : undefined, languageCode);
     if (menuCommand) await deletePreviousMenuMessage(token, message.chat.id, previousMenuMessageId);
   }
 }
@@ -373,8 +381,56 @@ async function handleUserRegionCallback(env: Env, token: string, q: NonNullable<
   }
   const preference = await setUserRegionPreference(env, q.from.id, countryCode);
   await telegram(token, 'answerCallbackQuery', { callback_query_id: q.id, text: preference.mode === 'automatic' ? 'Automatic detection enabled' : 'Region updated' }).catch(() => undefined);
-  await sendGameHome(env, token, chatId, q.message?.message_id, preference.languageCode ?? telegramLanguageCode(q.from));
+  const languageCode = preference.languageCode ?? telegramLanguageCode(q.from);
+  if (await enforceMandatoryChannelBotGate(env, token, chatId, q.from.id, q.message?.message_id, languageCode)) return true;
+  await sendGameHome(env, token, chatId, q.message?.message_id, languageCode);
   return true;
+}
+
+async function handleMandatoryChannelCallback(env: Env, token: string, q: NonNullable<TelegramUpdate['callback_query']>): Promise<boolean> {
+  if (String(q.data || '') !== 'vexa:mandatory:check') return false;
+  const chatId = q.message?.chat.id ?? q.from.id;
+  const languageCode = telegramLanguageCode(q.from);
+  const access = await getMandatoryChannelAccess(env, q.from.id);
+  const locale = localeForTelegramLanguage(languageCode);
+  const copy = MANDATORY_CHANNEL_TEXT[locale] ?? MANDATORY_CHANNEL_TEXT[DEFAULT_VEXA_LOCALE];
+  if (!access.required || access.joined) {
+    await telegram(token, 'answerCallbackQuery', { callback_query_id: q.id, text: copy.verified }).catch(() => undefined);
+    await sendGameHome(env, token, chatId, q.message?.message_id, languageCode);
+    return true;
+  }
+  await telegram(token, 'answerCallbackQuery', { callback_query_id: q.id, text: copy.notJoined, show_alert: false }).catch(() => undefined);
+  await sendMandatoryChannelPrompt(env, token, chatId, access, q.message?.message_id, languageCode);
+  return true;
+}
+
+async function enforceMandatoryChannelBotGate(env: Env, token: string, chatId: number, userId: number, existingMessageId?: number | null, languageCode?: string): Promise<boolean> {
+  const access = await getMandatoryChannelAccess(env, userId);
+  if (!access.required || access.joined) return false;
+  await sendMandatoryChannelPrompt(env, token, chatId, access, existingMessageId, languageCode);
+  return true;
+}
+
+async function sendMandatoryChannelPrompt(env: Env, token: string, chatId: number, access: Awaited<ReturnType<typeof getMandatoryChannelAccess>>, existingMessageId?: number | null, languageCode?: string): Promise<void> {
+  const channel = access.channel;
+  if (!channel) return;
+  const locale = localeForTelegramLanguage(languageCode);
+  const copy = MANDATORY_CHANNEL_TEXT[locale] ?? MANDATORY_CHANNEL_TEXT[DEFAULT_VEXA_LOCALE];
+  const text = [
+    `📢 <b>${escapeHtml(copy.title)}</b>`,
+    '',
+    escapeHtml(copy.body.replace('{channel}', channel.title)),
+  ].join('\n');
+  await replaceMenuMessage(env, token, chatId, {
+    text,
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: `📢 ${copy.join}`, url: channel.joinUrl }],
+        [{ text: `✓ ${copy.check}`, callback_data: 'vexa:mandatory:check' }],
+      ],
+    },
+  }, existingMessageId);
 }
 
 async function sendUserRegionMenu(env: Env, token: string, chatId: number, userId: number, messageId?: number | null): Promise<void> {

@@ -41,6 +41,7 @@ import { XP_BAR_EFFECTS_SCRIPT } from './xp-bar-effects-script';
 import { TELEGRAM_BACK_BUTTON_SCRIPT } from './telegram-back-button-script';
 import { SECTION_ACCESS_SCRIPT } from './section-access-script';
 import { SECTION_ACCESS_STYLES } from './section-access-styles';
+import { MANDATORY_CHANNEL_GATE_SCRIPT, MANDATORY_CHANNEL_GATE_STYLES } from './mandatory-channel-gate';
 import { CREDIT_GUARD_SCRIPT } from './credit-guard-script';
 import { COUNTRY_TO_VEXA_LOCALE, LOTTERY_HOME_TEXT } from './i18n';
 
@@ -71,6 +72,7 @@ const STYLES = [
   GAME_LIVE_COUNT_STYLES,
   GHOST_RUN_STYLES,
   SECTION_ACCESS_STYLES,
+  MANDATORY_CHANNEL_GATE_STYLES,
 ].join('');
 
 function initialSections(): string {
@@ -173,6 +175,7 @@ function scripts(): string {
     BOOT_LOADER_SCRIPT,
     lazySectionLoaderScript(),
     MINIAPP_SCRIPT,
+    MANDATORY_CHANNEL_GATE_SCRIPT,
     ACTIVITY_SCRIPT,
     TON_BALANCE_SCRIPT,
     DEPOSIT_ENHANCEMENTS_SCRIPT,

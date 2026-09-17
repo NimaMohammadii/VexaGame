@@ -226,7 +226,7 @@ export const MANDATORY_CHANNEL_GATE_SCRIPT = `
   }
   function openChannel(){
     var url=String(current&&current.channel&&current.channel.joinUrl||'');if(!url)return;
-    try{if(tg&&typeof tg.openTelegramLink==='function'&&/^https:\/\/t\.me\//i.test(url)){tg.openTelegramLink(url);return}}catch(e){}
+    try{if(tg&&typeof tg.openTelegramLink==='function'&&url.indexOf('https://t.me/')===0){tg.openTelegramLink(url);return}}catch(e){}
     try{window.open(url,'_blank','noopener,noreferrer')}catch(e){location.href=url}
   }
   function setChecking(active){

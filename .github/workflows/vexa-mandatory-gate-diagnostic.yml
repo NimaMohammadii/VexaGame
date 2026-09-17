@@ -47,6 +47,9 @@ jobs:
           const { JSDOM } = require('jsdom');
           const gate = require('/tmp/gatebuild/miniapp/mandatory-channel-gate.js');
           assert.equal(typeof gate.MANDATORY_CHANNEL_GATE_SCRIPT, 'string');
+          const generatedLines = gate.MANDATORY_CHANNEL_GATE_SCRIPT.split('\n');
+          console.log('GENERATED_GATE_AROUND_FAILURE');
+          console.log(generatedLines.slice(46, 55).map((line, index) => String(index + 47).padStart(3, '0') + ': ' + line).join('\n'));
           new Function(gate.MANDATORY_CHANNEL_GATE_SCRIPT);
           console.log('GATE_SYNTAX_OK');
 

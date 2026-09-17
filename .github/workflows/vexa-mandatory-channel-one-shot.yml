@@ -31,7 +31,7 @@ jobs:
           printf '%s\n' "$changed" | grep -qx 'src/telegram-section-access-admin.ts'
 
       - name: Install dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm install --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 
       - name: Verify TypeScript and runtime architecture
         run: npm run verify

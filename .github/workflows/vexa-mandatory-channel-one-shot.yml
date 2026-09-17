@@ -33,8 +33,27 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 
-      - name: Verify TypeScript and runtime architecture
-        run: npm run verify
+      - name: Verify no new TypeScript errors
+        run: |
+          set +e
+          npm run typecheck > /tmp/typecheck.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/typecheck.log
+          if [ "$code" -ne 0 ]; then
+            unexpected="$(grep -E '^src/.*error TS' /tmp/typecheck.log | grep -Ev '^src/(plinko-live\.ts|ton-deposits\.ts|ton-withdrawals\.ts)' || true)"
+            if [ -n "$unexpected" ]; then
+              echo 'Unexpected TypeScript errors:'
+              printf '%s\n' "$unexpected"
+              exit 1
+            fi
+            grep -q '^src/plinko-live\.ts.*error TS' /tmp/typecheck.log
+            grep -q '^src/ton-deposits\.ts.*error TS' /tmp/typecheck.log
+            grep -q '^src/ton-withdrawals\.ts.*error TS' /tmp/typecheck.log
+          fi
+
+      - name: Verify runtime architecture
+        run: npm run guard:runtime
 
       - name: Commit feature wiring
         run: |

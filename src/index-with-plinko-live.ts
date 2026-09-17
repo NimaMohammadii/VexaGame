@@ -725,8 +725,8 @@ export default {
         const body = await request.json().catch(() => ({})) as { initData?: unknown };
         const userId = await validateTelegramInitData(String(body.initData || ''), gameBotToken(runtimeEnv));
         return Response.json({ ok: true, ...(await getMandatoryChannelAccess(runtimeEnv, userId, 'app')) }, { headers: { 'cache-control': 'no-store' } });
-      } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : 'Could not verify channel membership' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+      } catch {
+        return Response.json({ ok: true, ...(await getMandatoryChannelAccess(runtimeEnv, null, 'app')) }, { headers: { 'cache-control': 'no-store' } });
       }
     }
     if (request.method === 'GET' && url.pathname === '/app/api/crash/live/ws') {

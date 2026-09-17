@@ -242,16 +242,13 @@ export const MANDATORY_CHANNEL_GATE_SCRIPT = `
   function clearRetry(){retryCount=0;if(retryTimer){clearTimeout(retryTimer);retryTimer=null}}
   function check(interactive){
     var initData=String(tg&&tg.initData||'').trim();
-    if(!initData){
-      if(document.documentElement.classList.contains('vexa-web')){clearRetry();unlock();return Promise.resolve(false)}
-      scheduleRetry();return Promise.resolve(false)
-    }
+    if(!initData)scheduleRetry();
     if(checking)return Promise.resolve(false);
     checking=true;lastCheckAt=Date.now();setChecking(true);
     return fetch('/app/api/mandatory-channel/status',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({initData:initData}),cache:'no-store'})
       .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j&&j.error||'Membership check failed');return j})})
       .then(function(data){
-        clearRetry();
+        if(data&&data.verificationError===true)scheduleRetry();else clearRetry();
         if(!data||data.required!==true||data.joined===true){unlock();return true}
         render(data);if(interactive){var c=copy[locale()]||copy.en;q('vexaMandatoryChannelStatus').textContent=c.notJoined}return false;
       })

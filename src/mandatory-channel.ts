@@ -147,17 +147,21 @@ export async function resolveMandatoryChannel(env: Env, input: string): Promise<
   };
 }
 
-export async function getMandatoryChannelAccess(env: Env, userId: string | number, surface?: MandatoryChannelSurface): Promise<MandatoryChannelAccess> {
+export async function getMandatoryChannelAccess(env: Env, userId: string | number | null | undefined, surface?: MandatoryChannelSurface): Promise<MandatoryChannelAccess> {
   const config = await getMandatoryChannelConfig(env);
   if (!config?.enabled) return { required: false, joined: true, verificationError: false, channel: null };
   if (surface && config.scope !== 'both' && config.scope !== surface) {
     return { required: false, joined: true, verificationError: false, channel: null };
   }
   const channel = { title: config.title, username: config.username, joinUrl: config.joinUrl };
+  const numericUserId = Number(userId);
+  if (!Number.isSafeInteger(numericUserId) || numericUserId <= 0) {
+    return { required: true, joined: false, verificationError: true, channel };
+  }
   try {
     const member = await telegramResult<TelegramMemberInfo>(env, 'getChatMember', {
       chat_id: telegramChatTarget(config.chatId),
-      user_id: Number(userId),
+      user_id: numericUserId,
     });
     return {
       required: true,

@@ -1,0 +1,103 @@
+name: Vexa mandatory gate diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vexa-mandatory-gate-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: |
+          npm install --no-package-lock --legacy-peer-deps
+          npm install --no-save --no-package-lock --legacy-peer-deps jsdom@24
+
+      - name: Compile gate module
+        run: |
+          rm -rf /tmp/gatebuild
+          npx tsc src/mandatory-channel.ts src/miniapp/mandatory-channel-gate.ts \
+            --target ES2022 \
+            --module commonjs \
+            --moduleResolution node \
+            --lib ES2022,DOM \
+            --types @cloudflare/workers-types \
+            --skipLibCheck \
+            --rootDir src \
+            --outDir /tmp/gatebuild
+
+      - name: Parse and execute generated gate script
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { JSDOM } = require('jsdom');
+          const gate = require('/tmp/gatebuild/miniapp/mandatory-channel-gate.js');
+          assert.equal(typeof gate.MANDATORY_CHANNEL_GATE_SCRIPT, 'string');
+          new Function(gate.MANDATORY_CHANNEL_GATE_SCRIPT);
+          console.log('GATE_SYNTAX_OK');
+
+          (async () => {
+            const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+              url: 'https://vexa.games/app',
+              runScripts: 'outside-only',
+              pretendToBeVisual: true,
+            });
+            dom.window.Telegram = {
+              WebApp: {
+                initData: 'query_id=test&user=%7B%22id%22%3A123%7D&auth_date=1&hash=test',
+                initDataUnsafe: { user: { id: 123, language_code: 'en' } },
+                openTelegramLink() {},
+              },
+            };
+            dom.window.fetch = async (url, init) => {
+              assert.equal(String(url), '/app/api/mandatory-channel/status');
+              assert.equal(String(init && init.method), 'POST');
+              return {
+                ok: true,
+                json: async () => ({
+                  ok: true,
+                  required: true,
+                  joined: false,
+                  verificationError: false,
+                  channel: { title: 'Vexa Test', username: 'VexaTest', joinUrl: 'https://t.me/VexaTest' },
+                }),
+              };
+            };
+            dom.window.eval(gate.MANDATORY_CHANNEL_GATE_SCRIPT);
+            dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+            await new Promise((resolve) => setTimeout(resolve, 80));
+
+            const panel = dom.window.document.getElementById('vexaMandatoryChannelPanel');
+            assert.ok(panel, 'membership panel was not created');
+            assert.ok(dom.window.document.body.classList.contains('vexa-mandatory-channel-locked'), 'membership lock class was not applied');
+            assert.equal(dom.window.document.getElementById('vexaMandatoryChannelName').textContent, 'Vexa Test');
+            assert.equal(dom.window.document.getElementById('vexaMandatoryChannelTitle').textContent, 'Join our channel');
+            console.log('GATE_DOM_OK');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Build actual Worker bundle
+        run: |
+          rm -rf /tmp/vexa-worker
+          npx wrangler deploy --dry-run --outdir /tmp/vexa-worker
+          grep -R -q 'vexaMandatoryChannelPanel' /tmp/vexa-worker
+          grep -R -q '/app/api/mandatory-channel/status' /tmp/vexa-worker
+          grep -R -q 'vexa-mandatory-channel-locked' /tmp/vexa-worker
+          echo BUNDLE_GATE_OK

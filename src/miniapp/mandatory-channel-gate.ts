@@ -182,7 +182,7 @@ export const MANDATORY_CHANNEL_GATE_SCRIPT = `
 (function(){
   var tg=window.Telegram&&window.Telegram.WebApp;
   var copy=${COPY_JSON};
-  var checking=false,current=null,lastCheckAt=0;
+  var checking=false,current=null,lastCheckAt=0,retryTimer=null,retryCount=0;
   function q(id){return document.getElementById(id)}
   function locale(){
     var raw=String(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code||'').trim().replace(/_/g,'-').toLowerCase();
@@ -233,17 +233,30 @@ export const MANDATORY_CHANNEL_GATE_SCRIPT = `
     var button=q('vexaMandatoryChannelCheck');if(!button)return;
     var c=copy[locale()]||copy.en;button.disabled=!!active;button.textContent=active?c.checking:c.check;
   }
+  function scheduleRetry(){
+    if(retryTimer)return;
+    retryCount=Math.min(retryCount+1,6);
+    var delay=Math.min(3200,300*Math.pow(1.65,retryCount-1));
+    retryTimer=setTimeout(function(){retryTimer=null;check(false)},delay);
+  }
+  function clearRetry(){retryCount=0;if(retryTimer){clearTimeout(retryTimer);retryTimer=null}}
   function check(interactive){
-    var initData=String(tg&&tg.initData||'').trim();if(!initData){unlock();return Promise.resolve(false)}
+    var initData=String(tg&&tg.initData||'').trim();
+    if(!initData){
+      if(document.documentElement.classList.contains('vexa-web')){clearRetry();unlock();return Promise.resolve(false)}
+      scheduleRetry();return Promise.resolve(false)
+    }
     if(checking)return Promise.resolve(false);
     checking=true;lastCheckAt=Date.now();setChecking(true);
     return fetch('/app/api/mandatory-channel/status',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({initData:initData}),cache:'no-store'})
       .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j&&j.error||'Membership check failed');return j})})
       .then(function(data){
+        clearRetry();
         if(!data||data.required!==true||data.joined===true){unlock();return true}
         render(data);if(interactive){var c=copy[locale()]||copy.en;q('vexaMandatoryChannelStatus').textContent=c.notJoined}return false;
       })
       .catch(function(){
+        scheduleRetry();
         if(current){render(current);var c=copy[locale()]||copy.en;q('vexaMandatoryChannelStatus').textContent=c.notJoined}
         return false;
       })

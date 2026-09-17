@@ -3,8 +3,12 @@ import type { VexaLocale } from './miniapp/i18n';
 
 const MANDATORY_CHANNEL_KEY = 'admin:mandatory-channel:v1';
 
+export type MandatoryChannelSurface = 'app' | 'bot';
+export type MandatoryChannelScope = MandatoryChannelSurface | 'both';
+
 export type MandatoryChannelConfig = {
   enabled: boolean;
+  scope: MandatoryChannelScope;
   chatId: string;
   title: string;
   username: string | null;
@@ -77,8 +81,10 @@ export async function getMandatoryChannelConfig(env: Env): Promise<MandatoryChan
     const chatId = String(parsed.chatId || '').trim();
     const joinUrl = String(parsed.joinUrl || '').trim();
     if (!chatId || !joinUrl) return null;
+    const scope: MandatoryChannelScope = parsed.scope === 'app' || parsed.scope === 'bot' || parsed.scope === 'both' ? parsed.scope : 'both';
     return {
       enabled: parsed.enabled === true,
+      scope,
       chatId,
       title: String(parsed.title || 'Vexa').trim() || 'Vexa',
       username: parsed.username ? String(parsed.username).replace(/^@/, '').trim() || null : null,
@@ -102,7 +108,16 @@ export async function setMandatoryChannelEnabled(env: Env, enabled: boolean): Pr
   return next;
 }
 
+export async function setMandatoryChannelScope(env: Env, scope: MandatoryChannelScope): Promise<MandatoryChannelConfig> {
+  const current = await getMandatoryChannelConfig(env);
+  if (!current) throw new Error('ابتدا کانال را تنظیم کنید.');
+  const next = { ...current, scope, updatedAt: new Date().toISOString() };
+  await saveMandatoryChannelConfig(env, next);
+  return next;
+}
+
 export async function resolveMandatoryChannel(env: Env, input: string): Promise<MandatoryChannelConfig> {
+  const current = await getMandatoryChannelConfig(env);
   const target = normalizeChannelInput(input);
   const chat = await telegramResult<TelegramChatInfo>(env, 'getChat', { chat_id: target });
   if (String(chat.type || '') !== 'channel') throw new Error('آیدی باید مربوط به یک Channel تلگرام باشد.');
@@ -123,6 +138,7 @@ export async function resolveMandatoryChannel(env: Env, input: string): Promise<
 
   return {
     enabled: true,
+    scope: current?.scope ?? 'both',
     chatId,
     title: String(chat.title || username || 'Vexa Channel').trim(),
     username,
@@ -131,9 +147,12 @@ export async function resolveMandatoryChannel(env: Env, input: string): Promise<
   };
 }
 
-export async function getMandatoryChannelAccess(env: Env, userId: string | number): Promise<MandatoryChannelAccess> {
+export async function getMandatoryChannelAccess(env: Env, userId: string | number, surface?: MandatoryChannelSurface): Promise<MandatoryChannelAccess> {
   const config = await getMandatoryChannelConfig(env);
   if (!config?.enabled) return { required: false, joined: true, verificationError: false, channel: null };
+  if (surface && config.scope !== 'both' && config.scope !== surface) {
+    return { required: false, joined: true, verificationError: false, channel: null };
+  }
   const channel = { title: config.title, username: config.username, joinUrl: config.joinUrl };
   try {
     const member = await telegramResult<TelegramMemberInfo>(env, 'getChatMember', {

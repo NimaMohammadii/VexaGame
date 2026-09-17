@@ -391,7 +391,7 @@ async function handleMandatoryChannelCallback(env: Env, token: string, q: NonNul
   if (String(q.data || '') !== 'vexa:mandatory:check') return false;
   const chatId = q.message?.chat.id ?? q.from.id;
   const languageCode = telegramLanguageCode(q.from);
-  const access = await getMandatoryChannelAccess(env, q.from.id);
+  const access = await getMandatoryChannelAccess(env, q.from.id, 'bot');
   const locale = localeForTelegramLanguage(languageCode);
   const copy = MANDATORY_CHANNEL_TEXT[locale] ?? MANDATORY_CHANNEL_TEXT[DEFAULT_VEXA_LOCALE];
   if (!access.required || access.joined) {
@@ -405,7 +405,7 @@ async function handleMandatoryChannelCallback(env: Env, token: string, q: NonNul
 }
 
 async function enforceMandatoryChannelBotGate(env: Env, token: string, chatId: number, userId: number, existingMessageId?: number | null, languageCode?: string): Promise<boolean> {
-  const access = await getMandatoryChannelAccess(env, userId);
+  const access = await getMandatoryChannelAccess(env, userId, 'bot');
   if (!access.required || access.joined) return false;
   await sendMandatoryChannelPrompt(env, token, chatId, access, existingMessageId, languageCode);
   return true;

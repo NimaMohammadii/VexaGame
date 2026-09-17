@@ -1,5 +1,5 @@
 import type { Env } from './types';
-import { getMandatoryChannelConfig, resolveMandatoryChannel, saveMandatoryChannelConfig, setMandatoryChannelEnabled } from './mandatory-channel';
+import { getMandatoryChannelConfig, resolveMandatoryChannel, saveMandatoryChannelConfig, setMandatoryChannelEnabled, setMandatoryChannelScope } from './mandatory-channel';
 import { upsertTelegramTextMenu } from './telegram-menu-state';
 
 type Message = { message_id: number; text?: string; chat: { id: number }; from?: { id: number } };
@@ -25,7 +25,10 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
     && data !== 'botadmin:mandatorychannel:refresh'
     && data !== 'botadmin:mandatorychannel:set'
     && data !== 'botadmin:mandatorychannel:on'
-    && data !== 'botadmin:mandatorychannel:off') return null;
+    && data !== 'botadmin:mandatorychannel:off'
+    && data !== 'botadmin:mandatorychannel:scope:app'
+    && data !== 'botadmin:mandatorychannel:scope:bot'
+    && data !== 'botadmin:mandatorychannel:scope:both') return null;
   if (!isAdmin(env, callback.from.id)) return ok();
 
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
@@ -55,6 +58,9 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
   try {
     if (data === 'botadmin:mandatorychannel:on') await setMandatoryChannelEnabled(env, true);
     if (data === 'botadmin:mandatorychannel:off') await setMandatoryChannelEnabled(env, false);
+    if (data === 'botadmin:mandatorychannel:scope:app') await setMandatoryChannelScope(env, 'app');
+    if (data === 'botadmin:mandatorychannel:scope:bot') await setMandatoryChannelScope(env, 'bot');
+    if (data === 'botadmin:mandatorychannel:scope:both') await setMandatoryChannelScope(env, 'both');
     await sendMenu(env, token, chatId, messageId);
   } catch (error) {
     await sendMenu(env, token, chatId, messageId, `❌ ${error instanceof Error ? error.message : 'ذخیره تنظیمات ناموفق بود.'}`);
@@ -101,9 +107,12 @@ async function promptAgain(env: Env, token: string, chatId: number, notice: stri
 async function sendMenu(env: Env, token: string, chatId: number, messageId?: number, notice = ''): Promise<void> {
   const config = await getMandatoryChannelConfig(env);
   const enabled = config?.enabled === true;
+  const scope = config?.scope ?? 'both';
+  const scopeLabel = scope === 'app' ? 'فقط Mini App' : scope === 'bot' ? 'فقط منوی ربات' : 'Mini App و ربات';
   const lines = config
     ? [
       `وضعیت: ${enabled ? '🟢 فعال' : '⚪️ غیرفعال'}`,
+      `اعمال روی: ${scopeLabel}`,
       `کانال: ${config.title}`,
       `آیدی: ${config.username ? '@' + config.username : config.chatId}`,
     ]
@@ -111,7 +120,14 @@ async function sendMenu(env: Env, token: string, chatId: number, messageId?: num
   const rows: Button[][] = [
     [{ text: config ? '✏️ تغییر کانال' : '➕ تنظیم کانال', callback_data: 'botadmin:mandatorychannel:set' }],
   ];
-  if (config) rows.push([{ text: enabled ? '⏸ غیرفعال کردن' : '▶️ فعال کردن', callback_data: enabled ? 'botadmin:mandatorychannel:off' : 'botadmin:mandatorychannel:on' }]);
+  if (config) {
+    rows.push([
+      { text: `${scope === 'app' ? '✓ ' : ''}📱 فقط App`, callback_data: 'botadmin:mandatorychannel:scope:app' },
+      { text: `${scope === 'bot' ? '✓ ' : ''}🤖 فقط ربات`, callback_data: 'botadmin:mandatorychannel:scope:bot' },
+    ]);
+    rows.push([{ text: `${scope === 'both' ? '✓ ' : ''}🔗 هر دو`, callback_data: 'botadmin:mandatorychannel:scope:both' }]);
+    rows.push([{ text: enabled ? '⏸ غیرفعال کردن' : '▶️ فعال کردن', callback_data: enabled ? 'botadmin:mandatorychannel:off' : 'botadmin:mandatorychannel:on' }]);
+  }
   rows.push([
     { text: '🔄 بروزرسانی', callback_data: 'botadmin:mandatorychannel:refresh' },
     { text: '⬅️ منوی اصلی', callback_data: 'botadmin:home' },

@@ -1,0 +1,43 @@
+name: Vexa wallet withdraw GRAM icon one-shot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vexa-wallet-withdraw-gram-icon-one-shot.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-wallet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Reuse visible GRAM balance icon in Withdraw
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/miniapp/wallet.ts')
+          s=p.read_text()
+          old="anchor.insertAdjacentElement('afterend',grid)}}"
+          new="anchor.insertAdjacentElement('afterend',grid);var gramIcon=grid.querySelector('.withdraw-method-icon.gram img');var balanceGramIcon=document.querySelector('.ton-mini-icon img');if(gramIcon&&balanceGramIcon){var gramSrc=balanceGramIcon.getAttribute('src')||balanceGramIcon.currentSrc||balanceGramIcon.src||'';if(gramSrc)gramIcon.setAttribute('src',gramSrc)}}}"
+          if s.count(old)!=1:
+              raise SystemExit(f'expected exactly one target, found {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = "src/miniapp/wallet.ts"
+      - name: Commit wallet change
+        shell: bash
+        run: |
+          git config user.name 'NimaMohammadii'
+          git config user.email 'nima.mohammadi084@gmail.com'
+          git add src/miniapp/wallet.ts
+          git commit -m 'Reuse balance GRAM icon in withdraw'
+          git push origin main

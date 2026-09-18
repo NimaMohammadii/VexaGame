@@ -32,6 +32,6 @@ export const TON_BALANCE_SCRIPT = `
   window.addEventListener('vexa-credit-game-change',function(ev){if(!ev||!ev.detail)return;var balance=Number(ev.detail.tonBalanceNano);if(Number.isFinite(balance)&&balance>=0)write(balance,0,true)});
   window.addEventListener('vexa-ton-balance-sync',function(ev){if(!ev||!ev.detail)return;var balance=Number(ev.detail.tonBalanceNano);if(Number.isFinite(balance))render(balance)});
   document.addEventListener('visibilitychange',function(){if(!document.hidden)render(read())});
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){render(read())});else render(read());
+  render(read());
 })();
 `;

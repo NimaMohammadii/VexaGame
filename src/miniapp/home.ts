@@ -460,20 +460,12 @@ const HOME_MARKUP_SCRIPT = `
     return String((all[locale]&&all[locale][key])||(all.en&&all.en[key])||'');
   }
   window.VexaLotteryText=lotteryText;
-  function reelY(index){return 'translate3d(0,-'+((index*34)+17)+'px,0)'}
-  function reelDigitsHtml(){var html='';for(var cycle=0;cycle<4;cycle++)for(var n=0;n<10;n++)html+='<span class="home-slot-number-digit">'+n+'</span>';return html}
-  function slotsHtml(){var html='';for(var i=0;i<5;i++){var v=0;html+='<div class="home-slot-number-reel" data-slot-index="'+i+'" data-slot-value="'+v+'"><div class="home-slot-number-strip" data-slot-strip style="transform:'+reelY(20+v)+'">'+reelDigitsHtml()+'</div></div>'}return '<div class="home-slot-number-grid" aria-hidden="true">'+html+'</div>'}
   function placeSection(home,sec){var promo=q('#homePromoCarousel',home),anchor=promo?promo.nextSibling:home.firstChild;if(anchor!==sec)home.insertBefore(sec,anchor)}
   function ensureDrawerPortal(sec){['homeTicketDrawerBackdrop','homeTicketDrawer'].forEach(function(id){var el=q('#'+id,sec);if(el&&el.parentNode!==document.body)document.body.appendChild(el)})}
   function setDrawer(open,sec){ensureDrawerPortal(sec);var drawer=q('#homeTicketDrawer'),backdrop=q('#homeTicketDrawerBackdrop');if(drawer)drawer.classList.toggle('is-open',!!open);if(backdrop)backdrop.classList.toggle('is-open',!!open)}
   function build(){
     var home=q('#home');if(!home)return null;
-    var sec=q('#homeLuckyCodeSection',home);
-    if(!sec){
-      sec=document.createElement('section');
-      sec.id='homeLuckyCodeSection';
-      sec.innerHTML='<div class="home-ticket-drawer-backdrop" id="homeTicketDrawerBackdrop"></div><div class="home-ticket-drawer" id="homeTicketDrawer"><div class="home-ticket-drawer-head"><strong>My Tickets</strong><button type="button" class="home-ticket-drawer-close" id="homeTicketDrawerClose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div><div class="home-ticket-drawer-count"><strong data-ticket-count>0 tickets</strong><span class="home-ticket-win-chance-text"><span data-win-chance-label>Your chance to win</span><b data-win-chance>0%</b></span></div><div class="home-ticket-list" id="homeTicketList"></div></div><div class="home-lucky-card"><div class="home-lucky-head" aria-hidden="true"></div><section class="home-lottery-slot-card" aria-label="Lottery slot image"><img class="home-lottery-slot-image" src="/app/api/home-lottery-slot.png?v=home-lottery" alt="" decoding="async" loading="eager"/>'+slotsHtml()+'</section><div class="home-ticket-layout"><div class="home-ticket-card"><div class="home-ticket-count" data-ticket-count>1 ticket</div><div class="home-ticket-stepper"><button class="home-ticket-step" type="button" data-ticket-minus>-</button><button class="home-ticket-step" type="button" data-ticket-plus>+</button></div><button class="home-ticket-button" id="homeTicketButton" type="button">Get Ticket</button></div><div class="home-ticket-finance-visual" aria-hidden="true"></div></div></div>';
-    }
+    var sec=q('#homeLuckyCodeSection',home);if(!sec)return null;
     placeSection(home,sec);
     ensureDrawerPortal(sec);
     return sec;
@@ -498,18 +490,17 @@ const HOME_SLOT_SCRIPT = `
   function digits(){var h='';for(var c=0;c<40;c++)for(var n=0;n<10;n++)h+='<span class="home-slot-number-digit">'+n+'</span>';return h}
   function indexFor(v,loop){return loop*10+Math.max(0,Math.min(9,Math.floor(Number(v)||0)))}
   function enableHomeScroll(){var h=q('#home');document.body.classList.remove('home-scroll-locked');if(h){h.style.removeProperty('overflow-y');h.style.removeProperty('touch-action');h.scrollLeft=0}}
-  function drawInfoHtml(){return '<div class="home-draw-info-card" id="homeDrawInfoCard"><div class="home-draw-main"><div class="home-draw-copy"><span class="home-draw-label">Next Draw in</span><strong class="home-draw-time" data-draw-time>00:00:00</strong></div><span class="home-draw-divider" aria-hidden="true"></span><div class="home-prize-copy"><span class="home-prize-label">Prize Pool</span><strong class="home-prize-value"><span data-prize-pool>0.00</span><span class="home-prize-icon ton-mini-icon"><img data-prize-pool-icon alt="" aria-hidden="true" style="display:none"></span></strong></div></div><div class="home-draw-actions" id="homeDrawActions"><button class="home-ticket-image-button" id="homeTicketImageButton" type="button">My Tickets</button><button class="home-bonus-button" id="homeBonusButton" type="button" aria-label="Lottery"><svg class="home-bonus-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1" stroke="currentColor" stroke-width="1.65"/><path d="M12 8v13" stroke="currentColor" stroke-width="1.65"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" stroke="currentColor" stroke-width="1.65"/><g class="home-bonus-bow"><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.65"/></g></svg></button></div></div>'}
   function ensureBonusPanel(){
     if(q('#homeBonusPanel'))return;
     var wrap=document.createElement('div');
     wrap.innerHTML='<div class="home-bonus-backdrop" id="homeBonusBackdrop"></div><section class="home-bonus-panel" id="homeBonusPanel" role="dialog" aria-modal="true" aria-label="Lottery"><div class="home-bonus-grab" aria-hidden="true"></div><header class="home-bonus-head"><div class="home-bonus-title"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9h12v10H6zM4 6h16v3H4zM12 6v13M11.8 5.9C9 5.7 7.2 4.4 7.2 2.9c0-1.1.9-1.8 1.9-1.6 1.5.3 2.4 1.9 2.7 4.6ZM12.2 5.9c2.8-.2 4.6-1.5 4.6-3 0-1.1-.9-1.8-1.9-1.6-1.5.3-2.4 1.9-2.7 4.6Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><strong data-lottery-title></strong></div><button class="home-bonus-close" id="homeBonusClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:18px;height:18px;display:block"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></header><div class="home-bonus-next"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M8 3v4m8-4v4M4 10h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><div><span data-lottery-draw-label></span><b data-lottery-draw-at>—</b></div></div><div class="home-bonus-guide"><div class="home-bonus-guide-row"><div class="home-bonus-guide-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="home-bonus-guide-copy"><b data-lottery-how-title></b><span data-lottery-ticket-note></span></div></div><div class="home-bonus-guide-row"><div class="home-bonus-guide-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 14.5 8l5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8L12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></div><div class="home-bonus-guide-copy"><b data-lottery-prize-title></b><span data-lottery-prize-note></span></div></div></div><div class="home-bonus-list" aria-live="polite"></div></section>';
     while(wrap.firstChild)document.body.appendChild(wrap.firstChild);
+    try{window.dispatchEvent(new CustomEvent('vexa:lottery-bonus-ready'))}catch(e){}
   }
   function setBonusPanel(open){ensureBonusPanel();var d=q('#homeBonusPanel'),b=q('#homeBonusBackdrop');if(d)d.classList.toggle('is-open',!!open);if(b)b.classList.toggle('is-open',!!open)}
   function tapAction(el){if(!el)return;el.classList.remove('home-action-pop');void el.offsetWidth;el.classList.add('home-action-pop');setTimeout(function(){try{el.classList.remove('home-action-pop')}catch(e){}},440)}
-  function ensureDrawInfoCard(){var slot=q('#home .home-lottery-slot-card');if(!slot)return;var card=q('#homeDrawInfoCard');if(!card)slot.insertAdjacentHTML('beforebegin',drawInfoHtml());ensureBonusPanel()}
   function prepare(){
-    enableHomeScroll();ensureDrawInfoCard();
+    enableHomeScroll();
     qa('#home .home-slot-number-reel').forEach(function(reel){
       var strip=q('[data-slot-strip]',reel);if(!strip)return;
       var v=Math.max(0,Math.min(9,Math.floor(Number(reel.getAttribute('data-slot-value')||'0'))));
@@ -843,7 +834,7 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
   function startClock(){if(clockTimer||document.hidden||!q('#home.active'))return;var tick=function(){clockTimer=0;updateCountdown();if(document.hidden||!q('#home.active'))return;var next=1000-(Math.floor(liveServerNow())%1000)+16;clockTimer=setTimeout(tick,Math.max(120,next))};tick()}
   function refreshWhenVisible(){if(!document.hidden&&q('#home.active')&&!busy){startClock();load(false)}else stopClock()}
   function handleResize(){syncWinnerHeight();updateWinnerFade(ensureWinnersSurface())}
-  function init(){lotteryCopy();document.addEventListener('click',handleTicketControls,true);document.addEventListener('click',handleSmartRefresh,true);window.addEventListener('vexa:live-activity',handleLivePrizePool);window.addEventListener('resize',handleResize,{passive:true});var cached=readCachedHomeState();if(cached){state=cached.state;stateFromCache=true;render();markHomeHydrated('cached')}load(true);startClock();window.VexaLotteryRefresh=function(){return load(true)}}
+  function init(){lotteryCopy();document.addEventListener('click',handleTicketControls,true);document.addEventListener('click',handleSmartRefresh,true);window.addEventListener('vexa:live-activity',handleLivePrizePool);window.addEventListener('vexa:lottery-bonus-ready',renderPrizePanel);window.addEventListener('resize',handleResize,{passive:true});var cached=readCachedHomeState();if(cached){state=cached.state;stateFromCache=true;render();markHomeHydrated('cached')}load(true);startClock();window.VexaLotteryRefresh=function(){return load(true)}}
   window.addEventListener('focus',guardOfficialSpinFocus,true);
   init();
   window.addEventListener('focus',refreshWhenVisible);

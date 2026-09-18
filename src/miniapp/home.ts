@@ -441,7 +441,13 @@ const HOME_SLOT_STYLES = [
 export const HOME_STYLES = HOME_BASE_STYLES + HOME_MARKUP_STYLES + HOME_SLOT_STYLES;
 
 // Home owns its markup, styles, asset synchronization, and client behavior.
-export const HOME_SECTION = `<section id="home" class="view active"><section id="homePromoCarousel" class="home-promo-carousel" aria-label="Featured"></section></section>`;
+const HOME_INITIAL_REEL_DIGITS = Array.from({ length: 40 }, (_, index) => `<span class="home-slot-number-digit">${index % 10}</span>`).join('');
+const HOME_INITIAL_SLOT_REELS = Array.from({ length: 5 }, (_, index) => `<div class="home-slot-number-reel" data-slot-index="${index}" data-slot-value="0"><div class="home-slot-number-strip" data-slot-strip style="transform:translate3d(0,-820px,0)">${HOME_INITIAL_REEL_DIGITS}</div></div>`).join('');
+const HOME_INITIAL_DRAW_INFO = `<div class="home-draw-info-card" id="homeDrawInfoCard"><div class="home-draw-main"><div class="home-draw-copy"><span class="home-draw-label">Next Draw in</span><strong class="home-draw-time" data-draw-time>00:00:00</strong></div><span class="home-draw-divider" aria-hidden="true"></span><div class="home-prize-copy"><span class="home-prize-label">Prize Pool</span><strong class="home-prize-value"><span data-prize-pool>0.00</span><span class="home-prize-icon ton-mini-icon"><img data-prize-pool-icon alt="" aria-hidden="true" style="display:none"></span></strong></div></div><div class="home-draw-actions" id="homeDrawActions"><button class="home-ticket-image-button" id="homeTicketImageButton" type="button">My Tickets</button><button class="home-bonus-button" id="homeBonusButton" type="button" aria-label="Lottery"><svg class="home-bonus-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1" stroke="currentColor" stroke-width="1.65"/><path d="M12 8v13" stroke="currentColor" stroke-width="1.65"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" stroke="currentColor" stroke-width="1.65"/><g class="home-bonus-bow"><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.65"/></g></svg></button></div></div>`;
+const HOME_INITIAL_WINNERS = `<section class="home-lottery-winners" aria-label="Lottery results"><div class="home-lottery-winners-title"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" stroke="currentColor" stroke-width="1.8"/><path d="M8 6H5v1a4 4 0 0 0 4 4M16 6h3v1a4 4 0 0 1-4 4M12 13v4M8.5 20h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-lottery-winners-title>Previous Winners</span></div><div class="home-lottery-winners-list"></div></section>`;
+const HOME_INITIAL_LUCKY_CODE = `<section id="homeLuckyCodeSection"><div class="home-ticket-drawer-backdrop" id="homeTicketDrawerBackdrop"></div><div class="home-ticket-drawer" id="homeTicketDrawer"><div class="home-ticket-drawer-head"><strong>My Tickets</strong><button type="button" class="home-ticket-drawer-close" id="homeTicketDrawerClose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div><div class="home-ticket-drawer-count"><strong data-ticket-count>0 tickets</strong><span class="home-ticket-win-chance-text"><span data-win-chance-label>Your chance to win</span><b data-win-chance>0%</b></span></div><div class="home-ticket-list" id="homeTicketList"></div></div><div class="home-lucky-card"><div class="home-lucky-head" aria-hidden="true"></div>${HOME_INITIAL_DRAW_INFO}<section class="home-lottery-slot-card" aria-label="Lottery slot image"><img class="home-lottery-slot-image" src="/app/api/home-lottery-slot.png?v=home-lottery" alt="" decoding="async" loading="eager"/><div class="home-slot-number-grid" aria-hidden="true">${HOME_INITIAL_SLOT_REELS}</div></section><div class="home-ticket-layout"><div class="home-ticket-card"><div class="home-ticket-count" data-ticket-count>1 ticket</div><div class="home-ticket-stepper"><button class="home-ticket-step" type="button" data-ticket-minus>-</button><button class="home-ticket-step" type="button" data-ticket-plus>+</button></div><button class="home-ticket-button" id="homeTicketButton" type="button">Get Ticket</button></div><div class="home-ticket-finance-visual">${HOME_INITIAL_WINNERS}</div></div></div></section>`;
+
+export const HOME_SECTION = `<section id="home" class="view active"><section id="homePromoCarousel" class="home-promo-carousel" aria-label="Featured"></section>${HOME_INITIAL_LUCKY_CODE}</section>`;
 
 const HOME_MARKUP_SCRIPT = `
 (function(){
@@ -479,7 +485,7 @@ const HOME_MARKUP_SCRIPT = `
     document.addEventListener('click',function(e){var t=e.target;if(t&&t.id==='homeTicketDrawerClose'){e.preventDefault();setDrawer(false,sec);return}if(t&&t.id==='homeTicketDrawerBackdrop'){e.preventDefault();setDrawer(false,sec)}},true);
   }
   function init(){var sec=build();if(sec)bind(sec)}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+  init();
 })();
 `;
 
@@ -557,7 +563,7 @@ const HOME_SLOT_SCRIPT = `
     if(close){e.preventDefault();setBonusPanel(false);return}
     if(t&&t.id==='homeBonusBackdrop'){e.preventDefault();setBonusPanel(false)}
   },true);
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',prepare,{once:true});else prepare();
+  prepare();
   window.addEventListener('focus',prepare);
 })();
 `;
@@ -676,7 +682,7 @@ const HOME_ASSET_SCRIPT = `
     return Promise.all([loadTonLogo(false),loadHomePromos(false),loadHomeBackground()]).then(function(){return true},function(){return false});
   }
   function apply(){homeVisualAssetsReady()}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply,{once:true});else apply();
+  apply();
   document.addEventListener('visibilitychange',function(){if(document.hidden){clearPromoTimer();clearPromoLoopTimer()}else schedulePromo()});
   window.addEventListener('resize',function(){(window.requestAnimationFrame||function(cb){return setTimeout(cb,0)})(function(){setPromoTransform(false)})},{passive:true});
   window.VexaRefreshHomeLotteryChrome=apply;window.VexaRefreshTonLogo=function(){return loadTonLogo(true)};window.VexaHomeVisualAssetsReady=homeVisualAssetsReady;
@@ -800,7 +806,7 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
   function handleResize(){syncWinnerHeight();updateWinnerFade(ensureWinnersSurface())}
   function init(){lotteryCopy();document.addEventListener('click',handleTicketControls,true);document.addEventListener('click',handleSmartRefresh,true);window.addEventListener('vexa:live-activity',handleLivePrizePool);window.addEventListener('resize',handleResize,{passive:true});load(true);startClock();window.VexaLotteryRefresh=function(){return load(true)}}
   window.addEventListener('focus',guardOfficialSpinFocus,true);
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+  init();
   window.addEventListener('focus',refreshWhenVisible);
   window.addEventListener('vexa-country-detected',lotteryCopy);
   document.addEventListener('visibilitychange',refreshWhenVisible);

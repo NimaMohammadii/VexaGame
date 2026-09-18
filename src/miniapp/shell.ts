@@ -199,6 +199,8 @@ export function miniAppShellHtml(): string {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+  <link rel="preload" as="image" href="/assets/Home.PNG?v=1" fetchpriority="high"/>
+  <link rel="preload" as="image" href="/app/api/home-lottery-slot.png?v=home-lottery" fetchpriority="high"/>
   <script>
     (function(){
       var launch=String(location.search||'')+'&'+String(location.hash||'');

@@ -2,9 +2,10 @@ import { miniAppShellHtml } from './miniapp/shell';
 
 const DEFAULT_HOME_SLOT_IMAGE = '/app/api/home-lottery-slot.png';
 const DEFAULT_PAYMENT_METHOD_IMAGES = {
-  stars: '/app/api/deposit-method-icon/stars.png',
-  gram: '/app/api/credit-icon.png',
-  nft: '/app/api/deposit-method-icon/nft.png',
+  stars: '/app/api/uploaded-image/payment-method/stars.png',
+  gram: '/app/api/uploaded-image/payment-method/gram.png',
+  usdt: '/app/api/uploaded-image/payment-method/usdt.png',
+  nft: '/app/api/uploaded-image/payment-method/nft.png',
 } as const;
 
 type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
@@ -16,7 +17,7 @@ function safeSingleQuotedJs(value: string): string {
 export function miniAppHtml(homeSlotImageUrl = DEFAULT_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
   const starsUrl = paymentMethodImageUrls.stars || DEFAULT_PAYMENT_METHOD_IMAGES.stars;
   const gramUrl = paymentMethodImageUrls.gram || DEFAULT_PAYMENT_METHOD_IMAGES.gram;
-  const usdtUrl = paymentMethodImageUrls.usdt || '';
+  const usdtUrl = paymentMethodImageUrls.usdt || DEFAULT_PAYMENT_METHOD_IMAGES.usdt;
   const nftUrl = paymentMethodImageUrls.nft || DEFAULT_PAYMENT_METHOD_IMAGES.nft;
   const walletSource = "var src=type==='ton'?'/app/api/credit-icon.png':('/app/api/deposit-method-icon/'+(type==='nft'?'nft':'stars')+'.png');";
   const walletResolvedSource = `var src=type==='ton'?'${safeSingleQuotedJs(gramUrl)}':(type==='nft'?'${safeSingleQuotedJs(nftUrl)}':'${safeSingleQuotedJs(starsUrl)}');`;
@@ -37,7 +38,7 @@ export function miniAppHtml(homeSlotImageUrl = DEFAULT_HOME_SLOT_IMAGE, paymentM
   if (usdtUrl) {
     shell = shell.replace(
       /<svg class="usdt-method-icon" viewBox="0 0 48 48"[\s\S]*?<\/svg>/,
-      `<img src="${usdtUrl}" alt="" decoding="async" loading="eager">`,
+      (fallbackSvg) => `<span style="position:relative;width:44px;height:44px;display:block">${fallbackSvg}<img src="${usdtUrl}" alt="" decoding="async" loading="eager" style="position:absolute;inset:0;width:44px;height:44px;object-fit:contain" onload="if(this.previousElementSibling)this.previousElementSibling.style.display='none'" onerror="this.remove()"></span>`,
     );
   }
 

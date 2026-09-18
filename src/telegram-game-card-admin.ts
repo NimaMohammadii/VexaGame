@@ -144,7 +144,18 @@ async function servePaymentMethodImage(request: Request, env: Env, raw: string):
   const method = normalizePaymentMethod(raw.replace(/\.png$/i, ''));
   if (!method) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   const head = await env.ASSETS.head(paymentMethodKey(method)).catch(() => null);
-  if (!head) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  if (!head) {
+    if (method === 'gram') {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: new URL('/app/api/credit-icon.png', request.url).toString(),
+          'cache-control': 'no-store',
+        },
+      });
+    }
+    return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
   const url = new URL(request.url);
   if (!url.searchParams.get('v')) {
     const version = String(head.customMetadata?.version || head.uploaded?.getTime?.() || '1');

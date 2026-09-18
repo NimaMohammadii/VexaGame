@@ -48,6 +48,7 @@ import { COUNTRY_TO_VEXA_LOCALE, LOTTERY_HOME_TEXT } from './i18n';
 
 const TON_LOGO_PNG = 'data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2064%2064%27%3E%3Ccircle%20cx=%2732%27%20cy=%2732%27%20r=%2732%27%20fill=%27%230096ff%27/%3E%3Cpath%20d=%27M16%2018h32L32%2048%2016%2018z%27%20fill=%27white%27/%3E%3Cpath%20d=%27M22%2022h20L32%2042%2022%2022z%27%20fill=%27%230096ff%27%20opacity=%27.18%27/%3E%3C/svg%3E';
 const GAME_BOT_PROFILE_IMAGE = 'https://t.me/i/userpic/320/' + 'VexaAppBOT' + '.jpg';
+const HEADER_LOGO_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
 
 const STYLES = [
   MINIAPP_STYLES,
@@ -218,7 +219,7 @@ export function miniAppShellHtml(): string {
     html.vexa-web body:has(#home.active){background:#000!important}
     html.vexa-web body:has(#home.active)::before{inset:0!important;width:auto!important;height:auto!important;background-color:transparent!important}
     #rankPill:empty,#userLine:empty{display:none!important}
-    .brand .logo[src="${GAME_BOT_PROFILE_IMAGE}"]{visibility:hidden!important}
+    .brand .logo[src="${HEADER_LOGO_PLACEHOLDER}"]{visibility:hidden!important}
     .top-balance-pill:has(#topTonBalance:empty){visibility:hidden!important}
     .predict-online-badge{display:none;align-items:center;justify-content:center;gap:5px;height:22px;padding:0;background:transparent;border:0;box-shadow:none;color:rgba(255,255,255,.82);font-family:"SF Pro Rounded","SF Pro Text","Inter Variable",Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1;white-space:nowrap;pointer-events:none;transform:translateY(1px)}
     body:has(#predictzone.active) .predict-online-badge{display:inline-flex}
@@ -234,7 +235,7 @@ export function miniAppShellHtml(): string {
   <main class="app">
     <header class="top">
       <div class="brand">
-        <img class="logo" src="${GAME_BOT_PROFILE_IMAGE}" alt="Vexa App"/>
+        <img class="logo" src="${HEADER_LOGO_PLACEHOLDER}" data-default-src="${GAME_BOT_PROFILE_IMAGE}" alt="Vexa App"/>
         <div>
           <div style="display:flex;align-items:center;gap:9px;min-width:0">
             <h1 id="brandTitle">Lucky Zone</h1>

@@ -218,7 +218,7 @@ export function miniAppShellHtml(): string {
     html.vexa-web body:has(#home.active)::before{inset:0!important;width:auto!important;height:auto!important;background-color:transparent!important}
     #rankPill:empty,#userLine:empty{display:none!important}
     .brand .logo[src="${GAME_BOT_PROFILE_IMAGE}"]{visibility:hidden!important}
-    .top-balance-pill:has(#topTonBalance:empty),.top-balance-pill:has(.ton-mini-icon img[src^="data:image/"]){visibility:hidden!important}
+    .top-balance-pill:has(#topTonBalance:empty){visibility:hidden!important}
     .predict-online-badge{display:none;align-items:center;justify-content:center;gap:5px;height:22px;padding:0;background:transparent;border:0;box-shadow:none;color:rgba(255,255,255,.82);font-family:"SF Pro Rounded","SF Pro Text","Inter Variable",Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1;white-space:nowrap;pointer-events:none;transform:translateY(1px)}
     body:has(#predictzone.active) .predict-online-badge{display:inline-flex}
     .predict-online-dot{position:relative;width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:#35d979;box-shadow:0 0 0 1px rgba(53,217,121,.16)}

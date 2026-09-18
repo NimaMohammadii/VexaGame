@@ -40,7 +40,7 @@ export function miniAppHtml(homeSlotImageUrl = DEFAULT_HOME_SLOT_IMAGE, paymentM
   if (usdtUrl) {
     shell = shell.replace(
       /<svg class="usdt-method-icon" viewBox="0 0 48 48"[\s\S]*?<\/svg>/,
-      (fallbackSvg) => `<span style="position:relative;width:44px;height:44px;display:block">${fallbackSvg}<img src="${usdtUrl}" alt="" decoding="async" loading="eager" style="position:absolute;inset:0;width:44px;height:44px;object-fit:contain" onload="if(this.previousElementSibling)this.previousElementSibling.style.display='none'" onerror="this.remove()"></span>`,
+      (fallbackSvg) => `<span style="position:relative;width:44px;height:44px;display:block">${fallbackSvg}<img src="${usdtUrl}" alt="" decoding="async" loading="eager" style="position:absolute;inset:0;width:44px;height:44px;object-fit:contain" onload="if(this.previousElementSibling)this.previousElementSibling.hidden=true" onerror="this.remove()"></span>`,
     );
   }
 

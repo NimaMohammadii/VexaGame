@@ -1,49 +1,13 @@
 import { miniAppLazySectionPayload, miniAppShellHtml } from './miniapp/shell';
 
 const DEFAULT_HOME_SLOT_IMAGE = '/app/api/home-lottery-slot.png';
-const DEFAULT_PAYMENT_METHOD_IMAGES = {
-  stars: '/app/api/uploaded-image/payment-method/stars.png',
-  gram: '/app/api/uploaded-image/payment-method/gram.png',
-  usdt: '/app/api/uploaded-image/payment-method/usdt.png',
-  nft: '/app/api/uploaded-image/payment-method/nft.png',
-} as const;
-
-type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
-
 export function miniAppLazySection(id: string) { return miniAppLazySectionPayload(id); }
 
-function safeSingleQuotedJs(value: string): string {
-  return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-}
-
-export function miniAppHtml(homeSlotImageUrl = DEFAULT_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
-  const starsUrl = paymentMethodImageUrls.stars || DEFAULT_PAYMENT_METHOD_IMAGES.stars;
-  const gramUrl = paymentMethodImageUrls.gram || DEFAULT_PAYMENT_METHOD_IMAGES.gram;
-  const usdtUrl = paymentMethodImageUrls.usdt || DEFAULT_PAYMENT_METHOD_IMAGES.usdt;
-  const nftUrl = paymentMethodImageUrls.nft || DEFAULT_PAYMENT_METHOD_IMAGES.nft;
-  const walletSource = "var src=type==='ton'?'/app/api/credit-icon.png':('/app/api/deposit-method-icon/'+(type==='nft'?'nft':'stars')+'.png');";
-  const walletResolvedSource = `var src=type==='ton'?'${safeSingleQuotedJs(gramUrl)}':(type==='nft'?'${safeSingleQuotedJs(nftUrl)}':'${safeSingleQuotedJs(starsUrl)}');`;
-  let shell = miniAppShellHtml()
-    .replace(
-      'src="/app/api/home-lottery-slot.png?v=home-lottery"',
-      `src="${homeSlotImageUrl}"`,
-    )
-    .replace(walletSource, walletResolvedSource);
-
-  if (paymentMethodImageUrls.gram) {
-    shell = shell.replace(
-      /<span class="ton-mini-icon"><img src="[^"]+" alt="" decoding="async"\/><\/span>/,
-      `<span class="ton-mini-icon"><img src="${gramUrl}" alt="" decoding="async"/></span>`,
-    );
-  }
-
-  if (usdtUrl) {
-    shell = shell.replace(
-      /<svg class="usdt-method-icon" viewBox="0 0 48 48"[\s\S]*?<\/svg>/,
-      (fallbackSvg) => `<span style="position:relative;width:44px;height:44px;display:block">${fallbackSvg}<img src="${usdtUrl}" alt="" decoding="async" loading="eager" style="position:absolute;inset:0;width:44px;height:44px;object-fit:contain" onload="if(this.previousElementSibling)this.previousElementSibling.hidden=true" onerror="this.remove()"></span>`,
-    );
-  }
-
+export function miniAppHtml(homeSlotImageUrl = DEFAULT_HOME_SLOT_IMAGE): string {
+  let shell = miniAppShellHtml().replace(
+    'src="/app/api/home-lottery-slot.png?v=home-lottery"',
+    `src="${homeSlotImageUrl}"`,
+  );
 
   const headExtras: string[] = [];
   headExtras.push(`<script>(function(){if(!document.documentElement.classList.contains('vexa-web'))return;var w=Number(screen&&screen.width)||innerWidth||0;var h=Number(screen&&screen.height)||innerHeight||0;if(Math.min(w,h)>=600)document.documentElement.classList.add('vexa-web-large')})()</script>`);

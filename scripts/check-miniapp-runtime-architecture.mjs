@@ -8,6 +8,8 @@ const files = {
   agents: read('AGENTS.md'),
   wallet: read('src/miniapp/wallet.ts'),
   shell: read('src/miniapp/shell.ts'),
+  script: read('src/miniapp/script.ts'),
+  index: read('src/index.ts'),
   playZone: read('src/miniapp/play-zone.ts'),
   boot: read('src/miniapp/boot-loader-script.ts'),
   backgrounds: read('src/miniapp/section-background-script.ts'),
@@ -64,6 +66,12 @@ const preloadBody = between(files.shell, 'function preload(){', 'window.VexaLazy
 expect('Lazy preload() must exist.', Boolean(preloadBody));
 expect('Lazy preload() must never mount sections or execute game runtime.', !/\bmount\s*\(/.test(preloadBody));
 expect('VexaLazySections must keep ensure=mount and preload=preload as separate paths.', has(files.shell, 'window.VexaLazySections={ensure:mount,preload:preload,isGame:isGame};'));
+expect('Initial Mini App HTML must not serialize lazy game section payloads.', !has(files.shell, 'var registry=${payload};') && !has(files.shell, 'const payload = inlineScriptJson(LAZY_SECTIONS'));
+expect('Lazy game sections must be fetched only from the on-demand endpoint.', has(files.shell, "fetch('/app/api/lazy-section/'+encodeURIComponent(id)"));
+expect('Lazy section endpoint must use the allowlisted section registry.', has(files.index, "app.get('/app/api/lazy-section/:id'") && has(files.index, "miniAppLazySection(c.req.param('id'))"));
+expect('Navigation must activate lazy sections only after async ensure resolves.', has(files.script, "Promise.resolve(result).then(function(ok){delete openingSections[id];if(ok)activateSection(id)"));
+const initialStyleBody = between(files.shell, 'const STYLES = [', "].join('');");
+expect('Game-only styles must stay out of the initial Home stylesheet payload.', !/PLINKO_STYLES|MINES_STYLES|CRASH_STYLES|SLOT_STYLES|GHOST_RUN_STYLES/.test(initialStyleBody));
 
 expect('Hidden games must be denied by canOpen without an admin bypass.', /canOpen:function\(id\)\{[^}]*!state\.isHidden\(id\)/.test(files.playZone));
 expect('Hidden games must be denied by shouldPreload without an admin bypass.', /shouldPreload:function\(id\)\{[^}]*!state\.isHidden\(id\)/.test(files.playZone));

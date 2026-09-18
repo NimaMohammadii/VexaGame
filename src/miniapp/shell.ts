@@ -52,11 +52,6 @@ const HEADER_LOGO_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
 
 const STYLES = [
   MINIAPP_STYLES,
-  PLINKO_STYLES,
-  MINES_STYLES,
-  CRASH_STYLES,
-  SLOT_STYLES,
-  PLINKO_CONTROLS_MODERN_STYLES,
   PLAY_ZONE_STYLES,
   PREDICT_ZONE_STYLES,
   PLAY_ZONE_SHOWCASE_OVERRIDES,
@@ -71,7 +66,6 @@ const STYLES = [
   APP_BACKGROUND_OVERRIDES,
   SECTION_BACKGROUND_STYLES,
   GAME_LIVE_COUNT_STYLES,
-  GHOST_RUN_STYLES,
   SECTION_ACCESS_STYLES,
   MANDATORY_CHANNEL_GATE_STYLES,
 ].join('');
@@ -85,17 +79,26 @@ function initialSections(): string {
   ].join('');
 }
 
-const LAZY_SECTIONS: Array<{ id: string; html: string; scripts?: string[] }> = [
-  { id: 'results', html: RESULTS_SECTION },
-  { id: 'mines', html: MINES_SECTION, scripts: [MINES_SCRIPT] },
-  { id: 'plinko', html: PLINKO_SECTION, scripts: [PLINKO_SCRIPT, PLINKO_DROP_FEEDBACK_SCRIPT, PLINKO_PERFORMANCE_SCRIPT, PLINKO_PANEL_SCRIPT] },
-  { id: 'crash', html: CRASH_SECTION, scripts: [CRASH_SCRIPT] },
-  { id: 'slot', html: SLOT_SECTION, scripts: [SLOT_SCRIPT] },
-  { id: 'wheel', html: WHEEL_SECTION, scripts: [] },
-  { id: 'dice', html: DICE_SECTION + DICE_FINAL_TWEAK },
-  { id: 'coinflip', html: PUMP_SECTION },
-  { id: 'ghostrun', html: GHOST_RUN_SECTION },
+type LazySectionPayload = { id: string; html: string; scripts: string[]; styles: string };
+
+const LAZY_SECTIONS: LazySectionPayload[] = [
+  { id: 'results', html: RESULTS_SECTION, scripts: [], styles: '' },
+  { id: 'mines', html: MINES_SECTION, scripts: [MINES_SCRIPT], styles: MINES_STYLES },
+  { id: 'plinko', html: PLINKO_SECTION, scripts: [PLINKO_SCRIPT, PLINKO_DROP_FEEDBACK_SCRIPT, PLINKO_PERFORMANCE_SCRIPT, PLINKO_PANEL_SCRIPT], styles: PLINKO_STYLES + PLINKO_CONTROLS_MODERN_STYLES },
+  { id: 'crash', html: CRASH_SECTION, scripts: [CRASH_SCRIPT], styles: CRASH_STYLES },
+  { id: 'slot', html: SLOT_SECTION, scripts: [SLOT_SCRIPT], styles: SLOT_STYLES },
+  { id: 'wheel', html: WHEEL_SECTION, scripts: [], styles: '' },
+  { id: 'dice', html: DICE_SECTION + DICE_FINAL_TWEAK, scripts: [], styles: '' },
+  { id: 'coinflip', html: PUMP_SECTION, scripts: [], styles: '' },
+  { id: 'ghostrun', html: GHOST_RUN_SECTION, scripts: [], styles: GHOST_RUN_STYLES },
 ];
+
+export function miniAppLazySectionPayload(rawId: string): LazySectionPayload | null {
+  const id = String(rawId || '').replace(/[^0-9A-Za-z_-]/g, '').slice(0, 40);
+  const section = LAZY_SECTIONS.find((entry) => entry.id === id);
+  if (!section) return null;
+  return { id: section.id, html: section.html, scripts: section.scripts, styles: section.styles };
+}
 
 const scriptBody = (script: string): string => script.replace(/^\s*<script[^>]*>/i, '').replace(/<\/script>\s*$/i, '');
 
@@ -109,14 +112,10 @@ function inlineScriptJson(value: unknown): string {
 }
 
 function lazySectionLoaderScript(): string {
-  const payload = inlineScriptJson(LAZY_SECTIONS.map((section) => ({
-    id: section.id,
-    html: section.html,
-    scripts: section.scripts || [],
-  })));
   return `
 (function(){
-  var registry=${payload};
+  var payloads={};
+  var loading={};
   var mounted={};
   var main=null;
   var gameIds={mines:true,plinko:true,crash:true,slot:true,wheel:true,dice:true,coinflip:true,ghostrun:true,hilo:true};
@@ -142,21 +141,45 @@ function lazySectionLoaderScript(): string {
       oldScript.parentNode.replaceChild(script,oldScript);
     });
   }
+  function applyStyles(id,css){
+    if(!css||document.getElementById('vexa-lazy-style-'+id))return;
+    var style=document.createElement('style');
+    style.id='vexa-lazy-style-'+id;
+    style.textContent=String(css);
+    document.head.appendChild(style);
+  }
+  function load(id){
+    if(payloads[id])return Promise.resolve(payloads[id]);
+    if(loading[id])return loading[id];
+    if(!canMount(id))return Promise.resolve(null);
+    var job=fetch('/app/api/lazy-section/'+encodeURIComponent(id),{cache:'no-store',headers:{accept:'application/json'}})
+      .then(function(r){return r.ok?r.json().catch(function(){return null}):null})
+      .then(function(item){if(!item||item.id!==id)return null;payloads[id]=item;return item})
+      .catch(function(){return null})
+      .then(function(item){delete loading[id];return item});
+    loading[id]=job;
+    return job;
+  }
   function mount(id){
-    if(!id||document.getElementById(id))return true;
-    if(!canMount(id))return false;
-    if(mounted[id])return !!document.getElementById(id);
-    var item=registry.filter(function(entry){return entry.id===id})[0];
-    if(!item)return false;
-    mounted[id]=true;
-    var wrap=document.createElement('div');
-    wrap.setAttribute('data-lazy-section-host',id);
-    wrap.innerHTML=item.html;
-    findMain().insertBefore(wrap, document.querySelector('nav.tabs'));
-    executeEmbeddedScripts(wrap);
-    (item.scripts||[]).forEach(runScript);
-    try{window.dispatchEvent(new CustomEvent('vexa:section-mounted',{detail:{id:id}}))}catch(e){}
-    return !!document.getElementById(id);
+    if(!id||document.getElementById(id))return Promise.resolve(true);
+    if(!canMount(id))return Promise.resolve(false);
+    return load(id).then(function(item){
+      if(!item||!canMount(id))return false;
+      if(document.getElementById(id))return true;
+      if(mounted[id])return !!document.getElementById(id);
+      mounted[id]=true;
+      try{
+        applyStyles(id,item.styles||'');
+        var wrap=document.createElement('div');
+        wrap.setAttribute('data-lazy-section-host',id);
+        wrap.innerHTML=String(item.html||'');
+        findMain().insertBefore(wrap,document.querySelector('nav.tabs'));
+        executeEmbeddedScripts(wrap);
+        (Array.isArray(item.scripts)?item.scripts:[]).forEach(runScript);
+        try{window.dispatchEvent(new CustomEvent('vexa:section-mounted',{detail:{id:id}}))}catch(e){}
+        return !!document.getElementById(id);
+      }catch(e){mounted[id]=false;return false}
+    });
   }
   var preloadJob=null;
   function preload(){
@@ -168,7 +191,6 @@ function lazySectionLoaderScript(): string {
   window.VexaLazySections={ensure:mount,preload:preload,isGame:isGame};
 })();`;
 }
-
 function scripts(): string {
   return [
     `window.__vexaLotteryTexts=${inlineScriptJson(LOTTERY_HOME_TEXT)};window.__vexaCountryLocales=${inlineScriptJson(COUNTRY_TO_VEXA_LOCALE)};`,

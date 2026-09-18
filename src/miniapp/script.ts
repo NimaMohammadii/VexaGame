@@ -121,9 +121,9 @@ export const MINIAPP_SCRIPT = `
     try{tg.BackButton.offClick(handleBackButton)}catch(e){}
     try{tg.BackButton.hide()}catch(e){}
   }
-  function ensureSection(id){return !id||q(id)||(window.VexaLazySections&&window.VexaLazySections.ensure&&window.VexaLazySections.ensure(id))}
   var primaryTabs={home:true,playzone:true,predictzone:true};
   var sectionTransitionTimer=0;
+  var openingSections={};
   function animatePrimarySection(node){
     if(sectionTransitionTimer){clearTimeout(sectionTransitionTimer);sectionTransitionTimer=0}
     node.classList.remove('view-transition-in');
@@ -133,8 +133,7 @@ export const MINIAPP_SCRIPT = `
     });
   }
 
-  function show(id){
-    if(!ensureSection(id))return false;
+  function activateSection(id){
     var v=q(id),current=document.querySelector('.view.active');
     if(!v)return false;
     if(current!==v){
@@ -151,6 +150,20 @@ export const MINIAPP_SCRIPT = `
     if(window.VexaApplySectionBackgrounds)setTimeout(function(){window.VexaApplySectionBackgrounds()},30);
     return true;
   }
+  function show(id){
+    if(!id)return false;
+    if(q(id))return activateSection(id);
+    var lazy=window.VexaLazySections;
+    if(!lazy||typeof lazy.ensure!=='function')return false;
+    if(openingSections[id])return true;
+    var result=lazy.ensure(id);
+    if(result&&typeof result.then==='function'){
+      openingSections[id]=true;
+      Promise.resolve(result).then(function(ok){delete openingSections[id];if(ok)activateSection(id);else toast('Coming soon')}).catch(function(){delete openingSections[id];toast('Coming soon')});
+      return true;
+    }
+    return result?activateSection(id):false;
+  }
 
   function openInitialTarget(){
     try{
@@ -161,7 +174,7 @@ export const MINIAPP_SCRIPT = `
       var hashSection=hash.indexOf('=')===-1?hash:(hashParams.get('section')||hashParams.get('startapp')||hashParams.get('tgWebAppStartParam')||'');
       var section=(params.get('section')||params.get('startapp')||params.get('tgWebAppStartParam')||hashSection||startParam||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40);
       if(!section)return;
-      var open=function(){if(ensureSection(section))show(section)};
+      var open=function(){show(section)};
       var lazy=window.VexaLazySections;
       if(lazy&&typeof lazy.isGame==='function'&&lazy.isGame(section)&&window.__vexaPlayZoneVisibilityReady){Promise.resolve(window.__vexaPlayZoneVisibilityReady).then(open);return}
       open();
@@ -177,14 +190,11 @@ export const MINIAPP_SCRIPT = `
       var id=(nav.getAttribute('data-game-view')||(button&&button.getAttribute('data-game-view'))||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40);
       if(!id)return;
       ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();
-      if(ensureSection(id)){
-        var animated=button||nav;
-        animated.classList.add('is-soft-entering');
-        document.body.classList.add('soft-game-entering');
-        setTimeout(function(){show(id);animated.classList.remove('is-soft-entering');document.body.classList.remove('soft-game-entering')},180);
-        return;
-      }
-      toast('Coming soon');
+      var animated=button||nav;
+      animated.classList.add('is-soft-entering');
+      document.body.classList.add('soft-game-entering');
+      if(show(id)){setTimeout(function(){animated.classList.remove('is-soft-entering');document.body.classList.remove('soft-game-entering')},260);return}
+      animated.classList.remove('is-soft-entering');document.body.classList.remove('soft-game-entering');toast('Coming soon');
     },true);
   }
 

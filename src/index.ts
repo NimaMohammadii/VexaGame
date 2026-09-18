@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { miniAppHtml } from './miniapp-game';
+import { miniAppHtml, miniAppLazySection } from './miniapp-game';
 import { registerFriendGameRoutes } from './game-friend-routes';
 import { registerWheelRoutes } from './wheel-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
@@ -83,6 +83,11 @@ app.get('/tonconnect-manifest.json', (c) => c.json(
   },
 ));
 app.get('/app', (c) => html(miniAppHtml()));
+app.get('/app/api/lazy-section/:id', (c) => {
+  const payload = miniAppLazySection(c.req.param('id'));
+  if (!payload) return c.json({ error: 'Not found' }, 404, { 'cache-control': 'no-store' });
+  return c.json(payload, 200, { 'cache-control': 'no-store' });
+});
 app.get('/assets/Home.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Home.PNG'));
 app.get('/assets/Playhub.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Playhub.PNG'));
 app.get('/assets/Mines.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Mines.PNG'));

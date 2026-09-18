@@ -1,4 +1,4 @@
-import { miniAppShellHtml } from './miniapp/shell';
+import { miniAppLazySectionPayload, miniAppShellHtml } from './miniapp/shell';
 
 const DEFAULT_HOME_SLOT_IMAGE = '/app/api/home-lottery-slot.png';
 const DEFAULT_PAYMENT_METHOD_IMAGES = {
@@ -9,6 +9,8 @@ const DEFAULT_PAYMENT_METHOD_IMAGES = {
 } as const;
 
 type PaymentMethodImageUrls = Partial<Record<'stars' | 'gram' | 'usdt' | 'nft', string>>;
+
+export function miniAppLazySection(id: string) { return miniAppLazySectionPayload(id); }
 
 function safeSingleQuotedJs(value: string): string {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");

@@ -181,6 +181,28 @@ export const STARTUP_RUNTIME_SCRIPT = `
     });
     return window.__vexaAllGameImagesReady
   }
+  function gameAssetsAlreadyReady(){try{return localStorage.getItem(BACKGROUND_ASSETS_READY_KEY)==='1'}catch(e){return false}}
+  function activeViewId(){var active=document.querySelector('.view.active');return String(active&&active.id||'')}
+  function shouldStartGameAssetWarmup(id){id=String(id||'');return id==='playzone'||id==='mines'||id==='plinko'||id==='crash'||id==='slot'||id==='wheel'||id==='dice'||id==='coinflip'||id==='ghostrun'||id==='hilo'}
+  function startGameAssetWarmup(){
+    if(window.__vexaGameAssetWarmupStarted||gameAssetsAlreadyReady())return;
+    window.__vexaGameAssetWarmupStarted=true;
+    idleTurn().then(function(){return gameImagesReady()}).then(function(value){if(value)try{localStorage.setItem(BACKGROUND_ASSETS_READY_KEY,'1')}catch(e){}return value}).catch(function(){})
+  }
+  function scheduleGameAssetWarmup(){
+    if(window.__vexaGameAssetWarmupScheduled||gameAssetsAlreadyReady())return;
+    window.__vexaGameAssetWarmupScheduled=true;
+    function cleanup(){window.removeEventListener('vexa:view-changed',maybeStart);document.removeEventListener('visibilitychange',maybeStart)}
+    function maybeStart(event){
+      if(document.hidden)return;
+      var id=String(event&&event.detail&&event.detail.id||activeViewId());
+      if(!shouldStartGameAssetWarmup(id))return;
+      cleanup();startGameAssetWarmup()
+    }
+    window.addEventListener('vexa:view-changed',maybeStart);
+    document.addEventListener('visibilitychange',maybeStart);
+    maybeStart()
+  }
   function scheduleBackgroundWarmup(){
     if(window.__vexaBackgroundWarmupScheduled)return;
     window.__vexaBackgroundWarmupScheduled=true;
@@ -188,9 +210,6 @@ export const STARTUP_RUNTIME_SCRIPT = `
       idleTurn().then(function(){
         var applyBackgrounds=window.VexaApplySectionBackgrounds;
         return typeof applyBackgrounds==='function'?Promise.resolve(applyBackgrounds()).catch(function(){return false}):false
-      }).then(function(){
-        try{if(localStorage.getItem(BACKGROUND_ASSETS_READY_KEY)==='1')return true}catch(e){}
-        return gameImagesReady().then(function(value){if(value)try{localStorage.setItem(BACKGROUND_ASSETS_READY_KEY,'1')}catch(e){}return value})
       }).catch(function(){})
     },700)
   }
@@ -212,7 +231,8 @@ export const STARTUP_RUNTIME_SCRIPT = `
     if(window.__vexaHomeReadyDispatched)return;
     window.__vexaHomeReadyDispatched=true;
     try{window.dispatchEvent(new CustomEvent('vexa:home-ready'))}catch(e){}
-    scheduleBackgroundWarmup()
+    scheduleBackgroundWarmup();
+    scheduleGameAssetWarmup()
   }
   window.__vexaInitialUiReady=homeHydrationReady().then(function(){
     return new Promise(function(resolve){

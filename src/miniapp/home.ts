@@ -13,7 +13,7 @@ html body:has(#home.active)::before{
   z-index:-1!important;
   pointer-events:none!important;
   background-color:#000!important;
-  background-image:url('/assets/Home.PNG?v=1')!important;
+  background-image:url('/assets/Home.PNG?v=1'),radial-gradient(ellipse 88% 48% at 50% 0%,rgba(92,10,35,.40),transparent 68%),linear-gradient(180deg,#0b0305 0%,#050202 48%,#020202 100%)!important;
   background-size:cover!important;
   background-position:center top!important;
   background-repeat:no-repeat!important;
@@ -570,7 +570,6 @@ const HOME_ASSET_SCRIPT = `
   var PROMO_HEIGHT_KEY='vexa:home-promo-height:v1';
   var promoTimer=0,promoLoopTimer=0,promoIndex=0,promoCount=0,promoHost=null,promoTrack=null,promoLoaded=false,promoInFlight=null;
   var promoObjectUrls=[];
-  var homeBackgroundInFlight=null;
   function applyTonLogo(url){if(!url)return;tonLogoAppliedUrl=url;var icons=document.querySelectorAll('.ton-mini-icon img');for(var i=0;i<icons.length;i++){if(icons[i].getAttribute('src')!==url)icons[i].setAttribute('src',url)}}
   function readMeta(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){return null}}
   function saveMeta(key,value){try{localStorage.setItem(key,JSON.stringify(value))}catch(e){}}
@@ -682,28 +681,10 @@ const HOME_ASSET_SCRIPT = `
     promoInFlight=Promise.all([1,2,3].map(loadPromoImage)).then(function(images){promoLoaded=true;renderHomePromos(images);return true}).catch(function(){promoLoaded=true;renderHomePromos([]);return false}).finally(function(){promoInFlight=null});
     return promoInFlight;
   }
-  function loadHomeBackground(){
-    if(homeBackgroundInFlight)return homeBackgroundInFlight;
-    homeBackgroundInFlight=new Promise(function(resolve){
-      var img=new Image(),done=false,timer=setTimeout(finish,7000);
-      function cleanup(){clearTimeout(timer);img.removeEventListener('load',loaded);img.removeEventListener('error',failed)}
-      function finish(){if(done)return;done=true;cleanup();resolve(true)}
-      function loaded(){
-        if(typeof img.decode==='function')img.decode().then(finish,finish);else finish();
-      }
-      function failed(){finish()}
-      img.decoding='async';img.loading='eager';
-      try{img.fetchPriority='high'}catch(e){}
-      img.addEventListener('load',loaded,{once:true});img.addEventListener('error',failed,{once:true});
-      img.src='/assets/Home.PNG?v=1';
-      if(img.complete&&img.naturalWidth>0)loaded();
-    });
-    return homeBackgroundInFlight;
-  }
   function homeVisualAssetsReady(){
     loadTonLogo(false).catch(function(){});
     loadHomePromos(false).catch(function(){});
-    return loadHomeBackground().then(function(){return true},function(){return false});
+    return Promise.resolve(true);
   }
   function reservePromoHeight(){var host=document.getElementById('homePromoCarousel');if(!host)return;try{var h=Math.floor(Number(localStorage.getItem(PROMO_HEIGHT_KEY))||0);if(h>0){host.style.height=h+'px';host.classList.add('is-ready')}}catch(e){}}
   function apply(){reservePromoHeight();homeVisualAssetsReady()}

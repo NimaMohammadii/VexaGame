@@ -28,6 +28,6 @@ export const ACTIVITY_CORE_SCRIPT = `
   document.addEventListener('pointerdown',stopIfBanned,true);
   document.addEventListener('touchstart',stopIfBanned,true);
   document.addEventListener('click',function(ev){if(bannedControl(ev.target)){stopIfBanned(ev);return}var b=ev.target&&ev.target.closest&&ev.target.closest('button');if(b&&(b.getAttribute('data-action')||b.getAttribute('data-tab')||b.closest('.tabs')))setTimeout(function(){smartSync();},120);},true);
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){sendActivity(true)});else sendActivity(true)
+  sendActivity(true);
 })();
 `;

@@ -36,6 +36,7 @@ import { TON_BALANCE_SCRIPT } from './ton-balance-script';
 import { PLAY_ZONE_STACK_SCROLL_SCRIPT } from './play-zone-stack-scroll-script';
 import { STARTUP_RUNTIME_SCRIPT } from './boot-loader-script';
 import { ACTIVITY_SCRIPT } from './activity-script';
+import { LEVEL_SYNC_SCRIPT } from './level-sync-script';
 import { MINIAPP_AUDIO_MANAGER_SCRIPT, MINIAPP_AUDIO_SCRIPT } from './audio-script';
 import { XP_BAR_EFFECTS_SCRIPT } from './xp-bar-effects-script';
 import { TELEGRAM_BACK_BUTTON_SCRIPT } from './telegram-back-button-script';
@@ -173,11 +174,12 @@ function scripts(): string {
     MINIAPP_AUDIO_MANAGER_SCRIPT,
     STARTUP_RUNTIME_SCRIPT,
     TON_BALANCE_SCRIPT,
+    MINIAPP_SCRIPT,
+    ACTIVITY_SCRIPT,
+    LEVEL_SYNC_SCRIPT,
     HOME_SCRIPT,
     lazySectionLoaderScript(),
-    MINIAPP_SCRIPT,
     MANDATORY_CHANNEL_GATE_SCRIPT,
-    ACTIVITY_SCRIPT,
     DEPOSIT_ENHANCEMENTS_SCRIPT,
     CREDIT_GUARD_SCRIPT,
     PREDICT_ZONE_SCRIPT,
@@ -199,7 +201,7 @@ export function miniAppShellHtml(): string {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
   <link rel="preload" as="image" href="/assets/Home.PNG?v=1" fetchpriority="high"/>
-  <link rel="preload" as="image" href="/app/api/home-lottery-slot.png?v=home-lottery" fetchpriority="high"/>
+  <link rel="preload" as="image" href="/app/api/home-lottery-slot.png" fetchpriority="high"/>
   <script>
     (function(){
       var launch=String(location.search||'')+'&'+String(location.hash||'');

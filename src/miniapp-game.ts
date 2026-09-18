@@ -1,6 +1,6 @@
 import { miniAppShellHtml } from './miniapp/shell';
 
-const EMPTY_HOME_SLOT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+const DEFAULT_HOME_SLOT_IMAGE = '/app/api/home-lottery-slot.png';
 const DEFAULT_PAYMENT_METHOD_IMAGES = {
   stars: '/app/api/deposit-method-icon/stars.png',
   gram: '/app/api/credit-icon.png',
@@ -13,7 +13,7 @@ function safeSingleQuotedJs(value: string): string {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
-export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
+export function miniAppHtml(homeSlotImageUrl = DEFAULT_HOME_SLOT_IMAGE, paymentMethodImageUrls: PaymentMethodImageUrls = {}): string {
   const starsUrl = paymentMethodImageUrls.stars || DEFAULT_PAYMENT_METHOD_IMAGES.stars;
   const gramUrl = paymentMethodImageUrls.gram || DEFAULT_PAYMENT_METHOD_IMAGES.gram;
   const usdtUrl = paymentMethodImageUrls.usdt || '';
@@ -25,11 +25,14 @@ export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMet
       'src="/app/api/home-lottery-slot.png?v=home-lottery"',
       `src="${homeSlotImageUrl}"`,
     )
-    .replace(
+    .replace(walletSource, walletResolvedSource);
+
+  if (paymentMethodImageUrls.gram) {
+    shell = shell.replace(
       /<span class="ton-mini-icon"><img src="[^"]+" alt="" decoding="async"\/><\/span>/,
       `<span class="ton-mini-icon"><img src="${gramUrl}" alt="" decoding="async"/></span>`,
-    )
-    .replace(walletSource, walletResolvedSource);
+    );
+  }
 
   if (usdtUrl) {
     shell = shell.replace(
@@ -44,7 +47,7 @@ export function miniAppHtml(homeSlotImageUrl = EMPTY_HOME_SLOT_IMAGE, paymentMet
   headExtras.push(`<style>
     .vexa-large-web-gate{display:none}
     html.vexa-web-large body{background:#000!important}
-    html.vexa-web-large .vexa-boot,html.vexa-web-large main.app,html.vexa-web-large #toast{display:none!important}
+    html.vexa-web-large main.app,html.vexa-web-large #toast{display:none!important}
     html.vexa-web-large .vexa-large-web-gate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:32px;background:radial-gradient(circle at 50% 30%,rgba(92,10,35,.18),transparent 38%),#000;color:#fff;font-family:"SF Pro Rounded","SF Pro Text",Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center}
     .vexa-large-web-gate-card{width:min(100%,520px);padding:42px 34px;border:1px solid rgba(255,255,255,.09);border-radius:30px;background:rgba(255,255,255,.035);box-shadow:0 28px 80px rgba(0,0,0,.45);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
     .vexa-large-web-gate-mark{width:58px;height:58px;margin:0 auto 22px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(145deg,#71102d,#31030f);font-size:28px;font-weight:900;letter-spacing:-.05em;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 14px 40px rgba(73,5,24,.34)}

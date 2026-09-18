@@ -52,7 +52,7 @@ export const LEVEL_SYNC_SCRIPT = `
   function esc(v){return String(v==null?'':v).replace(/[&<>]/g,function(s){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[s]||s})}
   function rank(level){level=Math.max(1,Math.floor(Number(level)||1));if(level>=60)return 'Titan';if(level>=40)return 'Legend';if(level>=25)return 'Master';if(level>=16)return 'Elite';if(level>=10)return 'Pro';if(level>=5)return 'Explorer';return 'Rookie'}
   function rankKey(value){return String(value||'Rookie').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40)||'Rookie'}
-  function setRankCharacter(rankName){try{var img=document.querySelector('.brand img.logo');if(!img)return;if(!img.dataset.defaultSrc)img.dataset.defaultSrc=img.getAttribute('src')||'https://t.me/i/userpic/320/VexaFlowBOT.jpg';var key=rankKey(rankName);var version=String(window.__vexaAppVersion||Date.now());var src='/app/api/rank-character/'+encodeURIComponent(key)+'.png?v='+version;if(img.getAttribute('src')!==src){img.onerror=function(){this.onerror=null;this.src=this.dataset.defaultSrc||'https://t.me/i/userpic/320/VexaFlowBOT.jpg'};img.src=src}bindRankModalTrigger(img)}catch(e){}}
+  function setRankCharacter(rankName){try{var img=document.querySelector('.brand img.logo');if(!img)return;if(!img.dataset.defaultSrc)img.dataset.defaultSrc=img.getAttribute('src')||'https://t.me/i/userpic/320/VexaFlowBOT.jpg';var key=rankKey(rankName);var src='/app/api/rank-character/'+encodeURIComponent(key)+'.png';if(img.getAttribute('src')!==src){img.onerror=function(){this.onerror=null;this.src=this.dataset.defaultSrc||'https://t.me/i/userpic/320/VexaFlowBOT.jpg'};img.src=src}bindRankModalTrigger(img)}catch(e){}}
   function need(level){level=Math.max(1,Math.floor(Number(level)||1));return Math.max(100,Math.floor(100*Math.pow(level,1.35)))}
   function clean(p){var level=Math.max(1,Math.floor(Number(p&&p.level)||1));var next=Math.max(1,Math.floor(Number(p&&p.nextLevelXp)||need(level)));var xp=Math.max(0,Math.min(next,Math.floor(Number(p&&p.xp)||0)));var percent=Math.max(0,Math.min(100,Math.floor((xp/next)*100)));return{level:level,xp:xp,totalXp:Math.max(0,Math.floor(Number(p&&p.totalXp)||0)),nextLevelXp:next,progressPercent:percent,xpLeft:Math.max(0,next-xp),rankName:String((p&&p.rankName)||rank(level))}}
   function fromTotalXp(total){var remaining=Math.max(0,Math.floor(Number(total)||0));var level=1;while(level<999){var next=need(level);if(remaining<next)break;remaining-=next;level++}return clean({level:level,xp:remaining,totalXp:Math.max(0,Math.floor(Number(total)||0)),nextLevelXp:need(level),rankName:rank(level)})}
@@ -119,6 +119,6 @@ export const LEVEL_SYNC_SCRIPT = `
   function drainOnExit(){if(exitDrained)return;exitDrained=true;stopPlaySession();try{var pending=loadPendingXp();if(pending.length&&navigator.sendBeacon)navigator.sendBeacon('/app/api/level/xp',new Blob([xpBatchBody(pending)],{type:'application/json'}))}catch(e){}}
   window.addEventListener('pagehide',drainOnExit);
   window.addEventListener('beforeunload',drainOnExit);
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){observedSection=section();initialLoad();startPlaySession()});else{observedSection=section();initialLoad();startPlaySession()}
+  observedSection=section();initialLoad();startPlaySession();
 })();
 `;

@@ -188,21 +188,7 @@ export const MINIAPP_SCRIPT = `
     },true);
   }
 
-  async function api(path,opt){
-    opt=opt||{};
-    var r=await fetch(path,Object.assign({},opt,{headers:Object.assign({'content-type':'application/json'},opt.headers||{})}));
-    var j=await r.json().catch(function(){return{error:'Invalid response'}});
-    if(!r.ok)throw new Error(j.error||'Request failed');
-    return j;
-  }
-
-  function rankFallback(level){level=Math.max(1,Math.floor(Number(level)||1));if(level>=60)return 'Titan';if(level>=40)return 'Legend';if(level>=25)return 'Master';if(level>=15)return 'Elite';if(level>=8)return 'Pro';if(level>=4)return 'Explorer';return 'Rookie'}
-  function renderLevel(profile){var n=q('userLine');var level=Math.max(1,Math.floor(Number(profile&&profile.level)||1));var progress=Math.max(0,Math.min(100,Math.floor(Number(profile&&profile.progressPercent)||0)));var left=Math.max(0,Math.floor(Number(profile&&profile.xpLeft)||0));var next=Math.floor(Number(profile&&profile.nextLevelXp)||0);var xp=Math.max(0,Math.floor(Number(profile&&profile.xp)||0));if(next>0){progress=Math.max(0,Math.min(100,Math.floor((Math.min(xp,next)/next)*100)));if(!left)left=Math.max(0,next-Math.min(xp,next))}var rank=String((profile&&profile.rankName)||rankFallback(level));var pill=q('rankPill');if(pill)pill.textContent=rank;if(!n)return;n.innerHTML='<span style="display:block;color:#fff;font-weight:800;font-size:12px;line-height:1">Level '+level+' <span style="color:rgba(255,255,255,.55);font-weight:700">• '+progress+'%</span></span><span style="display:block;width:158px;height:6px;margin-top:6px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden"><span style="display:block;width:'+progress+'%;height:100%;border-radius:999px;background:linear-gradient(90deg,#5b0f24,#8f1d3d,#c03a5b);box-shadow:0 0 14px rgba(192,58,91,.48)"></span></span><span style="display:block;margin-top:5px;color:rgba(255,255,255,.5);font-size:9.5px;line-height:1">'+left+' XP left</span>'}
-  async function loadLevel(){if(window.VexaLevel&&typeof window.VexaLevel.load==='function'){window.VexaLevel.load();return}if(!ownerId)return;try{var profile=await api('/app/api/level?userId='+encodeURIComponent(ownerId),{cache:'no-store',headers:{'accept':'application/json','cache-control':'no-store'}});if(window.VexaLevel)return;renderLevel(profile)}catch(e){}}
-  function userLine(){loadLevel()}
-
-
-  function saveUser(){ownerId=telegramUserId||(q('ownerId')&&q('ownerId').value.trim())||ownerId;storageSet('ownerId',ownerId);userLine()}
+  function saveUser(){ownerId=telegramUserId||(q('ownerId')&&q('ownerId').value.trim())||ownerId;storageSet('ownerId',ownerId);if(window.VexaLevel&&typeof window.VexaLevel.load==='function')window.VexaLevel.load()}
 
   document.body.addEventListener('click',function(ev){
     var target=ev.target;

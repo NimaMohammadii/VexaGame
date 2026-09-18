@@ -3,7 +3,7 @@ import type { Env } from './types';
 
 const RANKS = ['Rookie', 'Explorer', 'Pro', 'Elite', 'Master', 'Legend', 'Titan'];
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
-const CACHE_CONTROL = 'no-store, no-cache, must-revalidate, max-age=0';
+const CACHE_CONTROL = 'public, max-age=3600, stale-while-revalidate=604800';
 
 export function registerRankCharacterRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get('/app/api/rank-character/:rank', async (c) => {

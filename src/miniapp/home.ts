@@ -575,7 +575,9 @@ const HOME_ASSET_SCRIPT = `
   var tonLogoCheckedAt=0;
   var META_CACHE_MS=300000;
   var TON_META_KEY='vexaTonLogoMeta:v1';
+  var PROMO_CACHE_NAME='vexa-home-promos-v1';
   var promoTimer=0,promoLoopTimer=0,promoIndex=0,promoCount=0,promoHost=null,promoTrack=null,promoLoaded=false,promoInFlight=null;
+  var promoObjectUrls=[];
   var homeBackgroundInFlight=null;
   function applyTonLogo(url){if(!url)return;tonLogoAppliedUrl=url;var icons=document.querySelectorAll('.ton-mini-icon img');for(var i=0;i<icons.length;i++){if(icons[i].getAttribute('src')!==url)icons[i].setAttribute('src',url)}}
   function readMeta(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){return null}}
@@ -596,15 +598,41 @@ const HOME_ASSET_SCRIPT = `
   function clearPromoTimer(){if(promoTimer){clearTimeout(promoTimer);promoTimer=0}}
   function clearPromoLoopTimer(){if(promoLoopTimer){clearTimeout(promoLoopTimer);promoLoopTimer=0}}
   function promoImageUrl(slot){return '/app/api/section-background/promo-'+slot+'.png'}
+  function promoImageFromResponse(response,slot){
+    if(!response||!response.ok)return Promise.resolve(null);
+    return response.blob().then(function(blob){
+      var objectUrl=URL.createObjectURL(blob);promoObjectUrls.push(objectUrl);
+      return new Promise(function(resolve){
+        var img=new Image();
+        img.alt='';img.decoding='async';img.loading='eager';img.draggable=false;
+        try{img.fetchPriority=slot===1?'high':'auto'}catch(e){}
+        var done=false,finish=function(value){if(done)return;done=true;resolve(value)};
+        img.addEventListener('load',function(){finish(img)},{once:true});
+        img.addEventListener('error',function(){finish(null)},{once:true});
+        img.src=objectUrl;
+      });
+    }).catch(function(){return null});
+  }
+  function refreshPromoCache(cache,url){
+    return fetch(url,{cache:'no-store'}).then(function(response){
+      if(!response.ok){if(cache)cache.delete(url).catch(function(){});return null}
+      if(cache)cache.put(url,response.clone()).catch(function(){});
+      return response;
+    }).catch(function(){return null});
+  }
   function loadPromoImage(slot){
-    return new Promise(function(resolve){
-      var img=new Image();
-      img.alt='';img.decoding='async';img.loading='eager';img.draggable=false;
-      try{img.fetchPriority=slot===1?'high':'auto'}catch(e){}
-      var done=false,finish=function(value){if(done)return;done=true;resolve(value)};
-      img.addEventListener('load',function(){finish(img)},{once:true});
-      img.addEventListener('error',function(){finish(null)},{once:true});
-      img.src=promoImageUrl(slot);
+    var url=promoImageUrl(slot);
+    if(!('caches' in window))return refreshPromoCache(null,url).then(function(response){return promoImageFromResponse(response,slot)});
+    return caches.open(PROMO_CACHE_NAME).then(function(cache){
+      return cache.match(url).then(function(cached){
+        if(cached){
+          refreshPromoCache(cache,url);
+          return promoImageFromResponse(cached,slot);
+        }
+        return refreshPromoCache(cache,url).then(function(response){return promoImageFromResponse(response,slot)});
+      });
+    }).catch(function(){
+      return refreshPromoCache(null,url).then(function(response){return promoImageFromResponse(response,slot)});
     });
   }
   function syncPromoHeight(){
@@ -645,6 +673,8 @@ const HOME_ASSET_SCRIPT = `
   function renderHomePromos(images){
     clearPromoTimer();clearPromoLoopTimer();
     promoHost=document.getElementById('homePromoCarousel');if(!promoHost)return;
+    var keep=new Set((Array.isArray(images)?images:[]).map(function(img){return String(img&&img.src||'')}));
+    promoObjectUrls=promoObjectUrls.filter(function(url){if(keep.has(url))return true;try{URL.revokeObjectURL(url)}catch(e){}return false});
     var available=(Array.isArray(images)?images:[]).filter(function(img){return !!img}).slice(0,3);
     promoHost.innerHTML='';promoIndex=0;promoCount=available.length;promoTrack=null;
     if(!promoCount){promoHost.classList.remove('is-ready');promoHost.style.height='0px';return}
@@ -699,9 +729,14 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
   var heightObserver=null,observedTicket=null,renderedWinnersList=null,renderedWinnersHtml='';
   var prizePoolAnimations=[],prizePoolAnimationTargetNano=0,prizePoolPendingNano=null,displayedPrizePoolNano=0,displayedPrizePoolReady=false,displayedPrizePoolRoundId='';
   var DRAW_DELAY_MS=5000,DRAW_ANIMATION_MS=18260,NEXT_ROUND_DELAY_MS=10000;
+  var HOME_STATE_CACHE_PREFIX='vexa:home-lottery-state:v1:',stateFromCache=false;
   var initialHydrationPending=true,INITIAL_STATE_TIMEOUT_MS=6000;
   function q(s,r){return (r||document).querySelector(s)}
   function initData(){var tg=window.Telegram&&window.Telegram.WebApp;return String(tg&&tg.initData||'')}
+  function currentUserId(){var tg=window.Telegram&&window.Telegram.WebApp,u=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user,id=String(u&&u.id||'').trim();if(id)return id;try{return String(localStorage.getItem('ownerId')||'').trim()}catch(e){return ''}}
+  function homeStateCacheKey(){var id=currentUserId();return id?HOME_STATE_CACHE_PREFIX+id:''}
+  function readCachedHomeState(){try{var key=homeStateCacheKey();if(!key)return null;var cached=JSON.parse(localStorage.getItem(key)||'null');return cached&&cached.state&&typeof cached.state==='object'?cached:null}catch(e){return null}}
+  function writeCachedHomeState(next){try{var key=homeStateCacheKey();if(key&&next&&typeof next==='object')localStorage.setItem(key,JSON.stringify({savedAt:Date.now(),state:next}))}catch(e){}}
   function markHomeHydrated(status){
     if(!initialHydrationPending)return;
     initialHydrationPending=false;
@@ -776,7 +811,7 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
   function prizeRowsHtml(prizes){var rows=Array.isArray(prizes)?prizes:[],html='',limit=winnerCount();for(var i=0;i<limit;i++){var prize=rows[i]||{rank:i+1,prizeNano:0,percent:0},rank=i+1,percent=Math.max(0,Number(prize.percent)||0);html+='<article class="home-bonus-row"><div class="home-bonus-rank-avatar">#'+rank+'</div><div class="home-live-winner-user"><span>'+percent.toLocaleString(undefined,{maximumFractionDigits:2})+'%</span></div><div class="home-live-winner-amount home-bonus-prize-amount"><span>'+gram(prize.prizeNano)+'</span>'+prizeIconHtml()+'</div></article>'}return html}
   function lotteryCopy(){var set=function(selector,key){var el=q(selector);if(el)el.textContent=String(window.VexaLotteryText&&window.VexaLotteryText(key)||'')};set('[data-lottery-title]','lottery');set('[data-lottery-draw-label]','drawAt');set('[data-lottery-how-title]','howItWorks');set('[data-lottery-ticket-note]','ticketNote');set('[data-lottery-prize-title]','prizeSplit');set('[data-lottery-prize-note]','threeWinners');set('[data-win-chance-label]','winChance');var draw=q('[data-lottery-draw-at]'),drawAt=Date.parse(String(state&&state.round&&state.round.drawAt||''));if(draw)draw.textContent=Number.isFinite(drawAt)?new Intl.DateTimeFormat(undefined,{weekday:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(drawAt)):'—'}
   function renderPrizePanel(){var list=q('#homeBonusPanel .home-bonus-list');if(list&&state&&Array.isArray(state.prizes))list.innerHTML=prizeRowsHtml(state.prizes);lotteryCopy()}
-  function render(){var cardCount=q('#home .home-ticket-card [data-ticket-count]'),drawerCount=q('#homeTicketDrawer [data-ticket-count]'),list=q('#homeTicketList'),button=q('#homeTicketButton');var count=Math.max(0,Number(state&&state.ticketCount)||0),limitReached=!!(state&&state.settings&&Number(state.settings.maxTicketsPerUser)>0&&remainingLimit()<=0);var max=maxSelectable();if(quantity>max)quantity=max;if(quantity<1)quantity=1;if(cardCount)cardCount.textContent=quantity+' ticket'+(quantity===1?'':'s');if(drawerCount)drawerCount.textContent=count+' ticket'+(count===1?'':'s');if(list)list.innerHTML=listHtml(state&&state.tickets||[]);var minus=q('#home [data-ticket-minus]'),plus=q('#home [data-ticket-plus]');if(minus)minus.disabled=busy||quantity<=1||limitReached;if(plus)plus.disabled=busy||quantity>=max||!state||!state.canBuy||limitReached;if(button){var cost=purchaseCostNano();if(busy){button.textContent='Getting Ticket…';button.removeAttribute('aria-label')}else if(limitReached){button.textContent='Ticket limit reached';button.removeAttribute('aria-label')}else if(state&&state.canBuy&&cost<=0){button.textContent='Get Free Ticket';button.setAttribute('aria-label','Get Free Ticket')}else if(state&&state.canBuy){button.innerHTML=paidButtonHtml(cost);button.setAttribute('aria-label',gramPrice(cost)+' GRAM')}else if(state&&state.reason){button.textContent=state.reason;button.removeAttribute('aria-label')}else if(!initData()){button.textContent='Open in Telegram';button.removeAttribute('aria-label')}button.disabled=busy||!state||!state.canBuy||!initData()||limitReached}renderWinners();renderWinChanceText();renderPrizePool();renderPrizePanel();updateCountdown()}
+  function render(){var cardCount=q('#home .home-ticket-card [data-ticket-count]'),drawerCount=q('#homeTicketDrawer [data-ticket-count]'),list=q('#homeTicketList'),button=q('#homeTicketButton');var count=Math.max(0,Number(state&&state.ticketCount)||0),limitReached=!!(state&&state.settings&&Number(state.settings.maxTicketsPerUser)>0&&remainingLimit()<=0);var max=maxSelectable();if(quantity>max)quantity=max;if(quantity<1)quantity=1;if(cardCount)cardCount.textContent=quantity+' ticket'+(quantity===1?'':'s');if(drawerCount)drawerCount.textContent=count+' ticket'+(count===1?'':'s');if(list)list.innerHTML=listHtml(state&&state.tickets||[]);var minus=q('#home [data-ticket-minus]'),plus=q('#home [data-ticket-plus]');if(minus)minus.disabled=busy||quantity<=1||limitReached;if(plus)plus.disabled=busy||quantity>=max||!state||!state.canBuy||limitReached;if(button){var cost=purchaseCostNano();if(busy){button.textContent='Getting Ticket…';button.removeAttribute('aria-label')}else if(limitReached){button.textContent='Ticket limit reached';button.removeAttribute('aria-label')}else if(state&&state.canBuy&&cost<=0){button.textContent='Get Free Ticket';button.setAttribute('aria-label','Get Free Ticket')}else if(state&&state.canBuy){button.innerHTML=paidButtonHtml(cost);button.setAttribute('aria-label',gramPrice(cost)+' GRAM')}else if(state&&state.reason){button.textContent=state.reason;button.removeAttribute('aria-label')}else if(!initData()){button.textContent='Open in Telegram';button.removeAttribute('aria-label')}button.disabled=busy||stateFromCache||!state||!state.canBuy||!initData()||limitReached}renderWinners();renderWinChanceText();renderPrizePool();renderPrizePanel();updateCountdown()}
   function slotEngine(){return window.VexaLotterySlotEngine||null}
   function replaySuppressedFocus(){if(!suppressedWindowFocus)return;suppressedWindowFocus=false;setTimeout(function(){try{window.dispatchEvent(new Event('focus'))}catch(e){try{var event=document.createEvent('Event');event.initEvent('focus',false,false);window.dispatchEvent(event)}catch(x){}}},0)}
   function setOfficialSpinActive(active){officialSpinActive=!!active;if(!officialSpinActive)replaySuppressedFocus()}
@@ -796,7 +831,7 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
   function applyDrawResult(){var round=state&&state.round,draw=state&&state.lastDraw,drawId=draw&&String(draw.roundId||''),code=draw&&String(draw.winningCode||''),won=!!(state&&state.lastDrawWon),now=liveServerNow();if(!round||round.status==='open'){cancelScheduledDraw();cancelResultReset();setIdleCode();return}if(!drawId||!/^\\d{5}$/.test(code)){cancelScheduledDraw();cancelResultReset();setIdleCode();return}var sameClosedRound=round.status==='closed'&&String(round.id||'')===drawId;if(!sameClosedRound){cancelScheduledDraw();cancelResultReset();setIdleCode();return}var startAt=roundTime('drawStartsAt',DRAW_DELAY_MS);var engine=slotEngine(),duration=engine&&Number(engine.durationMs)>0?Number(engine.durationMs):DRAW_ANIMATION_MS;var animationEndsAt=startAt?startAt+duration:0;if(startAt&&now<startAt){cancelResultReset();setIdleCode();scheduleLiveDraw(drawId,code,won,startAt);return}if(!drawSpinAlreadyShown(drawId)&&(animationEndsAt&&now<animationEndsAt||state&&state.waitingForWinner)){if(!officialSpinActive&&scheduledDrawId!==drawId)scheduleLiveDraw(drawId,code,won,now);return}if(!drawSpinAlreadyShown(drawId)){scheduleLiveDraw(drawId,code,won,now);return}cancelScheduledDraw();cancelResultReset();setIdleCode();if(won)triggerWinnerEffect(drawId)}
   function handleLivePrizePool(event){var item=event&&event.detail;if(!item)return;if(item.kind==='lottery'){if(busy||loading)scheduleLifecycleRefresh(100);else load(true);return}if(item.kind!=='ticket'||item.prizePoolNano===null||item.prizePoolNano===undefined||!state||!state.round)return;if(String(item.roundId||'')!==String(state.round.id||''))return;var target=Math.max(0,Math.floor(Number(item.prizePoolNano)||0)),current=Math.max(0,Math.floor(Number(state.prizePoolNano)||0));if(target>=current){state.prizePoolNano=target;renderPrizePool()}var total=Math.max(0,Math.floor(Number(item.roundTicketCount)||0)),known=Math.max(0,Math.floor(Number(state.roundTicketCount)||0));if(!busy&&state.round.status==='open'&&total>0&&total>=known){var mine=Math.max(0,Math.floor(Number(state.userTicketCount)||0));state.roundTicketCount=total;state.winChancePercent=mine>0?Math.max(0,Math.min(100,(mine/total)*100)):0;renderWinChanceText()}}
   function emptyState(reason,free){return {winnerCount:0,ticketCount:0,roundTicketCount:0,userTicketCount:0,winChancePercent:0,prizePoolNano:0,tickets:[],round:null,lastDraw:null,lastDrawWon:false,freeTicketAvailable:!!free,canBuy:false,reason:reason||'',prizes:[],waitingForWinner:false,winnerDisplayAtMs:0,winners:[],settings:{ticketPriceNano:150000000,maxTicketsPerUser:0,drawIntervalMinutes:1440}}}
-  async function load(force){if(loading)return false;var now=Date.now();if(!force&&now-lastLoadAt<500)return false;var data=initData();if(!data){state=emptyState('Open in Telegram',true);clearLifecycleTimer();render();cancelResultReset();setIdleCode();markHomeHydrated('fallback');return false}loading=true;lastLoadAt=now;var started=Date.now();var hydrationStatus='error';try{var response=await requestLotteryState(data);var payload=await response.json().catch(function(){return null}),received=Date.now();if(!response.ok)throw new Error(payload&&payload.error||'Could not load Lottery');syncServerClock(payload,started,received);state=payload;applyDrawResult();render();var due=lifecycleDueTime();if(due&&due<=liveServerNow())lifecycleRetryMs=Math.min(5000,Math.max(800,Math.round(lifecycleRetryMs*1.7)));else lifecycleRetryMs=800;armLifecycle();hydrationStatus='ready';return true}catch(error){state=emptyState(String(error&&error.message||'Lottery unavailable'),false);render();cancelResultReset();setIdleCode();lifecycleRetryMs=Math.min(15000,Math.max(1200,Math.round(lifecycleRetryMs*1.8)));if(q('#home.active')&&!document.hidden)scheduleLifecycleRefresh(lifecycleRetryMs);return false}finally{loading=false;markHomeHydrated(hydrationStatus)}}
+  async function load(force){if(loading)return false;var now=Date.now();if(!force&&now-lastLoadAt<500)return false;var data=initData();if(!data){state=emptyState('Open in Telegram',true);clearLifecycleTimer();render();cancelResultReset();setIdleCode();markHomeHydrated('fallback');return false}loading=true;lastLoadAt=now;var started=Date.now();var hydrationStatus='error';try{var response=await requestLotteryState(data);var payload=await response.json().catch(function(){return null}),received=Date.now();if(!response.ok)throw new Error(payload&&payload.error||'Could not load Lottery');syncServerClock(payload,started,received);state=payload;stateFromCache=false;writeCachedHomeState(payload);applyDrawResult();render();var due=lifecycleDueTime();if(due&&due<=liveServerNow())lifecycleRetryMs=Math.min(5000,Math.max(800,Math.round(lifecycleRetryMs*1.7)));else lifecycleRetryMs=800;armLifecycle();hydrationStatus='ready';return true}catch(error){state=emptyState(String(error&&error.message||'Lottery unavailable'),false);render();cancelResultReset();setIdleCode();lifecycleRetryMs=Math.min(15000,Math.max(1200,Math.round(lifecycleRetryMs*1.8)));if(q('#home.active')&&!document.hidden)scheduleLifecycleRefresh(lifecycleRetryMs);return false}finally{loading=false;markHomeHydrated(hydrationStatus)}}
   async function buy(){if(busy||!state||!state.canBuy||!initData()||remainingLimit()<=0&&Number(state.settings&&state.settings.maxTicketsPerUser)>0)return;var cost=purchaseCostNano(),balance=Math.max(0,Number(state.gramBalanceNano)||0);if(cost>balance){haptic('error');openTicketWallet();return}busy=true;render();try{var response=await fetch('/app/api/lottery/tickets',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({initData:initData(),quantity:quantity,purchaseId:purchaseId()})});var payload=await response.json().catch(function(){return null});if(!response.ok)throw new Error(payload&&payload.error||'Could not get ticket');if(window.VexaTonBalance&&typeof window.VexaTonBalance.write==='function'&&payload.gramBalanceNano!==undefined)window.VexaTonBalance.write(Number(payload.gramBalanceNano)||0,0);if(state&&payload.prizePoolNano!==undefined&&(!payload.round||!state.round||String(payload.round.id||'')===String(state.round.id||''))){state.prizePoolNano=Math.max(Number(state.prizePoolNano)||0,Number(payload.prizePoolNano)||0);renderPrizePool()}quantity=1;haptic('success');await load(true)}catch(error){var message=String(error&&error.message||'Could not get ticket');haptic('error');if(/insufficient balance/i.test(message)){openTicketWallet();return}var button=q('#homeTicketButton');if(button){button.textContent=message;setTimeout(render,1200)}}finally{busy=false;setTimeout(render,0)}}
   function handleTicketControls(event){var target=event.target&&event.target.closest?event.target.closest('#homeTicketButton,#home [data-ticket-plus],#home [data-ticket-minus]'):null;if(!target)return;event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();if(target.id==='homeTicketButton'){ticketSound('buy');buy();return}if(busy||!state||!state.canBuy||remainingLimit()<=0&&Number(state.settings.maxTicketsPerUser)>0)return;if(target.hasAttribute('data-ticket-plus')){quantity=Math.min(maxSelectable(),quantity+1);ticketSound('plus')}if(target.hasAttribute('data-ticket-minus')){quantity=Math.max(1,quantity-1);ticketSound('minus')}haptic('light');render()}
   function handleSmartRefresh(event){var target=event.target&&event.target.closest?event.target:null;if(!target)return;var homeLink=target.closest('[data-view="home"]'),bonus=target.closest('#homeBonusButton');if(homeLink)setTimeout(function(){if(q('#home.active')&&!busy){startClock();load(false)}},60);else if(bonus)setTimeout(function(){if(q('#home.active')&&!busy)load(false)},0)}
@@ -804,7 +839,7 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
   function startClock(){if(clockTimer||document.hidden||!q('#home.active'))return;var tick=function(){clockTimer=0;updateCountdown();if(document.hidden||!q('#home.active'))return;var next=1000-(Math.floor(liveServerNow())%1000)+16;clockTimer=setTimeout(tick,Math.max(120,next))};tick()}
   function refreshWhenVisible(){if(!document.hidden&&q('#home.active')&&!busy){startClock();load(false)}else stopClock()}
   function handleResize(){syncWinnerHeight();updateWinnerFade(ensureWinnersSurface())}
-  function init(){lotteryCopy();document.addEventListener('click',handleTicketControls,true);document.addEventListener('click',handleSmartRefresh,true);window.addEventListener('vexa:live-activity',handleLivePrizePool);window.addEventListener('resize',handleResize,{passive:true});load(true);startClock();window.VexaLotteryRefresh=function(){return load(true)}}
+  function init(){lotteryCopy();document.addEventListener('click',handleTicketControls,true);document.addEventListener('click',handleSmartRefresh,true);window.addEventListener('vexa:live-activity',handleLivePrizePool);window.addEventListener('resize',handleResize,{passive:true});var cached=readCachedHomeState();if(cached){state=cached.state;stateFromCache=true;render()}load(true);startClock();window.VexaLotteryRefresh=function(){return load(true)}}
   window.addEventListener('focus',guardOfficialSpinFocus,true);
   init();
   window.addEventListener('focus',refreshWhenVisible);

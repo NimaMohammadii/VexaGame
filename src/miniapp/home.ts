@@ -709,7 +709,9 @@ const HOME_ASSET_SCRIPT = `
     return homeBackgroundInFlight;
   }
   function homeVisualAssetsReady(){
-    return Promise.all([loadTonLogo(false),loadHomePromos(false),loadHomeBackground()]).then(function(){return true},function(){return false});
+    loadTonLogo(false).catch(function(){});
+    loadHomePromos(false).catch(function(){});
+    return loadHomeBackground().then(function(){return true},function(){return false});
   }
   function apply(){homeVisualAssetsReady()}
   apply();

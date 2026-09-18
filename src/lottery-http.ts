@@ -8,6 +8,17 @@ export async function handleLotteryRequest(request: Request, env: Env): Promise<
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/app/api/lottery/')) return null;
 
+  const previousWinnerAvatar = url.pathname.match(/^\/app\/api\/lottery\/previous-winner-avatar\/([1-3])$/);
+  if (request.method === 'GET' && previousWinnerAvatar) {
+    const object = await env.ASSETS.get(`lottery/previous-winner/${previousWinnerAvatar[1]}`).catch(() => null);
+    if (!object) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+    return new Response(object.body, { headers: {
+      'content-type': object.httpMetadata?.contentType || 'image/jpeg',
+      'cache-control': url.searchParams.get('v') ? 'public, max-age=31536000, immutable' : 'no-store',
+      'x-content-type-options': 'nosniff',
+    } });
+  }
+
   try {
     if (request.method === 'GET' && url.pathname === '/app/api/lottery/state') {
       const serverStartedAtMs = Date.now();

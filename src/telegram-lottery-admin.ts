@@ -1,19 +1,22 @@
 import type { Env } from './types';
 import { getCurrentLotteryRound, getLotteryAdminOverview, getLotterySettings, setLotteryDrawMinutesFromNow, startLotteryNow, subtractLotteryDrawMinutes, updateLotterySettings } from './lottery';
-import { adjustLotteryPrizePool, clearLotteryWinnerSelections, getLotteryPrizePoolNano, getLotteryPrizes, getLotteryRoundTicketHolder, getLotteryUserHistory, getLotteryWinnerSelections, listLotteryRoundTicketHolders, LOTTERY_WINNER_COUNT, searchLotteryTicketHolders, setLotteryPrizePercentages, setLotteryWinnerSelection } from './lottery-prizes';
+import { adjustLotteryPrizePool, clearCustomPreviousWinners, clearLotteryWinnerSelections, deleteCustomPreviousWinner, getCustomPreviousWinners, getLotteryPrizePoolNano, getLotteryPrizes, getLotteryRoundTicketHolder, getLotteryUserHistory, getLotteryWinnerSelections, listLotteryRoundTicketHolders, LOTTERY_WINNER_COUNT, searchLotteryTicketHolders, setCustomPreviousWinner, setLotteryPrizePercentages, setLotteryWinnerSelection, useAutomaticPreviousWinners } from './lottery-prizes';
 import { publishLotteryLiveRefresh } from './live-activity';
 import { makeSimplePdf } from './telegram-pdf';
 import { getTelegramMenuMessageId, setTelegramMenuMessageId, upsertTelegramTextMenu } from './telegram-menu-state';
 
-type Message = { message_id: number; chat: { id: number }; from?: { id: number }; text?: string };
+type Photo = { file_id: string; file_size?: number };
+type Document = { file_id: string; file_size?: number; mime_type?: string };
+type Message = { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; photo?: Photo[]; document?: Document };
 type Callback = { id: string; data?: string; from: { id: number }; message?: { message_id: number; chat: { id: number } } };
 type Update = { message?: Message; callback_query?: Callback };
 type Button = { text: string; callback_data: string };
 type Keyboard = Button[][];
-type InputMode = 'draw' | 'price' | 'limit' | 'interval' | 'prizes' | 'pooladd' | 'poolsubtract' | `winner${1 | 2 | 3}`;
+type InputMode = 'draw' | 'price' | 'limit' | 'interval' | 'prizes' | 'pooladd' | 'poolsubtract' | `winner${1 | 2 | 3}` | `previousname${1 | 2 | 3}` | `previousphoto${1 | 2 | 3}`;
 
 const STATE_PREFIX = 'admin:lottery-input:';
 const NANO = 1_000_000_000;
+const MAX_PROFILE_BYTES = 5 * 1024 * 1024;
 
 export async function handleLotteryAdminRequest(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
@@ -74,6 +77,43 @@ async function handleCallback(env: Env, callback: Callback): Promise<Response> {
 
     if (action === 'winners') {
       await sendWinnerMenu(env, chatId, messageId);
+      return ok();
+    }
+
+    if (action === 'previous') {
+      await sendPreviousWinnersMenu(env, chatId, messageId);
+      return ok();
+    }
+
+    if (action === 'addprevious') {
+      const rank = Number(arg);
+      if (![1, 2, 3].includes(rank)) throw new Error('رتبه نامعتبر است.');
+      await setState(env, callback.from.id, `previousname${rank}` as InputMode);
+      await prompt(env, chatId, messageId, `previousname${rank}` as InputMode);
+      return ok();
+    }
+
+    if (action === 'deleteprevious') {
+      const rank = Number(arg);
+      await deleteCustomPreviousWinner(env, rank);
+      await env.ASSETS.delete(`lottery/previous-winner/${rank}`).catch(() => undefined);
+      await publishLotteryRefresh(env, undefined, 'Previous Lottery winner deleted');
+      await sendPreviousWinnersMenu(env, chatId, messageId, `✅ برنده رتبه ${rank} حذف شد.`);
+      return ok();
+    }
+
+    if (action === 'clearprevious') {
+      await clearCustomPreviousWinners(env);
+      await Promise.all([1, 2, 3].map((rank) => env.ASSETS.delete(`lottery/previous-winner/${rank}`).catch(() => undefined)));
+      await publishLotteryRefresh(env, undefined, 'Previous Lottery winners cleared');
+      await sendPreviousWinnersMenu(env, chatId, messageId, '✅ همه برنده‌های قبلی حذف شدند؛ این بخش خالی می‌ماند.');
+      return ok();
+    }
+
+    if (action === 'autoprevious') {
+      await useAutomaticPreviousWinners(env);
+      await publishLotteryRefresh(env, undefined, 'Previous Lottery winners restored');
+      await sendPreviousWinnersMenu(env, chatId, messageId, '✅ نمایش برنده‌های واقعی آخرین قرعه‌کشی فعال شد.');
       return ok();
     }
 
@@ -183,7 +223,36 @@ async function handleInput(env: Env, message: Message, mode: InputMode): Promise
       await clearState(env, userId);
       if (mode === 'prizes') await sendPrizeMenu(env, message.chat.id, menuMessageId);
       else if (mode.startsWith('winner')) await sendWinnerMenu(env, message.chat.id, menuMessageId);
+      else if (mode.startsWith('previous')) await sendPreviousWinnersMenu(env, message.chat.id, menuMessageId);
       else await sendLotteryMenu(env, message.chat.id, menuMessageId);
+      return;
+    }
+
+    if (mode.startsWith('previousname')) {
+      const rank = Number(mode.slice(-1));
+      const parsed = parsePreviousWinner(text);
+      await env.BOT_CACHE.put(previousDraftKey(userId), JSON.stringify(parsed), { expirationTtl: 900 });
+      await setState(env, userId, `previousphoto${rank}` as InputMode);
+      await prompt(env, message.chat.id, menuMessageId, `previousphoto${rank}` as InputMode);
+      return;
+    }
+
+    if (mode.startsWith('previousphoto')) {
+      const rank = Number(mode.slice(-1));
+      const draft = await getPreviousDraft(env, userId);
+      if (!draft) throw new Error('اطلاعات نام منقضی شده؛ دوباره از ابتدا شروع کنید.');
+      const source = profileImageFromMessage(message);
+      if (!source) throw new Error('عکس را به‌صورت Photo یا فایل JPG/PNG/WebP بفرستید.');
+      const version = await savePreviousWinnerProfile(env, source);
+      await env.ASSETS.put(`lottery/previous-winner/${rank}`, version.bytes, {
+        httpMetadata: { contentType: version.contentType },
+        customMetadata: { version: version.id, rank: String(rank), uploadedVia: 'telegram-lottery-admin' },
+      });
+      await setCustomPreviousWinner(env, rank, draft.name, draft.prizeNano, version.id);
+      await finishInput(env, userId);
+      await env.BOT_CACHE.delete(previousDraftKey(userId)).catch(() => undefined);
+      await publishLotteryRefresh(env, undefined, 'Previous Lottery winner updated');
+      await sendPreviousWinnersMenu(env, message.chat.id, menuMessageId, `✅ ${draft.name} در رتبه ${rank} ذخیره شد.`);
       return;
     }
 
@@ -301,6 +370,7 @@ async function sendLotteryMenu(env: Env, chatId: number, messageId?: number, not
   const rows: Keyboard = [
     [{ text: '🚀 Start Now', callback_data: 'botadmin:lottery:startnow' }],
     [{ text: '🎯 تعیین ۳ برنده راند بعدی', callback_data: 'botadmin:lottery:winners' }],
+    [{ text: '🖼 مدیریت برنده‌های قبلی Home', callback_data: 'botadmin:lottery:previous' }],
     [{ text: '👥 کاربران و تیکت‌های راند', callback_data: 'botadmin:lottery:holders:0' }],
     [{ text: '🏆 تقسیم Prize Pool برای ۳ برنده', callback_data: 'botadmin:lottery:prizes' }],
     [
@@ -454,6 +524,39 @@ async function sendWinnerMenu(env: Env, chatId: number, messageId?: number, noti
   if (active) await setTelegramMenuMessageId(env, chatId, active);
 }
 
+async function sendPreviousWinnersMenu(env: Env, chatId: number, messageId?: number, notice = ''): Promise<void> {
+  const state = await getCustomPreviousWinners(env);
+  const byRank = new Map(state.winners.map((winner) => [winner.rank, winner]));
+  const text = [
+    notice,
+    '🖼 برنده‌های قبلی Home',
+    '',
+    `حالت نمایش: ${state.enabled ? 'دستی' : 'خودکار (آخرین قرعه‌کشی واقعی)'}`,
+    ...(state.enabled
+      ? Array.from({ length: LOTTERY_WINNER_COUNT }, (_, index) => {
+        const rank = index + 1;
+        const winner = byRank.get(rank);
+        return `#${rank}: ${winner ? `${winner.displayName} · ${formatPrizePoolGram(winner.prizeNano)} GRAM` : 'خالی'}`;
+      })
+      : ['برای ساخت لیست دلخواه، یکی از رتبه‌ها را اضافه کنید.']),
+    '',
+    'نام، مبلغ اختیاری و عکس پروفایل هر رتبه را خودتان تعیین کنید. حذف همه، بخش برنده‌ها را عمداً خالی نگه می‌دارد.',
+  ].filter(Boolean).join('\n');
+  const rows: Keyboard = [];
+  for (let rank = 1; rank <= LOTTERY_WINNER_COUNT; rank += 1) {
+    const winner = byRank.get(rank);
+    rows.push([
+      { text: `${winner ? '✏️' : '➕'} رتبه ${rank}`, callback_data: `botadmin:lottery:addprevious:${rank}` },
+      ...(winner ? [{ text: '🗑 حذف', callback_data: `botadmin:lottery:deleteprevious:${rank}` }] : []),
+    ]);
+  }
+  rows.push([{ text: '🧹 حذف همه و نمایش لیست خالی', callback_data: 'botadmin:lottery:clearprevious' }]);
+  rows.push([{ text: '🔄 بازگشت به برنده‌های واقعی', callback_data: 'botadmin:lottery:autoprevious' }]);
+  rows.push([{ text: '⬅️ Lottery Control', callback_data: 'botadmin:lottery:menu' }]);
+  const active = await upsert(env, env.BOT_TOKEN, chatId, messageId, text, rows);
+  if (active) await setTelegramMenuMessageId(env, chatId, active);
+}
+
 async function sendWinnerCandidates(env: Env, chatId: number, messageId: number | undefined, rank: number, query = '', provided?: Awaited<ReturnType<typeof searchLotteryTicketHolders>>): Promise<void> {
   const round = await getCurrentLotteryRound(env, false);
   const candidates = provided || (round ? await searchLotteryTicketHolders(env, round.id, query, 12) : []);
@@ -494,7 +597,11 @@ async function sendPrizeMenu(env: Env, chatId: number, messageId?: number, notic
 }
 
 async function prompt(env: Env, chatId: number, messageId: number | undefined, mode: InputMode, notice = ''): Promise<void> {
-  const text = mode.startsWith('winner')
+  const text = mode.startsWith('previousname')
+    ? `✍️ نام برنده قبلی رتبه ${mode.slice(-1)} را بفرستید.\n\nمبلغ جایزه اختیاری است؛ مثال:\nNima | 125.5\n\nاگر مبلغ ننویسید، صفر ثبت می‌شود.`
+    : mode.startsWith('previousphoto')
+      ? `🖼 عکس پروفایل برنده رتبه ${mode.slice(-1)} را بفرستید.\n\nPhoto یا فایل JPG/PNG/WebP تا حداکثر ۵ مگابایت پذیرفته می‌شود.`
+      : mode.startsWith('winner')
     ? `🔎 جستجوی برنده رتبه ${mode.slice(-1)}\n\nیوزرنیم (با یا بدون @) یا Telegram ID کاربر دارای تیکت را بفرستید.`
     : mode === 'prizes'
     ? '🏆 تقسیم Prize Pool\n\nدرصد رتبه اول، دوم و سوم را به‌ترتیب بفرستید.\nمثال: 50,30,20\nمجموع باید دقیقاً 100 باشد.'
@@ -509,7 +616,7 @@ async function prompt(env: Env, chatId: number, messageId: number | undefined, m
             : mode === 'limit'
               ? '👤 سقف تیکت هر کاربر\n\nیک عدد صحیح بفرستید.\n0 یعنی بدون محدودیت.'
               : '🔁 فاصله پیش‌فرض Draw\n\nتعداد دقیقه را بفرستید.\nمثال: 1440 یعنی 24 ساعت.';
-  const back = mode === 'prizes' ? 'botadmin:lottery:prizes' : mode.startsWith('winner') ? `botadmin:lottery:winner:${mode.slice(-1)}` : 'botadmin:lottery:menu';
+  const back = mode === 'prizes' ? 'botadmin:lottery:prizes' : mode.startsWith('winner') ? `botadmin:lottery:winner:${mode.slice(-1)}` : mode.startsWith('previous') ? 'botadmin:lottery:previous' : 'botadmin:lottery:menu';
   const active = await upsert(env, env.BOT_TOKEN, chatId, messageId, `${notice ? notice + '\n\n' : ''}${text}\n\n/cancel برای لغو`, [[{ text: '⬅️ بازگشت', callback_data: back }]]);
   if (active) await setTelegramMenuMessageId(env, chatId, active);
 }
@@ -519,7 +626,7 @@ async function finishInput(env: Env, userId: number): Promise<void> {
 }
 
 function normalizeMode(value: string): InputMode | null {
-  return value === 'draw' || value === 'price' || value === 'limit' || value === 'interval' || value === 'prizes' || value === 'pooladd' || value === 'poolsubtract' || /^winner[123]$/.test(value) ? value as InputMode : null;
+  return value === 'draw' || value === 'price' || value === 'limit' || value === 'interval' || value === 'prizes' || value === 'pooladd' || value === 'poolsubtract' || /^winner[123]$/.test(value) || /^previous(?:name|photo)[123]$/.test(value) ? value as InputMode : null;
 }
 function parsePrizePercentages(value: string): number[] {
   const parts = value.replace(/٪/g, '%').split(/[،,;|/\s]+/).map((item) => item.replace('%', '').trim()).filter(Boolean);
@@ -537,6 +644,47 @@ function parsePrizePoolAmountNano(value: string): number {
   const nano = Math.round(gram * NANO);
   if (!Number.isFinite(gram) || gram <= 0 || !Number.isSafeInteger(nano) || nano <= 0) throw new Error('یک مقدار مثبت و معتبر GRAM بفرستید.');
   return nano;
+}
+function parsePreviousWinner(value: string): { name: string; prizeNano: number } {
+  const [rawName, rawPrize = '0'] = value.split('|', 2);
+  const name = String(rawName || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  const gram = Number(String(rawPrize || '0').trim().replace(',', '.'));
+  const prizeNano = Math.round(gram * NANO);
+  if (!name) throw new Error('نام برنده را بنویسید.');
+  if (!Number.isFinite(gram) || gram < 0 || !Number.isSafeInteger(prizeNano)) throw new Error('مبلغ جایزه نامعتبر است. مثال: Nima | 125.5');
+  return { name, prizeNano };
+}
+function previousDraftKey(userId: number): string { return `${STATE_PREFIX}${userId}:previous-draft`; }
+async function getPreviousDraft(env: Env, userId: number): Promise<{ name: string; prizeNano: number } | null> {
+  const raw = await env.BOT_CACHE.get(previousDraftKey(userId)).catch(() => null);
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as { name?: unknown; prizeNano?: unknown };
+    const name = String(value.name || '').trim();
+    const prizeNano = Math.floor(Number(value.prizeNano));
+    return name && Number.isSafeInteger(prizeNano) && prizeNano >= 0 ? { name, prizeNano } : null;
+  } catch { return null; }
+}
+function profileImageFromMessage(message: Message): { fileId: string; size?: number; contentType: string } | null {
+  const photo = message.photo?.at(-1);
+  if (photo?.file_id) return { fileId: photo.file_id, size: photo.file_size, contentType: 'image/jpeg' };
+  const document = message.document;
+  const type = String(document?.mime_type || '').toLowerCase();
+  return document?.file_id && ['image/jpeg', 'image/png', 'image/webp'].includes(type)
+    ? { fileId: document.file_id, size: document.file_size, contentType: type }
+    : null;
+}
+async function savePreviousWinnerProfile(env: Env, source: { fileId: string; size?: number; contentType: string }): Promise<{ bytes: ArrayBuffer; contentType: string; id: string }> {
+  if (source.size && source.size > MAX_PROFILE_BYTES) throw new Error('حجم عکس باید کمتر از ۵ مگابایت باشد.');
+  const file = await tg<{ file_path?: string }>(env.BOT_TOKEN, 'getFile', { file_id: source.fileId });
+  if (!file.file_path) throw new Error('فایل عکس از تلگرام دریافت نشد.');
+  const response = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`);
+  if (!response.ok) throw new Error('دانلود عکس پروفایل ناموفق بود.');
+  const bytes = await response.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > MAX_PROFILE_BYTES) throw new Error('حجم عکس باید کمتر از ۵ مگابایت باشد.');
+  const responseType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const contentType = ['image/jpeg', 'image/png', 'image/webp'].includes(responseType) ? responseType : source.contentType;
+  return { bytes, contentType, id: String(Date.now()) };
 }
 function stateKey(userId: number): string { return `${STATE_PREFIX}${userId}`; }
 async function getState(env: Env, userId: number): Promise<InputMode | null> {

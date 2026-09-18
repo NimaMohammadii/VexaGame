@@ -442,7 +442,7 @@ export const HOME_STYLES = HOME_BASE_STYLES + HOME_MARKUP_STYLES + HOME_SLOT_STY
 
 // Home owns its markup, styles, asset synchronization, and client behavior.
 const HOME_INITIAL_REEL_DIGITS = Array.from({ length: 40 }, (_, index) => `<span class="home-slot-number-digit">${index % 10}</span>`).join('');
-const HOME_INITIAL_SLOT_REELS = Array.from({ length: 5 }, (_, index) => `<div class="home-slot-number-reel" data-slot-index="${index}" data-slot-value="0"><div class="home-slot-number-strip" data-slot-strip style="transform:translate3d(0,-820px,0)">${HOME_INITIAL_REEL_DIGITS}</div></div>`).join('');
+const HOME_INITIAL_SLOT_REELS = Array.from({ length: 5 }, (_, index) => `<div class="home-slot-number-reel" data-slot-index="${index}" data-slot-value="0"><div class="home-slot-number-strip" data-slot-strip style="transform:translate3d(0,-697px,0)">${HOME_INITIAL_REEL_DIGITS}</div></div>`).join('');
 const HOME_INITIAL_DRAW_INFO = `<div class="home-draw-info-card" id="homeDrawInfoCard"><div class="home-draw-main"><div class="home-draw-copy"><span class="home-draw-label">Next Draw in</span><strong class="home-draw-time" data-draw-time>00:00:00</strong></div><span class="home-draw-divider" aria-hidden="true"></span><div class="home-prize-copy"><span class="home-prize-label">Prize Pool</span><strong class="home-prize-value"><span data-prize-pool>0.00</span><span class="home-prize-icon ton-mini-icon"><img data-prize-pool-icon alt="" aria-hidden="true" style="display:none"></span></strong></div></div><div class="home-draw-actions" id="homeDrawActions"><button class="home-ticket-image-button" id="homeTicketImageButton" type="button">My Tickets</button><button class="home-bonus-button" id="homeBonusButton" type="button" aria-label="Lottery"><svg class="home-bonus-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1" stroke="currentColor" stroke-width="1.65"/><path d="M12 8v13" stroke="currentColor" stroke-width="1.65"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" stroke="currentColor" stroke-width="1.65"/><g class="home-bonus-bow"><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.65"/></g></svg></button></div></div>`;
 const HOME_INITIAL_WINNERS = `<section class="home-lottery-winners" aria-label="Lottery results"><div class="home-lottery-winners-title"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" stroke="currentColor" stroke-width="1.8"/><path d="M8 6H5v1a4 4 0 0 0 4 4M16 6h3v1a4 4 0 0 1-4 4M12 13v4M8.5 20h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-lottery-winners-title>Previous Winners</span></div><div class="home-lottery-winners-list"></div></section>`;
 const HOME_INITIAL_LUCKY_CODE = `<section id="homeLuckyCodeSection"><div class="home-ticket-drawer-backdrop" id="homeTicketDrawerBackdrop"></div><div class="home-ticket-drawer" id="homeTicketDrawer"><div class="home-ticket-drawer-head"><strong>My Tickets</strong><button type="button" class="home-ticket-drawer-close" id="homeTicketDrawerClose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div><div class="home-ticket-drawer-count"><strong data-ticket-count>0 tickets</strong><span class="home-ticket-win-chance-text"><span data-win-chance-label>Your chance to win</span><b data-win-chance>0%</b></span></div><div class="home-ticket-list" id="homeTicketList"></div></div><div class="home-lucky-card"><div class="home-lucky-head" aria-hidden="true"></div>${HOME_INITIAL_DRAW_INFO}<section class="home-lottery-slot-card" aria-label="Lottery slot image"><img class="home-lottery-slot-image" src="/app/api/home-lottery-slot.png?v=home-lottery" alt="" decoding="async" loading="eager"/><div class="home-slot-number-grid" aria-hidden="true">${HOME_INITIAL_SLOT_REELS}</div></section><div class="home-ticket-layout"><div class="home-ticket-card"><div class="home-ticket-count" data-ticket-count>1 ticket</div><div class="home-ticket-stepper"><button class="home-ticket-step" type="button" data-ticket-minus>-</button><button class="home-ticket-step" type="button" data-ticket-plus>+</button></div><button class="home-ticket-button" id="homeTicketButton" type="button">Get Ticket</button></div><div class="home-ticket-finance-visual">${HOME_INITIAL_WINNERS}</div></div></div></section>`;
@@ -460,7 +460,7 @@ const HOME_MARKUP_SCRIPT = `
     return String((all[locale]&&all[locale][key])||(all.en&&all.en[key])||'');
   }
   window.VexaLotteryText=lotteryText;
-  function reelY(index){return 'translate3d(0,-'+((index*40)+20)+'px,0)'}
+  function reelY(index){return 'translate3d(0,-'+((index*34)+17)+'px,0)'}
   function reelDigitsHtml(){var html='';for(var cycle=0;cycle<4;cycle++)for(var n=0;n<10;n++)html+='<span class="home-slot-number-digit">'+n+'</span>';return html}
   function slotsHtml(){var html='';for(var i=0;i<5;i++){var v=0;html+='<div class="home-slot-number-reel" data-slot-index="'+i+'" data-slot-value="'+v+'"><div class="home-slot-number-strip" data-slot-strip style="transform:'+reelY(20+v)+'">'+reelDigitsHtml()+'</div></div>'}return '<div class="home-slot-number-grid" aria-hidden="true">'+html+'</div>'}
   function placeSection(home,sec){var promo=q('#homePromoCarousel',home),anchor=promo?promo.nextSibling:home.firstChild;if(anchor!==sec)home.insertBefore(sec,anchor)}
@@ -491,11 +491,11 @@ const HOME_MARKUP_SCRIPT = `
 
 const HOME_SLOT_SCRIPT = `
 (function(){
-  var busy=false,row=34,restLoop=20,spinLoops=25,totalSpinMs=6000,reelStopGapMs=3000;
+  var busy=false,row=34,restLoop=2,spinLoops=25,totalSpinMs=6000,reelStopGapMs=3000;
   function q(s,r){return (r||document).querySelector(s)}
   function qa(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))}
   function y(i){return 'translate3d(0,-'+((i*row)+(row/2))+'px,0)'}
-  function digits(){var h='';for(var c=0;c<90;c++)for(var n=0;n<10;n++)h+='<span class="home-slot-number-digit">'+n+'</span>';return h}
+  function digits(){var h='';for(var c=0;c<40;c++)for(var n=0;n<10;n++)h+='<span class="home-slot-number-digit">'+n+'</span>';return h}
   function indexFor(v,loop){return loop*10+Math.max(0,Math.min(9,Math.floor(Number(v)||0)))}
   function enableHomeScroll(){var h=q('#home');document.body.classList.remove('home-scroll-locked');if(h){h.style.removeProperty('overflow-y');h.style.removeProperty('touch-action');h.scrollLeft=0}}
   function drawInfoHtml(){return '<div class="home-draw-info-card" id="homeDrawInfoCard"><div class="home-draw-main"><div class="home-draw-copy"><span class="home-draw-label">Next Draw in</span><strong class="home-draw-time" data-draw-time>00:00:00</strong></div><span class="home-draw-divider" aria-hidden="true"></span><div class="home-prize-copy"><span class="home-prize-label">Prize Pool</span><strong class="home-prize-value"><span data-prize-pool>0.00</span><span class="home-prize-icon ton-mini-icon"><img data-prize-pool-icon alt="" aria-hidden="true" style="display:none"></span></strong></div></div><div class="home-draw-actions" id="homeDrawActions"><button class="home-ticket-image-button" id="homeTicketImageButton" type="button">My Tickets</button><button class="home-bonus-button" id="homeBonusButton" type="button" aria-label="Lottery"><svg class="home-bonus-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1" stroke="currentColor" stroke-width="1.65"/><path d="M12 8v13" stroke="currentColor" stroke-width="1.65"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" stroke="currentColor" stroke-width="1.65"/><g class="home-bonus-bow"><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.65"/></g></svg></button></div></div>'}
@@ -512,7 +512,6 @@ const HOME_SLOT_SCRIPT = `
     enableHomeScroll();ensureDrawInfoCard();
     qa('#home .home-slot-number-reel').forEach(function(reel){
       var strip=q('[data-slot-strip]',reel);if(!strip)return;
-      if(strip.dataset.tuned!=='3'){strip.innerHTML=digits();strip.dataset.tuned='3'}
       var v=Math.max(0,Math.min(9,Math.floor(Number(reel.getAttribute('data-slot-value')||'0'))));
       strip.style.setProperty('transition','none','important');strip.style.transform=y(indexFor(v,restLoop));strip.style.willChange='auto';
     });
@@ -543,6 +542,7 @@ const HOME_SLOT_SCRIPT = `
     if(!pending){busy=false;return false}
     reels.forEach(function(reel,i){
       var strip=q('[data-slot-strip]',reel);if(!strip){pending--;return}
+      if(strip.dataset.tuned!=='3'){strip.innerHTML=digits();strip.dataset.tuned='3'}
       var current=Math.max(0,Math.min(9,Math.floor(Number(reel.getAttribute('data-slot-value')||'0'))));
       var final=clean?Number(clean.charAt(i)):Math.floor(Math.random()*10),loops=spinLoops+i*2,finalIndex=indexFor(final,restLoop+loops);
       reel.setAttribute('data-slot-value',String(final));
@@ -576,6 +576,7 @@ const HOME_ASSET_SCRIPT = `
   var META_CACHE_MS=300000;
   var TON_META_KEY='vexaTonLogoMeta:v1';
   var PROMO_CACHE_NAME='vexa-home-promos-v1';
+  var PROMO_HEIGHT_KEY='vexa:home-promo-height:v1';
   var promoTimer=0,promoLoopTimer=0,promoIndex=0,promoCount=0,promoHost=null,promoTrack=null,promoLoaded=false,promoInFlight=null;
   var promoObjectUrls=[];
   var homeBackgroundInFlight=null;
@@ -640,7 +641,7 @@ const HOME_ASSET_SCRIPT = `
     var slide=promoTrack.children[Math.min(promoIndex,promoCount)]||promoTrack.children[0];
     if(!slide)return;
     var h=Math.ceil(slide.getBoundingClientRect().height||0);
-    if(h>0)promoHost.style.height=h+'px';
+    if(h>0){promoHost.style.height=h+'px';try{localStorage.setItem(PROMO_HEIGHT_KEY,String(h))}catch(e){}}
   }
   function setPromoTransform(animate){
     if(!promoTrack)return;
@@ -713,7 +714,8 @@ const HOME_ASSET_SCRIPT = `
     loadHomePromos(false).catch(function(){});
     return loadHomeBackground().then(function(){return true},function(){return false});
   }
-  function apply(){homeVisualAssetsReady()}
+  function reservePromoHeight(){var host=document.getElementById('homePromoCarousel');if(!host)return;try{var h=Math.floor(Number(localStorage.getItem(PROMO_HEIGHT_KEY))||0);if(h>0){host.style.height=h+'px';host.classList.add('is-ready')}}catch(e){}}
+  function apply(){reservePromoHeight();homeVisualAssetsReady()}
   apply();
   document.addEventListener('visibilitychange',function(){if(document.hidden){clearPromoTimer();clearPromoLoopTimer()}else schedulePromo()});
   window.addEventListener('resize',function(){(window.requestAnimationFrame||function(cb){return setTimeout(cb,0)})(function(){setPromoTransform(false)})},{passive:true});

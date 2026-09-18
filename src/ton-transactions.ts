@@ -38,6 +38,52 @@ type TonTransactionRow = {
   created_at: string;
 };
 
+
+type TonDepositHistoryRow = {
+  id: string;
+  user_id: string;
+  amount_ton: string;
+  ton_balance_nano: number;
+  status: string;
+  tx_hash: string | null;
+  credited_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type UsdtDepositHistoryRow = {
+  id: string;
+  user_id: string;
+  network: string;
+  expected_amount_usdt: string;
+  amount_nano: number;
+  status: string;
+  tx_hash: string | null;
+  credited_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type StarsDepositHistoryRow = {
+  id: string;
+  user_id: string;
+  stars_amount: number;
+  amount_nano: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type WithdrawalHistoryRow = {
+  id: string;
+  user_id: string;
+  wallet_address: string;
+  amount_nano: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TonTransaction = {
   id: string;
   userId: string;
@@ -177,8 +223,149 @@ export async function listUserTonTransactions(
   return { transactions: (rows.results ?? []).map(rowToTransaction) };
 }
 
-export function listUserTonWalletTransactions(env: Env, userId: string, limit = 100): Promise<{ transactions: TonTransaction[] }> {
-  return listUserTonTransactions(env, userId, limit, ['deposit', 'withdraw']);
+export async function listUserTonWalletTransactions(env: Env, userId: string, limit = 100): Promise<{ transactions: TonTransaction[] }> {
+  const safeUserId = cleanUserId(userId);
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(Number(limit) || 100)));
+  await ensureTonTransactionsTable(env);
+
+  const [ledgerRows, tonDeposits, usdtDeposits, starsDeposits, withdrawals] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM ton_transactions
+      WHERE user_id = ? AND (kind = 'withdraw' OR (kind = 'deposit' AND status = 'completed'))
+      ORDER BY datetime(created_at) DESC, id DESC LIMIT ?`)
+      .bind(safeUserId, safeLimit)
+      .all<TonTransactionRow>()
+      .then((rows) => rows.results ?? []),
+    readWalletHistoryRows<TonDepositHistoryRow>(env, `SELECT id,user_id,amount_ton,ton_balance_nano,status,tx_hash,credited_at,created_at,updated_at
+      FROM ton_deposits WHERE user_id = ? AND status = 'completed'
+      ORDER BY datetime(COALESCE(credited_at,updated_at,created_at)) DESC LIMIT ?`, safeUserId, safeLimit),
+    readWalletHistoryRows<UsdtDepositHistoryRow>(env, `SELECT id,user_id,network,expected_amount_usdt,amount_nano,status,tx_hash,credited_at,created_at,updated_at
+      FROM usdt_deposits WHERE user_id = ? AND status = 'completed'
+      ORDER BY datetime(COALESCE(credited_at,updated_at,created_at)) DESC LIMIT ?`, safeUserId, safeLimit),
+    readWalletHistoryRows<StarsDepositHistoryRow>(env, `SELECT id,user_id,stars_amount,amount_nano,status,created_at,updated_at
+      FROM stars_deposits WHERE user_id = ? AND status = 'completed'
+      ORDER BY datetime(updated_at) DESC LIMIT ?`, safeUserId, safeLimit),
+    readWalletHistoryRows<WithdrawalHistoryRow>(env, `SELECT id,user_id,wallet_address,amount_nano,status,created_at,updated_at
+      FROM ton_withdrawals WHERE user_id = ?
+      ORDER BY datetime(created_at) DESC LIMIT ?`, safeUserId, safeLimit),
+  ]);
+
+  const transactions = ledgerRows.map(rowToTransaction);
+  const bySource = new Map<string, TonTransaction>();
+  for (const item of transactions) {
+    const key = walletHistorySourceKey(item.referenceType, item.referenceId);
+    if (key) bySource.set(key, item);
+  }
+
+  for (const row of tonDeposits) {
+    mergeWalletHistorySource(transactions, bySource, {
+      id: `source_tondep:${row.id}`,
+      userId: row.user_id,
+      kind: 'deposit',
+      title: 'GRAM wallet deposit',
+      description: `${row.amount_ton} GRAM wallet payment`,
+      amountNano: Math.max(0, Number(row.ton_balance_nano || 0)),
+      balanceAfterNano: 0,
+      status: 'completed',
+      referenceId: row.id,
+      referenceType: 'ton_deposit',
+      metadata: row.tx_hash ? { txHash: row.tx_hash } : {},
+      createdAt: row.credited_at || row.updated_at || row.created_at,
+    });
+  }
+
+  for (const row of usdtDeposits) {
+    mergeWalletHistorySource(transactions, bySource, {
+      id: `source_usdtdep:${row.id}`,
+      userId: row.user_id,
+      kind: 'deposit',
+      title: 'USDT deposit',
+      description: `${row.expected_amount_usdt} USDT (${String(row.network || '').toUpperCase()})`,
+      amountNano: Math.max(0, Number(row.amount_nano || 0)),
+      balanceAfterNano: 0,
+      status: 'completed',
+      referenceId: row.id,
+      referenceType: 'usdt_deposit',
+      metadata: row.tx_hash ? { txHash: row.tx_hash, network: row.network } : { network: row.network },
+      createdAt: row.credited_at || row.updated_at || row.created_at,
+    });
+  }
+
+  for (const row of starsDeposits) {
+    mergeWalletHistorySource(transactions, bySource, {
+      id: `source_starsdep:${row.id}`,
+      userId: row.user_id,
+      kind: 'deposit',
+      title: 'Stars purchase',
+      description: `${Number(row.stars_amount || 0)} Stars converted to Gram balance`,
+      amountNano: Math.max(0, Number(row.amount_nano || 0)),
+      balanceAfterNano: 0,
+      status: 'completed',
+      referenceId: row.id,
+      referenceType: 'stars_deposit',
+      metadata: { starsAmount: row.stars_amount },
+      createdAt: row.updated_at || row.created_at,
+    });
+  }
+
+  for (const row of withdrawals) {
+    const status = String(row.status || 'pending').toLowerCase();
+    mergeWalletHistorySource(transactions, bySource, {
+      id: `source_withdraw:${row.id}`,
+      userId: row.user_id,
+      kind: 'withdraw',
+      title: status === 'paid' ? 'Gram withdrawal paid' : 'Gram withdrawal',
+      description: 'Withdrawal request to ' + shortWalletHistoryAddress(row.wallet_address),
+      amountNano: -Math.abs(Number(row.amount_nano || 0)),
+      balanceAfterNano: 0,
+      status: status === 'paid' ? 'completed' : status,
+      referenceId: row.id,
+      referenceType: 'ton_withdrawal',
+      metadata: { walletAddress: row.wallet_address, sourceStatus: status },
+      createdAt: row.created_at,
+    });
+  }
+
+  transactions.sort((a, b) => walletHistoryTime(b.createdAt) - walletHistoryTime(a.createdAt) || b.id.localeCompare(a.id));
+  return { transactions: transactions.slice(0, safeLimit) };
+}
+
+async function readWalletHistoryRows<T>(env: Env, sql: string, userId: string, limit: number): Promise<T[]> {
+  try {
+    const rows = await env.DB.prepare(sql).bind(userId, limit).all<T>();
+    return rows.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeWalletHistorySource(items: TonTransaction[], bySource: Map<string, TonTransaction>, source: TonTransaction): void {
+  const key = walletHistorySourceKey(source.referenceType, source.referenceId);
+  const existing = key ? bySource.get(key) : undefined;
+  if (existing) {
+    existing.title = source.title;
+    existing.description = source.description;
+    existing.amountNano = source.amountNano;
+    existing.status = source.status;
+    existing.metadata = { ...(existing.metadata || {}), ...(source.metadata || {}) };
+    existing.createdAt = source.createdAt || existing.createdAt;
+    return;
+  }
+  if (key) bySource.set(key, source);
+  items.push(source);
+}
+
+function walletHistorySourceKey(referenceType: string | null | undefined, referenceId: string | null | undefined): string {
+  return referenceType && referenceId ? `${referenceType}:${referenceId}` : '';
+}
+
+function walletHistoryTime(value: string): number {
+  const time = Date.parse(String(value || ''));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function shortWalletHistoryAddress(value: unknown): string {
+  const wallet = String(value || '').trim();
+  return wallet.length > 14 ? wallet.slice(0, 6) + '...' + wallet.slice(-6) : wallet;
 }
 
 // One-way compatibility migration for records created before wallet operations wrote

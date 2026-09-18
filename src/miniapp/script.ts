@@ -155,8 +155,11 @@ export const MINIAPP_SCRIPT = `
   function openInitialTarget(){
     try{
       var params=new URLSearchParams(location.search);
+      var hash=location.hash.replace(/^#/, '');
+      var hashParams=new URLSearchParams(hash);
       var startParam=String(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param||'');
-      var section=(params.get('section')||location.hash.replace(/^#/, '')||startParam||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40);
+      var hashSection=hash.indexOf('=')===-1?hash:(hashParams.get('section')||hashParams.get('startapp')||hashParams.get('tgWebAppStartParam')||'');
+      var section=(params.get('section')||params.get('startapp')||params.get('tgWebAppStartParam')||hashSection||startParam||'').replace(/[^0-9A-Za-z_-]/g,'').slice(0,40);
       if(!section)return;
       var open=function(){if(ensureSection(section))show(section)};
       var lazy=window.VexaLazySections;

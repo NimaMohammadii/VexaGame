@@ -37,7 +37,7 @@ import { PLAY_ZONE_STACK_SCROLL_SCRIPT } from './play-zone-stack-scroll-script';
 import { STARTUP_RUNTIME_SCRIPT } from './boot-loader-script';
 import { ACTIVITY_SCRIPT } from './activity-script';
 import { LEVEL_SYNC_SCRIPT } from './level-sync-script';
-import { MINIAPP_AUDIO_MANAGER_SCRIPT, MINIAPP_AUDIO_SCRIPT } from './audio-script';
+import { MINIAPP_AUDIO_MANAGER_SCRIPT } from './audio-script';
 import { XP_BAR_EFFECTS_SCRIPT } from './xp-bar-effects-script';
 import { TELEGRAM_BACK_BUTTON_SCRIPT } from './telegram-back-button-script';
 import { SECTION_ACCESS_SCRIPT } from './section-access-script';
@@ -212,7 +212,6 @@ function scripts(): string {
     TELEGRAM_BACK_BUTTON_SCRIPT,
     SECTION_ACCESS_SCRIPT,
     SECTION_BACKGROUND_SCRIPT,
-    MINIAPP_AUDIO_SCRIPT,
     XP_BAR_EFFECTS_SCRIPT,
   ].map((script) => `<script>${script}</script>`).join('');
 }

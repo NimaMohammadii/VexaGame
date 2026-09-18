@@ -12,7 +12,6 @@ export const STARTUP_RUNTIME_SCRIPT = `
   var GAME_IMAGE_MANIFEST_CACHE_KEY='vexa:game-image-manifests:v1';
   var GAME_IMAGE_COMMON_URLS=[
     '/assets/Home.PNG?v=1',
-    '/assets/Rewards.PNG?v=1',
     '/app/api/uploaded-image/ton-icon.png'
   ];
   var GAME_IMAGE_STATIC_BY_GAME={

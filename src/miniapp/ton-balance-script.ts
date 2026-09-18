@@ -1,7 +1,7 @@
 export const TON_BALANCE_SCRIPT = `
 (function(){
   var KEY='vexaTonBalanceNano';
-  var INITIAL_CACHE_PRESENT=false;try{INITIAL_CACHE_PRESENT=localStorage.getItem(KEY)!==null}catch(e){}
+  var INITIAL_CACHE_PRESENT=false;
   var NANO_PER_TON=1000000000;
   var PLINKO_UNIT_NANO=NANO_PER_TON;
   var lastBalanceLoadAt=0;
@@ -27,12 +27,13 @@ export const TON_BALANCE_SCRIPT = `
   function decideWin(){return Math.random()*100<readWinChance()}
   function decideNative(nativeChance){return !!decideWin()}
   readWinChance();
+  user();try{INITIAL_CACHE_PRESENT=localStorage.getItem(KEY)!==null}catch(e){}
   window.VexaGameChance={read:readWinChance,set:setWinChance,isCustom:hasCustomChance,decideWin:decideWin,decideNative:decideNative};
   window.VexaTonBalance={read:read,write:write,flush:flush,render:function(){return render(read())},load:load,initialCachePresent:INITIAL_CACHE_PRESENT,format:formatTon,rate:NANO_PER_TON,parse:parseTonText,plinkoUnitNano:PLINKO_UNIT_NANO};
   window.addEventListener('vexa-ton-balance-game-change',function(ev){if(!ev||!ev.detail)return;var balance=Number(ev.detail.tonBalanceNano);if(Number.isFinite(balance)&&balance>=0)write(balance,0,true)});
   window.addEventListener('vexa-credit-game-change',function(ev){if(!ev||!ev.detail)return;var balance=Number(ev.detail.tonBalanceNano);if(Number.isFinite(balance)&&balance>=0)write(balance,0,true)});
   window.addEventListener('vexa-ton-balance-sync',function(ev){if(!ev||!ev.detail)return;var balance=Number(ev.detail.tonBalanceNano);if(Number.isFinite(balance))render(balance)});
   document.addEventListener('visibilitychange',function(){if(!document.hidden)render(read())});
-  user();render(read());
+  render(read());
 })();
 `;

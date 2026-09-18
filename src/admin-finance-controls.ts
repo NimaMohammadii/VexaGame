@@ -37,12 +37,20 @@ export async function setFinanceLimits(env: Env, patch: Partial<Record<keyof Fin
   return next;
 }
 
+type FinanceSourceTables = {
+  tonDeposits: boolean;
+  usdtDeposits: boolean;
+  starsDeposits: boolean;
+  tonWithdrawals: boolean;
+};
+
 export async function getFinanceStats(env: Env): Promise<Record<string, Record<string, number>>> {
+  const tables = await financeSourceTables(env);
   const [todayDeposits, weeklyDeposits, todayWithdrawals, weeklyWithdrawals, todayUsers, weeklyUsers] = await Promise.all([
-    aggregate(env, "kind = 'deposit' AND amount_nano > 0 AND date(created_at) = date('now')"),
-    aggregate(env, "kind = 'deposit' AND amount_nano > 0 AND datetime(created_at) >= datetime('now','-7 days')"),
-    aggregate(env, "kind = 'withdraw' AND amount_nano < 0 AND date(created_at) = date('now')"),
-    aggregate(env, "kind = 'withdraw' AND amount_nano < 0 AND datetime(created_at) >= datetime('now','-7 days')"),
+    aggregateCompletedDeposits(env, tables, "date(completed_at) = date('now')"),
+    aggregateCompletedDeposits(env, tables, "datetime(completed_at) >= datetime('now','-7 days')"),
+    aggregateCompletedWithdrawals(env, tables, "date(completed_at) = date('now')"),
+    aggregateCompletedWithdrawals(env, tables, "datetime(completed_at) >= datetime('now','-7 days')"),
     activeUsers(env, "date(COALESCE(last_seen_at, updated_at, created_at)) = date('now')"),
     activeUsers(env, "datetime(COALESCE(last_seen_at, updated_at, created_at)) >= datetime('now','-7 days')"),
   ]);
@@ -52,11 +60,87 @@ export async function getFinanceStats(env: Env): Promise<Record<string, Record<s
   };
 }
 
-async function aggregate(env: Env, where: string): Promise<{ amountNano: number; users: number }> {
+async function financeSourceTables(env: Env): Promise<FinanceSourceTables> {
+  const state: FinanceSourceTables = { tonDeposits: false, usdtDeposits: false, starsDeposits: false, tonWithdrawals: false };
   try {
-    const row = await env.DB.prepare(`SELECT COALESCE(SUM(ABS(amount_nano)), 0) AS amountNano, COUNT(DISTINCT user_id) AS users FROM ton_transactions WHERE ${where}`).first<{ amountNano: number | string; users: number | string }>();
+    const rows = await env.DB.prepare(`SELECT name FROM sqlite_master
+      WHERE type='table' AND name IN ('ton_deposits','usdt_deposits','stars_deposits','ton_withdrawals')`)
+      .all<{ name: string }>();
+    const names = new Set((rows.results ?? []).map((row) => String(row.name || '')));
+    state.tonDeposits = names.has('ton_deposits');
+    state.usdtDeposits = names.has('usdt_deposits');
+    state.starsDeposits = names.has('stars_deposits');
+    state.tonWithdrawals = names.has('ton_withdrawals');
+  } catch {
+    // The ledger fallback below still counts completed transactions safely.
+  }
+  return state;
+}
+
+async function aggregateCompletedDeposits(env: Env, tables: FinanceSourceTables, periodWhere: string): Promise<{ amountNano: number; users: number }> {
+  const joins: string[] = [];
+  const completionCases: string[] = [];
+  const sourceGuards: string[] = [];
+
+  if (tables.tonDeposits) {
+    joins.push("LEFT JOIN ton_deposits td ON t.reference_type='ton_deposit' AND td.id=t.reference_id AND td.user_id=t.user_id");
+    completionCases.push("WHEN t.reference_type='ton_deposit' THEN COALESCE(td.credited_at, td.updated_at, t.created_at)");
+    sourceGuards.push("(t.reference_type IS NULL OR t.reference_type!='ton_deposit' OR td.status='completed')");
+  }
+  if (tables.usdtDeposits) {
+    joins.push("LEFT JOIN usdt_deposits ud ON t.reference_type='usdt_deposit' AND ud.id=t.reference_id AND ud.user_id=t.user_id");
+    completionCases.push("WHEN t.reference_type='usdt_deposit' THEN COALESCE(ud.credited_at, ud.updated_at, t.created_at)");
+    sourceGuards.push("(t.reference_type IS NULL OR t.reference_type!='usdt_deposit' OR ud.status='completed')");
+  }
+  if (tables.starsDeposits) {
+    joins.push("LEFT JOIN stars_deposits sd ON t.reference_type='stars_deposit' AND sd.id=t.reference_id AND sd.user_id=t.user_id");
+    completionCases.push("WHEN t.reference_type='stars_deposit' THEN COALESCE(sd.updated_at, t.created_at)");
+    sourceGuards.push("(t.reference_type IS NULL OR t.reference_type!='stars_deposit' OR sd.status='completed')");
+  }
+
+  const completedAt = completionCases.length
+    ? `CASE ${completionCases.join(' ')} ELSE t.created_at END`
+    : 't.created_at';
+  const guardSql = sourceGuards.length ? ` AND ${sourceGuards.join(' AND ')}` : '';
+
+  return aggregateCompletedLedger(env, `
+    SELECT t.user_id, t.amount_nano, ${completedAt} AS completed_at
+    FROM ton_transactions t
+    ${joins.join('\n')}
+    WHERE t.kind='deposit' AND t.amount_nano>0 AND t.status='completed'${guardSql}
+  `, periodWhere);
+}
+
+async function aggregateCompletedWithdrawals(env: Env, tables: FinanceSourceTables, periodWhere: string): Promise<{ amountNano: number; users: number }> {
+  const join = tables.tonWithdrawals
+    ? "LEFT JOIN ton_withdrawals tw ON t.reference_type='ton_withdrawal' AND tw.id=t.reference_id AND tw.user_id=t.user_id"
+    : '';
+  const completedAt = tables.tonWithdrawals
+    ? "CASE WHEN t.reference_type='ton_withdrawal' THEN COALESCE(tw.paid_at, tw.updated_at, t.created_at) ELSE t.created_at END"
+    : 't.created_at';
+  const sourceGuard = tables.tonWithdrawals
+    ? " AND (t.reference_type IS NULL OR t.reference_type!='ton_withdrawal' OR tw.status='paid')"
+    : '';
+
+  return aggregateCompletedLedger(env, `
+    SELECT t.user_id, t.amount_nano, ${completedAt} AS completed_at
+    FROM ton_transactions t
+    ${join}
+    WHERE t.kind='withdraw' AND t.amount_nano<0 AND t.status='completed'${sourceGuard}
+  `, periodWhere);
+}
+
+async function aggregateCompletedLedger(env: Env, sourceSql: string, periodWhere: string): Promise<{ amountNano: number; users: number }> {
+  try {
+    const row = await env.DB.prepare(`WITH completed AS (${sourceSql})
+      SELECT COALESCE(SUM(ABS(amount_nano)), 0) AS amountNano, COUNT(DISTINCT user_id) AS users
+      FROM completed
+      WHERE completed_at IS NOT NULL AND ${periodWhere}`)
+      .first<{ amountNano: number | string; users: number | string }>();
     return { amountNano: Number(row?.amountNano || 0), users: Number(row?.users || 0) };
-  } catch { return { amountNano: 0, users: 0 }; }
+  } catch {
+    return { amountNano: 0, users: 0 };
+  }
 }
 
 async function activeUsers(env: Env, where: string): Promise<number> {

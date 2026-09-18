@@ -2,6 +2,7 @@ import type { Env } from './types';
 import { ensureLevelTables } from './levels';
 import { ensureTonBalanceColumn } from './user-controls';
 import { ensureTonTransactionsTable } from './ton-transactions';
+import { PUBLIC_BASE_URL } from './utils';
 
 export const LOTTERY_WINNER_COUNT = 3;
 export const LOTTERY_WINNER_COOLDOWN_DAYS = 21;
@@ -34,6 +35,7 @@ type SelectedWinnerRow = { rank: number; user_id: string };
 type TicketHolderRow = { user_id: string; username?: string | null; first_name?: string | null; ticket_count: number; paid_ticket_count: number; free_ticket_count: number; first_ticket_at: string; last_ticket_at: string };
 type TicketHistoryRow = { round_id: string; ticket_code?: string | null; ticket_number: string; price_nano: number; is_free: number; created_at: string };
 type WinnerHistoryRow = { round_id: string; rank: number; ticket_code: string; prize_nano: number; payout_status: string; paid_at?: string | null; created_at: string };
+type PreviousWinnerRow = { rank: number; display_name: string; prize_nano: number; avatar_version: string; created_at: string; updated_at: string };
 
 export type LotteryPrize = {
   rank: number;
@@ -129,6 +131,75 @@ export async function ensureLotteryPrizeTables(env: Env): Promise<void> {
     PRIMARY KEY(round_id, rank),
     UNIQUE(round_id, user_id)
   )`).run();
+
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS lottery_previous_winner_settings (
+    id INTEGER PRIMARY KEY CHECK (id=1),
+    custom_enabled INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  await env.DB.prepare(`INSERT OR IGNORE INTO lottery_previous_winner_settings (id,custom_enabled,updated_at)
+    VALUES (1,0,CURRENT_TIMESTAMP)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS lottery_previous_winners (
+    rank INTEGER PRIMARY KEY CHECK (rank BETWEEN 1 AND 3),
+    display_name TEXT NOT NULL,
+    prize_nano INTEGER NOT NULL DEFAULT 0,
+    avatar_version TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+}
+
+export async function getCustomPreviousWinners(env: Env): Promise<{ enabled: boolean; winners: LotteryWinner[] }> {
+  await ensureLotteryPrizeTables(env);
+  const setting = await env.DB.prepare('SELECT custom_enabled FROM lottery_previous_winner_settings WHERE id=1')
+    .first<{ custom_enabled: number }>();
+  const enabled = Number(setting?.custom_enabled || 0) === 1;
+  if (!enabled) return { enabled, winners: [] };
+  const rows = await env.DB.prepare(`SELECT rank,display_name,prize_nano,avatar_version,created_at,updated_at
+    FROM lottery_previous_winners ORDER BY rank ASC`).all<PreviousWinnerRow>();
+  return { enabled, winners: (rows.results || []).map(publicPreviousWinner) };
+}
+
+export async function setCustomPreviousWinner(env: Env, rankInput: unknown, nameInput: unknown, prizeNanoInput: unknown, avatarVersionInput: unknown): Promise<void> {
+  await ensureLotteryPrizeTables(env);
+  const rank = Math.floor(Number(rankInput));
+  const displayName = String(nameInput || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  const prizeNano = Math.floor(Number(prizeNanoInput) || 0);
+  const avatarVersion = String(avatarVersionInput || '').trim().slice(0, 40);
+  if (rank < 1 || rank > LOTTERY_WINNER_COUNT) throw new Error('رتبه برنده نامعتبر است.');
+  if (!displayName) throw new Error('نام برنده نمی‌تواند خالی باشد.');
+  if (!Number.isSafeInteger(prizeNano) || prizeNano < 0) throw new Error('مبلغ جایزه نامعتبر است.');
+  if (!/^\d{10,20}$/.test(avatarVersion)) throw new Error('تصویر پروفایل نامعتبر است.');
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO lottery_previous_winners (rank,display_name,prize_nano,avatar_version,created_at,updated_at)
+      VALUES (?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      ON CONFLICT(rank) DO UPDATE SET display_name=excluded.display_name,prize_nano=excluded.prize_nano,
+        avatar_version=excluded.avatar_version,updated_at=CURRENT_TIMESTAMP`).bind(rank, displayName, prizeNano, avatarVersion),
+    env.DB.prepare('UPDATE lottery_previous_winner_settings SET custom_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=1'),
+  ]);
+}
+
+export async function deleteCustomPreviousWinner(env: Env, rankInput: unknown): Promise<void> {
+  await ensureLotteryPrizeTables(env);
+  const rank = Math.floor(Number(rankInput));
+  if (rank < 1 || rank > LOTTERY_WINNER_COUNT) throw new Error('رتبه برنده نامعتبر است.');
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM lottery_previous_winners WHERE rank=?').bind(rank),
+    env.DB.prepare('UPDATE lottery_previous_winner_settings SET custom_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=1'),
+  ]);
+}
+
+export async function clearCustomPreviousWinners(env: Env): Promise<void> {
+  await ensureLotteryPrizeTables(env);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM lottery_previous_winners'),
+    env.DB.prepare('UPDATE lottery_previous_winner_settings SET custom_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=1'),
+  ]);
+}
+
+export async function useAutomaticPreviousWinners(env: Env): Promise<void> {
+  await ensureLotteryPrizeTables(env);
+  await env.DB.prepare('UPDATE lottery_previous_winner_settings SET custom_enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=1').run();
 }
 
 export async function getLotteryWinnerSelections(env: Env, roundIdInput: unknown): Promise<Array<{ rank: number; userId: string; displayName: string }>> {
@@ -346,8 +417,12 @@ export async function setLotteryPrizePercentages(env: Env, percentBpsInput: unkn
   return getLotteryPrizes(env);
 }
 
-export async function getLotteryWinners(env: Env, roundIdInput?: unknown): Promise<LotteryWinner[]> {
+export async function getLotteryWinners(env: Env, roundIdInput?: unknown, includeCustomPrevious = true): Promise<LotteryWinner[]> {
   await ensureLotteryPrizeTables(env);
+  if (includeCustomPrevious) {
+    const custom = await getCustomPreviousWinners(env);
+    if (custom.enabled) return custom.winners;
+  }
   await ensureLevelTables(env);
   await ensureLotteryWinnerProfileColumn(env);
   let roundId = String(roundIdInput || '').trim();
@@ -366,6 +441,24 @@ export async function getLotteryWinners(env: Env, roundIdInput?: unknown): Promi
     ORDER BY w.rank ASC
     LIMIT ?`).bind(roundId, LOTTERY_WINNER_COUNT).all<WinnerRow>();
   return (rows.results || []).map(publicWinner);
+}
+
+function publicPreviousWinner(row: PreviousWinnerRow): LotteryWinner {
+  const rank = Math.max(1, Math.min(LOTTERY_WINNER_COUNT, Math.floor(Number(row.rank) || 1)));
+  const version = encodeURIComponent(String(row.avatar_version || '1'));
+  return {
+    id: `custom-previous-${rank}`,
+    roundId: 'custom-previous',
+    rank,
+    displayName: String(row.display_name || '').trim().slice(0, 80),
+    username: null,
+    avatarUrl: `${PUBLIC_BASE_URL}/app/api/lottery/previous-winner-avatar/${rank}?v=${version}`,
+    level: 1,
+    ticketCode: '00000',
+    prizeNano: Math.max(0, Math.floor(Number(row.prize_nano) || 0)),
+    paid: true,
+    createdAt: String(row.updated_at || row.created_at || ''),
+  };
 }
 
 export async function userWonLotteryRound(env: Env, userIdInput: unknown, roundIdInput: unknown): Promise<boolean> {
@@ -419,7 +512,7 @@ export async function finalizeLotteryWinners(env: Env, roundIdInput: unknown): P
   }
 
   await payPendingLotteryWinners(env, roundId);
-  return getLotteryWinners(env, roundId);
+  return getLotteryWinners(env, roundId, false);
 }
 
 async function randomCandidateForUser(env: Env, roundId: string, userId: string): Promise<CandidateRow | null> {

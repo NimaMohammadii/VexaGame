@@ -17,12 +17,11 @@ const AUDIO_TYPES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wa
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'oga', 'webm', 'mp4', 'm4a', 'aac']);
 const MINIAPP_AUDIO_KEY = 'miniapp/audio';
 const WALLET_CREDIT_AUDIO_KEY = 'miniapp/audio/wallet-credit';
-const LOADING_AUDIO_KEY = 'miniapp/audio/loading';
 const MINIAPP_AUDIO_ENABLED_KEY = 'admin:miniapp-audio-enabled';
 const UPLOADED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const UPLOADED_IMAGE_INDEX_CACHE_CONTROL = 'no-store';
 
-type MiniappAudioTarget = 'dice' | 'wallet-credit' | 'loading';
+type MiniappAudioTarget = 'dice' | 'wallet-credit';
 
 const UPLOADED_IMAGE_CONTEXT_SECTIONS: Record<string, string[]> = {
   home: ['home'],
@@ -101,22 +100,20 @@ app.get('/app/api/uploaded-images', async (c) => {
   const scopedSections = context ? UPLOADED_IMAGE_CONTEXT_SECTIONS[context] : null;
   const assetScope = new Set(context ? UPLOADED_IMAGE_CONTEXT_ASSETS[context] : uploadedImageAssetScopeForSections(scopedSections));
   const head = (enabled: boolean, key: string) => enabled ? c.env.ASSETS.head(key).catch(() => null) : Promise.resolve(null);
-  const [loadingAudioHead, creditHead, tonHead, plinkoHead, minesSafeHead, minesBombHead] = await Promise.all([
-    head(context === 'startup', LOADING_AUDIO_KEY),
+  const [creditHead, tonHead, plinkoHead, minesSafeHead, minesBombHead] = await Promise.all([
     head(assetScope.has('credit'), 'credit-icon'),
     head(assetScope.has('ton'), 'ton-icon'),
     head(assetScope.has('plinko'), 'plinko-ball'),
     head(assetScope.has('mines'), 'mines-tile/safe'),
     head(assetScope.has('mines'), 'mines-tile/bomb'),
   ]);
-  const loadingAudioUrl = loadingAudioHead ? `/app/api/miniapp-audio-file?target=loading&v=${assetVersion(loadingAudioHead)}` : null;
   const creditIconUrl = assetScope.has('credit') ? `/app/api/credit-icon.png?v=${assetVersion(creditHead)}` : null;
   const tonIconUrl = assetScope.has('ton') ? (tonHead ? `/app/api/uploaded-image/ton-icon.png?v=${assetVersion(tonHead)}` : creditIconUrl) : null;
   const plinkoBallUrl = assetScope.has('plinko') ? (plinkoHead ? `/app/api/uploaded-image/plinko-ball.png?v=${assetVersion(plinkoHead)}` : creditIconUrl) : null;
   const minesSafeUrl = minesSafeHead ? `/app/api/uploaded-image/mines-safe.png?v=${assetVersion(minesSafeHead)}` : null;
   const minesBombUrl = minesBombHead ? `/app/api/uploaded-image/mines-bomb.png?v=${assetVersion(minesBombHead)}` : null;
   const preload = [creditIconUrl, tonIconUrl, plinkoBallUrl, minesSafeUrl, minesBombUrl].filter(Boolean);
-  return c.json({ loadingAudioUrl, creditIconUrl, tonIconUrl, plinkoBallUrl, minesSafeUrl, minesBombUrl, preload }, 200, { 'cache-control': UPLOADED_IMAGE_INDEX_CACHE_CONTROL });
+  return c.json({ creditIconUrl, tonIconUrl, plinkoBallUrl, minesSafeUrl, minesBombUrl, preload }, 200, { 'cache-control': UPLOADED_IMAGE_INDEX_CACHE_CONTROL });
 });
 
 app.get('/app/api/uploaded-image/ton-icon.png', async (c) => getAssetResponse(c.env, 'ton-icon', '/app/api/credit-icon.png'));
@@ -152,10 +149,10 @@ app.get('/app/api/section-access', zValidator('query', userIdSchema), async (c) 
 
 function normalizeMiniappAudioTarget(value: unknown): MiniappAudioTarget {
   const clean = String(value || '').trim().toLowerCase();
-  return clean === 'loading' ? 'loading' : clean === 'wallet-credit' ? 'wallet-credit' : 'dice';
+  return clean === 'wallet-credit' ? 'wallet-credit' : 'dice';
 }
 function miniappAudioKey(target: MiniappAudioTarget): string {
-  return target === 'loading' ? LOADING_AUDIO_KEY : target === 'wallet-credit' ? WALLET_CREDIT_AUDIO_KEY : MINIAPP_AUDIO_KEY;
+  return target === 'wallet-credit' ? WALLET_CREDIT_AUDIO_KEY : MINIAPP_AUDIO_KEY;
 }
 async function getMiniappAudioJson(env: Env, target: MiniappAudioTarget): Promise<Record<string, unknown>> {
   const object = await env.ASSETS.head(miniappAudioKey(target)).catch(() => null);

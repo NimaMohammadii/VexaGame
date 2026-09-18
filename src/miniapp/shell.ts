@@ -34,7 +34,7 @@ import { PREDICT_ZONE_SCRIPT, PREDICT_ZONE_SECTION, PREDICT_ZONE_STYLES } from '
 import { MINIAPP_SCRIPT } from './script';
 import { TON_BALANCE_SCRIPT } from './ton-balance-script';
 import { PLAY_ZONE_STACK_SCROLL_SCRIPT } from './play-zone-stack-scroll-script';
-import { BOOT_LOADING_IMAGE_DATA_URI, BOOT_LOADER_SCRIPT, BOOT_LOADER_STYLES } from './boot-loader-script';
+import { STARTUP_RUNTIME_SCRIPT } from './boot-loader-script';
 import { ACTIVITY_SCRIPT } from './activity-script';
 import { MINIAPP_AUDIO_MANAGER_SCRIPT, MINIAPP_AUDIO_SCRIPT } from './audio-script';
 import { XP_BAR_EFFECTS_SCRIPT } from './xp-bar-effects-script';
@@ -67,7 +67,6 @@ const STYLES = [
   NAV_GLASS_OVERRIDES,
   GLASS_COMPONENTS_OVERRIDES,
   APP_BACKGROUND_OVERRIDES,
-  BOOT_LOADER_STYLES,
   SECTION_BACKGROUND_STYLES,
   GAME_LIVE_COUNT_STYLES,
   GHOST_RUN_STYLES,
@@ -172,7 +171,7 @@ function scripts(): string {
   return [
     `window.__vexaLotteryTexts=${inlineScriptJson(LOTTERY_HOME_TEXT)};window.__vexaCountryLocales=${inlineScriptJson(COUNTRY_TO_VEXA_LOCALE)};`,
     MINIAPP_AUDIO_MANAGER_SCRIPT,
-    BOOT_LOADER_SCRIPT,
+    STARTUP_RUNTIME_SCRIPT,
     TON_BALANCE_SCRIPT,
     HOME_SCRIPT,
     lazySectionLoaderScript(),
@@ -215,8 +214,6 @@ export function miniAppShellHtml(): string {
     html.vexa-web .app{padding-top:0!important}
     html.vexa-web,html.vexa-web body{background:#000!important}
     html.vexa-web body:has(#home.active){background:#000!important}
-    html.vexa-web .vexa-boot{inset:0!important}
-    html.vexa-web .vexa-boot-top-shadow{position:absolute;top:0;left:0;right:0;height:150px;z-index:3;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.98) 0%,rgba(0,0,0,.82) 24%,rgba(0,0,0,.48) 52%,rgba(0,0,0,.16) 76%,rgba(0,0,0,0) 100%)}
     html.vexa-web body:has(#home.active)::before{inset:0!important;width:auto!important;height:auto!important;background-color:transparent!important}
     #rankPill:empty,#userLine:empty{display:none!important}
     .brand .logo[src="${GAME_BOT_PROFILE_IMAGE}"]{visibility:hidden!important}
@@ -232,13 +229,6 @@ export function miniAppShellHtml(): string {
   </style>
 </head>
 <body>
-  <div id="vexaBoot" class="vexa-boot" role="progressbar" aria-label="Loading Vexa Game" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-    <div class="vexa-boot-top-shadow" aria-hidden="true"></div>
-    <div class="vexa-boot-card">
-      <img id="vexaBootImage" class="vexa-boot-logo" src="${BOOT_LOADING_IMAGE_DATA_URI}" alt="" decoding="async" fetchpriority="high"/>
-      <div class="vexa-boot-progress" aria-hidden="true"><span id="vexaBootProgress" class="vexa-boot-progress-bar"></span></div>
-    </div>
-  </div>
   <main class="app">
     <header class="top">
       <div class="brand">

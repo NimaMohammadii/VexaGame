@@ -260,8 +260,11 @@ export const BOOT_LOADER_SCRIPT = `
   function headerAndHomeAssetsReady(){
     var jobs=[];
     jobs.push(call(window.VexaHomeVisualAssetsReady,7500,false));
-    jobs.push(window.VexaTonBalance&&typeof window.VexaTonBalance.load==='function'?settle(window.VexaTonBalance.load(),5500,false):Promise.resolve(false));
-    if(window.VexaLevel&&typeof window.VexaLevel.load==='function')jobs.push(settle(window.VexaLevel.load(),5500,false));
+    if(window.VexaTonBalance&&typeof window.VexaTonBalance.load==='function'){
+      if(window.VexaTonBalance.initialCachePresent){Promise.resolve(window.VexaTonBalance.load()).catch(function(){})}
+      else jobs.push(settle(window.VexaTonBalance.load(),5500,false))
+    }
+    if(window.VexaLevel&&typeof window.VexaLevel.load==='function')Promise.resolve(window.VexaLevel.load()).catch(function(){});
     return Promise.all(jobs)
   }
   function homeReady(){

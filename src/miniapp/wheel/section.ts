@@ -186,16 +186,16 @@ export const WHEEL_SECTION = `
           dailySpinButton.disabled=true;
           dailySpinButton.textContent='Spinning...';
           if(dailyResult)dailyResult.textContent='Spinning';
-          var index=secureDailyPrizeIndex(),jitter=(Math.random()-.5)*10,target=-index*30-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+3600,finalRotation=startRotation+4320+delta,finished=false,spinAnimation=null;
+          var index=secureDailyPrizeIndex(),jitter=(Math.random()-.5)*10,target=-index*30-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+6480,finalRotation=startRotation+8640+delta,finished=false,spinAnimation=null;
           dailyRotation=finalRotation;
           function finishDailySpin(){if(finished)return;finished=true;dailyRotor.style.transform='rotate('+finalRotation+'deg)';if(spinAnimation)spinAnimation.cancel();dailySpinning=false;if(dailyResult)dailyResult.textContent=dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
           spinAnimation=dailyRotor.animate([
             {transform:'rotate('+startRotation+'deg)',offset:0,easing:'linear'},
-            {transform:'rotate('+fastRotation+'deg)',offset:5000/8200,easing:'cubic-bezier(.35,.7,.4,1)'},
+            {transform:'rotate('+fastRotation+'deg)',offset:5000/8600,easing:'cubic-bezier(.32,.68,.55,1)'},
             {transform:'rotate('+finalRotation+'deg)',offset:1}
-          ],{duration:8200,fill:'forwards'});
+          ],{duration:8600,fill:'forwards'});
           spinAnimation.addEventListener('finish',finishDailySpin,{once:true});
-          setTimeout(finishDailySpin,8600)
+          setTimeout(finishDailySpin,9000)
         }
         function applyWheelSlices(c){var winDeg=c*3.6,loseDeg=360-winDeg;rotor.style.background='conic-gradient(from 0deg,#E8D5DA 0deg '+winDeg+'deg,#1A0B0F '+winDeg+'deg 360deg)';winLabel.style.setProperty('--wheel-angle',(winDeg/2)+'deg');loseLabel.style.setProperty('--wheel-angle',(winDeg+loseDeg/2)+'deg')}
         function queueWheelSlices(value){sliceTarget=clampChance(value);if(sliceFrame)return;sliceFrame=requestAnimationFrame(function(){sliceFrame=0;applyWheelSlices(sliceTarget)})}

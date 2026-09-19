@@ -47,10 +47,7 @@ export async function handleCrashGhostLiveBetsAdminRequest(request: Request, env
 async function handleCallback(env: Env, token: string, callback: Callback): Promise<Response | null> {
   const data = String(callback.data || '');
   const game: GameKind | null = data.startsWith('botadmin:crashlive:') ? 'crash' : data.startsWith('botadmin:ghostlive:') ? 'ghost' : null;
-  if (!game) {
-    if (data.startsWith('botadmin:')) await clearState(env, callback.from.id);
-    return null;
-  }
+  if (!game) return null;
   if (!isAdmin(env, callback.from.id)) return ok();
 
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);

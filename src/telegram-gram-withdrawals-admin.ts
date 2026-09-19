@@ -150,13 +150,9 @@ async function flushPendingGramNotifications(env: Env): Promise<void> {
 
 async function handleCallback(env: Env, token: string, callback: Callback): Promise<Response | null> {
   const data = String(callback.data || '');
-  if (!data.startsWith('botadmin:gw:')) {
-    if (data.startsWith('botadmin:')) await clearState(env, callback.from.id);
-    return null;
-  }
+  if (!data.startsWith('botadmin:gw:')) return null;
   if (!isAdmin(env, callback.from.id)) return ok();
 
-  await clearOtherAdminStates(env, callback.from.id);
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
   const chatId = callback.message?.chat.id ?? callback.from.id;
   const messageId = callback.message?.message_id;

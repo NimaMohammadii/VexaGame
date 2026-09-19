@@ -38,13 +38,9 @@ export async function handleOnlineCountsAdminRequest(request: Request, env: Env)
 
 async function handleCallback(env: Env, token: string, callback: Callback): Promise<Response | null> {
   const data = String(callback.data || '');
-  if (!data.startsWith('botadmin:online:')) {
-    if (data.startsWith('botadmin:')) await clearState(env, callback.from.id);
-    return null;
-  }
+  if (!data.startsWith('botadmin:online:')) return null;
   if (!isAdmin(env, callback.from.id)) return ok();
 
-  await clearOtherAdminStates(env, callback.from.id);
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
   const chatId = callback.message?.chat.id ?? callback.from.id;
   const messageId = callback.message?.message_id;

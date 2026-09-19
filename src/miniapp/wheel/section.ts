@@ -23,8 +23,8 @@ export const WHEEL_SECTION = `
     .wheel-view.daily-mode .daily-wheel-wrap{position:relative;inset:auto;opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0) scale(1);filter:blur(0);transition-delay:0s}
     /* Daily reward wheel */
     .daily-wheel-stage{position:relative;box-sizing:border-box;width:min(calc(100vw - 56px),340px);max-width:100%;aspect-ratio:1;margin:12px auto 16px}
-    .daily-wheel-rotor{position:absolute;inset:0;display:block;width:100%;height:100%;border-radius:50%;object-fit:contain;will-change:transform;transform:rotate(0deg)}
-    .daily-wheel-pointer{position:absolute;z-index:7;left:50%;top:-11px;width:56px;height:auto;transform:translateX(-50%);filter:drop-shadow(0 7px 9px rgba(0,0,0,.58));pointer-events:none}
+    .daily-wheel-rotor{position:absolute;inset:0;display:block;width:100%;height:100%;border-radius:50%;object-fit:contain;transform-box:border-box;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden;will-change:transform;transform:rotate(0deg)}
+    .daily-wheel-pointer{position:absolute;z-index:7;left:50%;top:auto;bottom:100%;width:41px;height:auto;transform:translateX(-50%);filter:drop-shadow(0 7px 9px rgba(0,0,0,.58));pointer-events:none}
     .daily-wheel-card{margin:0 8px 48px;padding:14px;border:1px solid rgba(255,255,255,.11);border-radius:24px;background:linear-gradient(155deg,rgba(72,18,46,.55),rgba(8,6,9,.64));box-shadow:0 20px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(17px);-webkit-backdrop-filter:blur(17px)}
     .daily-wheel-result{min-height:38px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 4px 11px;text-align:left}
     .daily-wheel-result span{color:rgba(255,255,255,.46);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.08em}.daily-wheel-result b{max-width:70%;color:#fff;font-size:13px;font-weight:950;text-align:right;line-height:1.2}
@@ -186,14 +186,15 @@ export const WHEEL_SECTION = `
           dailySpinButton.disabled=true;
           dailySpinButton.textContent='Spinning...';
           if(dailyResult)dailyResult.textContent='Spinning';
-          var index=secureDailyPrizeIndex(),jitter=(Math.random()-.5)*10,target=-index*30-jitter,current=((dailyRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,finished=false;
-          dailyRotation+=1800+delta;
-          function finishDailySpin(){if(finished)return;finished=true;dailyRotor.removeEventListener('transitionend',onDailyEnd);dailySpinning=false;if(dailyResult)dailyResult.textContent=dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
-          function onDailyEnd(event){if(event.propertyName==='transform')finishDailySpin()}
+          var index=secureDailyPrizeIndex(),jitter=(Math.random()-.5)*10,target=-index*30-jitter,finished=false,phase='fast',settleTimer=0,finishTimer=0;
+          function finishDailySpin(){if(finished)return;finished=true;if(settleTimer)clearTimeout(settleTimer);if(finishTimer)clearTimeout(finishTimer);dailyRotor.removeEventListener('transitionend',onDailyEnd);dailySpinning=false;if(dailyResult)dailyResult.textContent=dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
+          function settleDailySpin(){if(finished||phase!=='fast')return;phase='settle';var current=((dailyRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360;dailyRotation+=720+delta;dailyRotor.style.transition='transform 2.2s cubic-bezier(.12,.72,.12,1)';requestAnimationFrame(function(){dailyRotor.style.transform='rotate('+dailyRotation+'deg)'});finishTimer=setTimeout(finishDailySpin,2500)}
+          function onDailyEnd(event){if(event.propertyName!=='transform')return;if(phase==='fast')settleDailySpin();else if(phase==='settle')finishDailySpin()}
           dailyRotor.addEventListener('transitionend',onDailyEnd);
-          dailyRotor.style.transition='transform 5.2s cubic-bezier(.11,.72,.12,1)';
+          dailyRotation+=1800;
+          dailyRotor.style.transition='transform 5s linear';
           requestAnimationFrame(function(){dailyRotor.style.transform='rotate('+dailyRotation+'deg)'});
-          setTimeout(finishDailySpin,5600)
+          settleTimer=setTimeout(settleDailySpin,5100)
         }
         function applyWheelSlices(c){var winDeg=c*3.6,loseDeg=360-winDeg;rotor.style.background='conic-gradient(from 0deg,#E8D5DA 0deg '+winDeg+'deg,#1A0B0F '+winDeg+'deg 360deg)';winLabel.style.setProperty('--wheel-angle',(winDeg/2)+'deg');loseLabel.style.setProperty('--wheel-angle',(winDeg+loseDeg/2)+'deg')}
         function queueWheelSlices(value){sliceTarget=clampChance(value);if(sliceFrame)return;sliceFrame=requestAnimationFrame(function(){sliceFrame=0;applyWheelSlices(sliceTarget)})}

@@ -801,6 +801,10 @@ export default {
     }) as Env;
 
     const url = new URL(request.url);
+    if (request.method === 'GET') {
+      const gameCardAssetResponse = await handleGameCardAdminRequest(request, runtimeEnv);
+      if (gameCardAssetResponse) return gameCardAssetResponse;
+    }
     if (request.method === 'POST' && url.pathname === '/app/api/mandatory-channel/status') {
       try {
         const body = await request.json().catch(() => ({})) as { initData?: unknown };

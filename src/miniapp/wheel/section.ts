@@ -23,7 +23,7 @@ export const WHEEL_SECTION = `
     .wheel-view.daily-mode .daily-wheel-wrap{position:relative;inset:auto;opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0) scale(1);filter:blur(0);transition-delay:0s}
     /* Daily reward wheel */
     .daily-wheel-stage{position:relative;box-sizing:border-box;width:min(calc(100vw - 56px),340px);max-width:100%;aspect-ratio:1;margin:12px auto 16px}
-    .daily-wheel-rotor{position:absolute;inset:6px;display:block;width:calc(100% - 12px);height:calc(100% - 12px);object-fit:contain;transform-box:border-box;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden;will-change:transform;transform:rotate(0deg)}
+    .daily-wheel-rotor{position:absolute;inset:12px;display:block;width:calc(100% - 24px);height:calc(100% - 24px);object-fit:contain;transform-box:border-box;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden;will-change:transform;transform:rotate(0deg)}
     .daily-wheel-pointer{position:absolute;z-index:7;left:50%;top:auto;bottom:calc(100% - 18px);width:41px;height:auto;transform:translateX(-50%);filter:drop-shadow(0 7px 9px rgba(0,0,0,.58));pointer-events:none}
     .daily-wheel-card{margin:0 8px 48px;padding:14px;border:1px solid rgba(255,255,255,.11);border-radius:24px;background:linear-gradient(155deg,rgba(72,18,46,.55),rgba(8,6,9,.64));box-shadow:0 20px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(17px);-webkit-backdrop-filter:blur(17px)}
     .daily-wheel-result{min-height:38px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 4px 11px;text-align:left}
@@ -186,7 +186,7 @@ export const WHEEL_SECTION = `
           dailySpinButton.disabled=true;
           dailySpinButton.textContent='Spinning...';
           if(dailyResult)dailyResult.textContent='Spinning';
-          var index=secureDailyPrizeIndex(),jitter=(Math.random()-.5)*10,target=-index*30-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+6480,finalRotation=startRotation+8640+delta,finished=false,spinAnimation=null;
+          var index=secureDailyPrizeIndex(),jitter=(Math.random()-.5)*10,target=-index*30-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+8640,finalRotation=startRotation+11520+delta,finished=false,spinAnimation=null;
           dailyRotation=finalRotation;
           function finishDailySpin(){if(finished)return;finished=true;dailyRotor.style.transform='rotate('+finalRotation+'deg)';if(spinAnimation)spinAnimation.cancel();dailySpinning=false;if(dailyResult)dailyResult.textContent=dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
           spinAnimation=dailyRotor.animate([

@@ -35,6 +35,9 @@ type AdminUserRow = {
   app_entered_at?: string | null;
   server_country_code?: string | null;
   server_timezone?: string | null;
+  level?: number | null;
+  xp?: number | null;
+  total_xp?: number | null;
 };
 
 export type UserRegionPreference = {
@@ -184,32 +187,71 @@ function cleanAvatarUrl(value: unknown): string | null {
   }
 }
 
+let adminUsersSchemaReady: Promise<void> | null = null;
+
+async function ensureAdminUsersSchema(env: Env): Promise<void> {
+  if (!adminUsersSchemaReady) {
+    adminUsersSchemaReady = (async () => {
+      await ensureTonBalanceColumn(env);
+      await ensureUserRegionColumns(env);
+      await ensureUserTrackingColumns(env);
+      await env.DB.prepare('ALTER TABLE app_users ADD COLUMN timezone TEXT').run().catch(() => undefined);
+      await env.DB.prepare('ALTER TABLE app_users ADD COLUMN return_count INTEGER NOT NULL DEFAULT 1').run().catch(() => undefined);
+    })().catch((error) => {
+      adminUsersSchemaReady = null;
+      throw error;
+    });
+  }
+  return adminUsersSchemaReady;
+}
+
+function adminRankName(levelInput: unknown): string {
+  const level = Math.max(1, Math.floor(Number(levelInput) || 1));
+  if (level >= 60) return 'Titan';
+  if (level >= 40) return 'Legend';
+  if (level >= 25) return 'Master';
+  if (level >= 16) return 'Elite';
+  if (level >= 10) return 'Pro';
+  if (level >= 5) return 'Explorer';
+  return 'Rookie';
+}
+
 export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<string, unknown>>; stats: Record<string, number> }> {
-  await ensureTonBalanceColumn(env);
-  await ensureUserRegionColumns(env);
-  await ensureUserTrackingColumns(env);
-  await env.DB.prepare('ALTER TABLE app_users ADD COLUMN timezone TEXT').run().catch(() => undefined);
-  await env.DB.prepare('ALTER TABLE app_users ADD COLUMN return_count INTEGER NOT NULL DEFAULT 1').run().catch(() => undefined);
-  const rows = await env.DB.prepare(`WITH ranked AS (
-      SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, 'game_bot' AS source, region_code, language_code, region_mode, timezone, return_count, bot_started_at, app_entered_at, server_country_code, server_timezone,
-        ROW_NUMBER() OVER (PARTITION BY telegram_user_id ORDER BY datetime(COALESCE(last_seen_at, created_at)) DESC) AS rn
-      FROM app_users
-    )
-    SELECT telegram_user_id, first_name, username, current_section, ton_balance_nano, last_seen_at, created_at, source, region_code, language_code, region_mode, timezone, return_count, bot_started_at, app_entered_at, server_country_code, server_timezone
-    FROM ranked
-    WHERE rn = 1
-    ORDER BY datetime(COALESCE(last_seen_at, created_at)) DESC
+  await ensureAdminUsersSchema(env);
+  const rows = await env.DB.prepare(`SELECT
+      u.telegram_user_id,
+      u.first_name,
+      u.username,
+      u.current_section,
+      u.ton_balance_nano,
+      u.last_seen_at,
+      u.created_at,
+      'game_bot' AS source,
+      u.region_code,
+      u.language_code,
+      u.region_mode,
+      u.timezone,
+      u.return_count,
+      u.bot_started_at,
+      u.app_entered_at,
+      u.server_country_code,
+      u.server_timezone,
+      l.level,
+      l.xp,
+      l.total_xp
+    FROM app_users AS u
+    LEFT JOIN user_levels AS l ON l.user_id = u.telegram_user_id
+    ORDER BY datetime(COALESCE(u.last_seen_at, u.created_at)) DESC
     LIMIT 700`).all<AdminUserRow>();
   const now = Date.now();
-  const users = await Promise.all((rows.results ?? []).map(async (row) => {
-    const [controls, levelInfo] = await Promise.all([
-      getUserControls(env, row.telegram_user_id).catch(() => null),
-      getUserLevel(env, row.telegram_user_id).catch(() => null),
-    ]);
+  const users = (rows.results ?? []).map((row) => {
     const lastSeenMs = row.last_seen_at ? Date.parse(row.last_seen_at) : 0;
     const appActivityKnown = Boolean(row.app_entered_at) || !row.bot_started_at;
     const online = appActivityKnown && lastSeenMs > 0 && now - lastSeenMs <= 90_000;
-    const tonBalanceNano = Number(controls?.tonBalanceNano ?? row.ton_balance_nano ?? 0);
+    const tonBalanceNano = Number(row.ton_balance_nano ?? 0);
+    const level = Math.max(1, Math.floor(Number(row.level) || 1));
+    const xp = Math.max(0, Math.floor(Number(row.xp) || 0));
+    const totalXp = Math.max(0, Math.floor(Number(row.total_xp) || 0));
     const selectedRegionCode = String(row.region_mode || '').trim().toLowerCase() === 'manual' ? cleanCountryCode(row.region_code) : null;
     const serverRegionCode = cleanCountryCode(row.server_country_code);
     const storedRegionCode = cleanCountryCode(row.region_code);
@@ -225,10 +267,10 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
       currentSection: row.current_section || 'unknown',
       tonBalanceNano,
       tonBalance: formatTon(tonBalanceNano),
-      level: levelInfo?.level ?? 1,
-      xp: levelInfo?.xp ?? 0,
-      totalXp: levelInfo?.totalXp ?? 0,
-      rankName: levelInfo?.rankName ?? 'Starter',
+      level,
+      xp,
+      totalXp,
+      rankName: adminRankName(level),
       lastSeenAt: row.last_seen_at,
       createdAt: row.created_at,
       botStartedAt: row.bot_started_at || null,
@@ -242,7 +284,7 @@ export async function adminUsersJson(env: Env): Promise<{ users: Array<Record<st
       timezone,
       returnCount: Math.max(1, Math.floor(Number(row.return_count) || 1)),
     };
-  }));
+  });
   const online = users.filter((user) => user.isActive).length;
   const gameBot = users.filter((user) => user.source === 'game_bot').length;
   const userBot = users.filter((user) => user.source === 'user_bot').length;

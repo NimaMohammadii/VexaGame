@@ -26,6 +26,87 @@ import {
 } from './crash-finance';
 import type { Env } from './types';
 import type { TonWithdrawal } from './ton-withdrawals';
+
+
+type TelegramAdminRequestHandler = (request: Request, env: Env) => Promise<Response | null>;
+type TelegramAdminCallbackRoute = {
+  group: keyof typeof TELEGRAM_ADMIN_STATE_PREFIXES;
+  handler: TelegramAdminRequestHandler;
+};
+type TelegramWebhookUpdatePreview = {
+  callback_query?: { data?: string; from?: { id?: number } };
+  message?: unknown;
+};
+
+const TELEGRAM_ADMIN_STATE_PREFIXES = {
+  mandatory: ['admin:mandatory-channel-input:'],
+  prediction: ['admin:prediction-event-input:', 'admin:predict-ops-input:'],
+  crashGhost: ['admin:crash-ghost-live-bets-input:'],
+  slot: ['admin:slot-live-bets-input:'],
+  online: ['admin:online-count-input:'],
+  plinko: ['admin:plinko-control-input:'],
+  gram: ['admin:gram-withdrawal-input:'],
+  lottery: ['admin:lottery-input:'],
+  sectionAccess: ['admin:section-access-input:'],
+  playCards: [],
+  gameCard: ['admin:game-card-upload:'],
+} as const;
+
+const GAME_CARD_ADMIN_CALLBACKS = new Set([
+  'botadmin:imagesmenu',
+  'botadmin:paymentmethods',
+  'botadmin:audiomenu',
+  'botadmin:gameimages',
+  'botadmin:gamebackgrounds',
+  'botadmin:homepromos',
+  'botadmin:crashstage',
+  'botadmin:tonlogo',
+  'botadmin:homeslot',
+  'botadmin:mainmenuimage',
+  'botadmin:predictimages',
+  'botadmin:shareinviteimage',
+  'botadmin:ranks',
+  'botadmin:ghostassets',
+  'botadmin:slotsymbols',
+  'botadmin:minestiles',
+]);
+const GAME_CARD_ADMIN_CALLBACK_PREFIXES = [
+  'botadmin:paymentmethod:',
+  'botadmin:audio:',
+  'botadmin:gameimage:',
+  'botadmin:gamebackground:',
+  'botadmin:homepromo:',
+  'botadmin:crashstage:',
+  'botadmin:rank:',
+  'botadmin:ghostasset:',
+  'botadmin:slotsymbol:',
+  'botadmin:minestile:',
+  'botadmin:predictimage:',
+];
+
+function telegramAdminCallbackRoute(dataInput: unknown): TelegramAdminCallbackRoute | null {
+  const data = String(dataInput || '');
+  if (data.startsWith('botadmin:mandatorychannel')) return { group: 'mandatory', handler: handleMandatoryChannelAdminRequest };
+  if (data.startsWith('botadmin:events:') || data.startsWith('botadmin:predictops:')) return { group: 'prediction', handler: handlePredictionEventsAdminRequest };
+  if (data.startsWith('botadmin:crashlive:') || data.startsWith('botadmin:ghostlive:')) return { group: 'crashGhost', handler: handleCrashGhostLiveBetsAdminRequest };
+  if (data.startsWith('botadmin:slotlive:')) return { group: 'slot', handler: handleSlotLiveBetsAdminRequest };
+  if (data.startsWith('botadmin:online:')) return { group: 'online', handler: handleOnlineCountsAdminRequest };
+  if (data.startsWith('botadmin:plinko:')) return { group: 'plinko', handler: handlePlinkoControlAdminRequest };
+  if (data.startsWith('botadmin:gw:')) return { group: 'gram', handler: handleGramWithdrawalAdminRequest };
+  if (data.startsWith('botadmin:lottery:')) return { group: 'lottery', handler: handleLotteryAdminRequest };
+  if (data.startsWith('botadmin:access:')) return { group: 'sectionAccess', handler: handleSectionAccessAdminRequest };
+  if (data === 'botadmin:playcards' || data.startsWith('botadmin:playcard:')) return { group: 'playCards', handler: handlePlayZoneCardAdminRequest };
+  if (GAME_CARD_ADMIN_CALLBACKS.has(data) || GAME_CARD_ADMIN_CALLBACK_PREFIXES.some((prefix) => data.startsWith(prefix))) {
+    return { group: 'gameCard', handler: handleGameCardAdminRequest };
+  }
+  return null;
+}
+
+async function clearOtherSpecializedAdminStates(env: Env, adminId: number, keepGroup?: keyof typeof TELEGRAM_ADMIN_STATE_PREFIXES): Promise<void> {
+  const keep = new Set<string>(keepGroup ? [...TELEGRAM_ADMIN_STATE_PREFIXES[keepGroup]] : []);
+  const prefixes = Object.values(TELEGRAM_ADMIN_STATE_PREFIXES).flat().filter((prefix) => !keep.has(prefix));
+  await Promise.all(prefixes.map((prefix) => env.BOT_CACHE.delete(prefix + adminId).catch(() => undefined)));
+}
 export { SectionLockEvents } from './section-lock-events';
 export { LiveActivityRoom } from './live-activity';
 export { LotteryScheduler } from './lottery';
@@ -819,38 +900,55 @@ export default {
     const lotteryResponse = await handleLotteryRequest(request, runtimeEnv);
     if (lotteryResponse) return lotteryResponse;
 
-    const mandatoryChannelAdminResponse = await handleMandatoryChannelAdminRequest(request, runtimeEnv);
-    if (mandatoryChannelAdminResponse) return mandatoryChannelAdminResponse;
+    const isTelegramWebhook = request.method === 'POST' && url.pathname === '/telegram/webhook';
+    const telegramUpdatePreview = isTelegramWebhook
+      ? await request.clone().json().catch(() => null) as TelegramWebhookUpdatePreview | null
+      : null;
+    const adminCallback = telegramUpdatePreview?.callback_query;
+    if (adminCallback) {
+      const callbackData = String(adminCallback.data || '');
+      if (callbackData.startsWith('botadmin:')) {
+        const route = telegramAdminCallbackRoute(callbackData);
+        const adminId = Number(adminCallback.from?.id);
+        if (Number.isSafeInteger(adminId) && adminId > 0) {
+          await clearOtherSpecializedAdminStates(runtimeEnv, adminId, route?.group);
+        }
+        if (route) {
+          const routedResponse = await route.handler(request, runtimeEnv);
+          if (routedResponse) return routedResponse;
+        }
+      }
+    } else if (isTelegramWebhook && telegramUpdatePreview?.message) {
+      const mandatoryChannelAdminResponse = await handleMandatoryChannelAdminRequest(request, runtimeEnv);
+      if (mandatoryChannelAdminResponse) return mandatoryChannelAdminResponse;
 
-    const predictionEventsAdminResponse = await handlePredictionEventsAdminRequest(request, runtimeEnv);
-    if (predictionEventsAdminResponse) return predictionEventsAdminResponse;
+      const predictionEventsAdminResponse = await handlePredictionEventsAdminRequest(request, runtimeEnv);
+      if (predictionEventsAdminResponse) return predictionEventsAdminResponse;
 
-    const crashGhostLiveBetsAdminResponse = await handleCrashGhostLiveBetsAdminRequest(request, runtimeEnv);
-    if (crashGhostLiveBetsAdminResponse) return crashGhostLiveBetsAdminResponse;
+      const crashGhostLiveBetsAdminResponse = await handleCrashGhostLiveBetsAdminRequest(request, runtimeEnv);
+      if (crashGhostLiveBetsAdminResponse) return crashGhostLiveBetsAdminResponse;
 
-    const slotLiveBetsAdminResponse = await handleSlotLiveBetsAdminRequest(request, runtimeEnv);
-    if (slotLiveBetsAdminResponse) return slotLiveBetsAdminResponse;
+      const slotLiveBetsAdminResponse = await handleSlotLiveBetsAdminRequest(request, runtimeEnv);
+      if (slotLiveBetsAdminResponse) return slotLiveBetsAdminResponse;
 
-    const onlineCountsAdminResponse = await handleOnlineCountsAdminRequest(request, runtimeEnv);
-    if (onlineCountsAdminResponse) return onlineCountsAdminResponse;
+      const onlineCountsAdminResponse = await handleOnlineCountsAdminRequest(request, runtimeEnv);
+      if (onlineCountsAdminResponse) return onlineCountsAdminResponse;
 
-    const plinkoControlAdminResponse = await handlePlinkoControlAdminRequest(request, runtimeEnv);
-    if (plinkoControlAdminResponse) return plinkoControlAdminResponse;
+      const plinkoControlAdminResponse = await handlePlinkoControlAdminRequest(request, runtimeEnv);
+      if (plinkoControlAdminResponse) return plinkoControlAdminResponse;
 
-    const gramWithdrawalAdminResponse = await handleGramWithdrawalAdminRequest(request, runtimeEnv);
-    if (gramWithdrawalAdminResponse) return gramWithdrawalAdminResponse;
+      const gramWithdrawalAdminResponse = await handleGramWithdrawalAdminRequest(request, runtimeEnv);
+      if (gramWithdrawalAdminResponse) return gramWithdrawalAdminResponse;
 
-    const lotteryAdminResponse = await handleLotteryAdminRequest(request, runtimeEnv);
-    if (lotteryAdminResponse) return lotteryAdminResponse;
+      const lotteryAdminResponse = await handleLotteryAdminRequest(request, runtimeEnv);
+      if (lotteryAdminResponse) return lotteryAdminResponse;
 
-    const sectionAccessAdminResponse = await handleSectionAccessAdminRequest(request, runtimeEnv);
-    if (sectionAccessAdminResponse) return sectionAccessAdminResponse;
+      const sectionAccessAdminResponse = await handleSectionAccessAdminRequest(request, runtimeEnv);
+      if (sectionAccessAdminResponse) return sectionAccessAdminResponse;
 
-    const playZoneCardAdminResponse = await handlePlayZoneCardAdminRequest(request, runtimeEnv);
-    if (playZoneCardAdminResponse) return playZoneCardAdminResponse;
-
-    const gameCardAdminResponse = await handleGameCardAdminRequest(request, runtimeEnv);
-    if (gameCardAdminResponse) return gameCardAdminResponse;
+      const gameCardAdminResponse = await handleGameCardAdminRequest(request, runtimeEnv);
+      if (gameCardAdminResponse) return gameCardAdminResponse;
+    }
 
     const isNewGramWithdrawal = request.method === 'POST' && url.pathname === '/app/api/ton/withdrawals';
     const response = await app.fetch(request, runtimeEnv as never, ctx);

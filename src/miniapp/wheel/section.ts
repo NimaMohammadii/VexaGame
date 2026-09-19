@@ -22,7 +22,7 @@ export const WHEEL_SECTION = `
     .wheel-view.daily-mode .wheel-classic-mode{position:absolute;inset:0;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(-34px) scale(.965);filter:blur(5px);transition:opacity .42s ease,transform .52s cubic-bezier(.2,.8,.2,1),filter .42s ease,visibility 0s linear .52s}
     .wheel-view.daily-mode .daily-wheel-wrap{position:relative;inset:auto;opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0) scale(1);filter:blur(0);transition-delay:0s}
     /* Daily reward wheel */
-    .daily-wheel-stage{position:relative;width:min(96vw,440px);aspect-ratio:1;margin:2px auto 14px}
+    .daily-wheel-stage{position:relative;width:min(100%,400px);max-width:100%;aspect-ratio:1;margin:2px auto 14px}
     .daily-wheel-rotor{position:absolute;inset:0;display:block;width:100%;height:100%;border-radius:50%;object-fit:cover;box-shadow:0 22px 42px rgba(0,0,0,.48);will-change:transform;transform:rotate(0deg)}
     .daily-wheel-pointer{position:absolute;z-index:7;left:50%;top:-11px;width:56px;height:auto;transform:translateX(-50%);filter:drop-shadow(0 7px 9px rgba(0,0,0,.58));pointer-events:none}
     .daily-wheel-card{margin:0 8px 48px;padding:14px;border:1px solid rgba(255,255,255,.11);border-radius:24px;background:linear-gradient(155deg,rgba(72,18,46,.55),rgba(8,6,9,.64));box-shadow:0 20px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(17px);-webkit-backdrop-filter:blur(17px)}

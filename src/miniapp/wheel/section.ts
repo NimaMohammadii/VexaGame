@@ -205,10 +205,11 @@ export const WHEEL_SECTION = `
         function toNano(v){return Math.max(0,Math.floor((Number(String(v||'').replace(',','.'))||0)*1000000000))}
         function userId(){var tg=window.Telegram&&window.Telegram.WebApp,u=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user,id=String((u&&u.id)||'').trim();if(id)return id;try{return String(localStorage.getItem('ownerId')||'').trim()}catch(_){return ''}}
         function telegramInitData(){var tg=window.Telegram&&window.Telegram.WebApp;return tg?String(tg.initData||''):''}
+        function isDailyWheelAdmin(){var state=window.VexaPlayZoneVisibility;return !!(state&&state.ready&&state.admin===true)}
         function dailyStorageKey(){return'vexa:wheel:daily:last-spin:'+String(userId()||'guest')}
         function readDailyLastSpin(){try{return Math.max(0,Number(localStorage.getItem(dailyStorageKey()))||0)}catch(_){return 0}}
         function writeDailyLastSpin(value){try{localStorage.setItem(dailyStorageKey(),String(value))}catch(_){}}
-        function dailyTimeLeft(){return Math.max(0,dailyCooldownMs-(Date.now()-readDailyLastSpin()))}
+        function dailyTimeLeft(){return isDailyWheelAdmin()?0:Math.max(0,dailyCooldownMs-(Date.now()-readDailyLastSpin()))}
         function formatDailyTime(ms){var total=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60;return[h,m,s].map(function(v){return String(v).padStart(2,'0')}).join(':')}
         function updateDailyAvailability(){if(!dailySpinButton||dailySpinning)return;var left=dailyTimeLeft();dailySpinButton.disabled=left>0;dailySpinButton.textContent=left>0?'Next Spin · '+formatDailyTime(left):'Spin Daily Wheel'}
         function stopDailyClock(){if(dailyTimer){clearInterval(dailyTimer);dailyTimer=0}}
@@ -218,7 +219,7 @@ export const WHEEL_SECTION = `
         function spinDailyWheel(){
           if(dailySpinning||!dailyRotor||!dailySpinButton||dailyTimeLeft()>0){updateDailyAvailability();return}
           dailySpinning=true;
-          writeDailyLastSpin(Date.now());
+          if(!isDailyWheelAdmin())writeDailyLastSpin(Date.now());
           stopDailyClock();
           dailySpinButton.disabled=true;
           dailySpinButton.textContent='Spinning...';

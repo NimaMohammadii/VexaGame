@@ -48,7 +48,6 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
   }
   if (!isAdmin(env, callback.from.id)) return ok();
 
-  await clearOtherAdminStates(env, callback.from.id);
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
   const chatId = callback.message?.chat.id ?? callback.from.id;
   const messageId = callback.message?.message_id;
@@ -362,15 +361,6 @@ async function getState(env: Env, userId: number): Promise<SlotState | null> {
 function setState(env: Env, userId: number, state: SlotState): Promise<void> { return env.BOT_CACHE.put(stateKey(userId), JSON.stringify(state), { expirationTtl: 900 }); }
 function clearState(env: Env, userId: number): Promise<void> { return env.BOT_CACHE.delete(stateKey(userId)).catch(() => undefined); }
 function stateKey(userId: number): string { return `${STATE_PREFIX}${userId}`; }
-async function clearOtherAdminStates(env: Env, userId: number): Promise<void> {
-  await Promise.all([
-    env.BOT_CACHE.delete(`admin:section-access-input:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`admin:online-count-input:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`admin:crash-ghost-live-bets-input:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`admin:game-card-upload:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`botadmin:state:${userId}`).catch(() => undefined),
-  ]);
-}
 function isAdmin(env: Env, userId: unknown): boolean {
   return String(env.BOT_ADMIN || '').split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean).includes(String(userId || ''));
 }

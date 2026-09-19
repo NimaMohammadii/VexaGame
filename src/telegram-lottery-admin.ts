@@ -27,10 +27,6 @@ export async function handleLotteryAdminRequest(request: Request, env: Env): Pro
   if (update.callback_query) {
     const callback = update.callback_query;
     const data = String(callback.data || '');
-    if (data === 'botadmin:home') {
-      if (isAdmin(env, callback.from.id)) await clearState(env, callback.from.id);
-      return null;
-    }
     if (!data.startsWith('botadmin:lottery:')) return null;
     if (!isAdmin(env, callback.from.id)) return ok();
     await tg(env.BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);

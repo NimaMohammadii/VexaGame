@@ -211,8 +211,7 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
   const callback = update.callback_query;
   if (callback) {
     const data = callback.data || '';
-    const ours = data === 'botadmin:home'
-      || data === 'botadmin:imagesmenu'
+    const ours = data === 'botadmin:imagesmenu'
       || data === 'botadmin:paymentmethods'
       || data === 'botadmin:audiomenu'
       || data === 'botadmin:gameimages'
@@ -245,10 +244,7 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
     const chatId = callback.message?.chat.id ?? callback.from.id;
     const messageId = callback.message?.message_id;
 
-    if (data === 'botadmin:home') {
-      await clearState(env, callback.from.id);
-      await sendHome(env, token, chatId, messageId);
-    } else if (data === 'botadmin:imagesmenu') {
+    if (data === 'botadmin:imagesmenu') {
       await clearState(env, callback.from.id);
       await sendImagesMenu(token, chatId, messageId);
     } else if (data === 'botadmin:paymentmethods') {

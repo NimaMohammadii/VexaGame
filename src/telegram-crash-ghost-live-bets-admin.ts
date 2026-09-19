@@ -53,7 +53,6 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
   }
   if (!isAdmin(env, callback.from.id)) return ok();
 
-  await clearOtherAdminStates(env, callback.from.id);
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
   const chatId = callback.message?.chat.id ?? callback.from.id;
   const messageId = callback.message?.message_id;
@@ -355,16 +354,6 @@ function setState(env: Env, userId: number, state: State): Promise<void> {
 
 function clearState(env: Env, userId: number): Promise<void> {
   return env.BOT_CACHE.delete(stateKey(userId)).catch(() => undefined);
-}
-
-async function clearOtherAdminStates(env: Env, userId: number): Promise<void> {
-  await Promise.all([
-    env.BOT_CACHE.delete(`admin:section-access-input:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`admin:online-count-input:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`admin:slot-live-bets-input:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`admin:game-card-upload:${userId}`).catch(() => undefined),
-    env.BOT_CACHE.delete(`botadmin:state:${userId}`).catch(() => undefined),
-  ]);
 }
 
 function stateKey(userId: number): string {

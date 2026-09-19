@@ -25,8 +25,7 @@ export async function handleSectionAccessAdminRequest(request: Request, env: Env
 
 async function handleCallback(env: Env, token: string, callback: Callback): Promise<Response | null> {
   const data = String(callback.data || '');
-  const ours = data === 'botadmin:home'
-    || data === 'botadmin:access:list'
+  const ours = data === 'botadmin:access:list'
     || data === 'botadmin:access:refresh'
     || data.startsWith('botadmin:access:select:')
     || data.startsWith('botadmin:access:unlock:');
@@ -36,12 +35,6 @@ async function handleCallback(env: Env, token: string, callback: Callback): Prom
   await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
   const chatId = callback.message?.chat.id ?? callback.from.id;
   const messageId = callback.message?.message_id;
-
-  if (data === 'botadmin:home') {
-    await clearAdminInputStates(env, callback.from.id);
-    await sendAdminHome(env, token, chatId, messageId);
-    return ok();
-  }
 
   if (data === 'botadmin:access:list' || data === 'botadmin:access:refresh') {
     await clearLockState(env, callback.from.id);

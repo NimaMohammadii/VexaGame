@@ -1,5 +1,6 @@
 import type { Env } from './types';
 import { ensureTonTransactionsTable } from './ton-transactions';
+import { dailyWheelWinMultiplier, ensureDailyWheelSchema } from './daily-wheel-rewards';
 
 const CRASH_MAX_MULTIPLIER = 50;
 let crashFinanceSchemaReady = false;
@@ -64,9 +65,10 @@ export async function settleCrashCashoutAtomic(
   multiplier: number,
   payoutNano: number,
 ): Promise<CrashBetRow> {
-  await ensureCrashFinanceSchema(env);
+  await Promise.all([ensureCrashFinanceSchema(env), ensureDailyWheelSchema(env)]);
   const lockedMultiplier = cleanLockedMultiplier(multiplier);
-  const lockedPayout = cleanPayout(payoutNano);
+  const rewardMultiplier = lockedMultiplier > 1 ? await dailyWheelWinMultiplier(env, userId) : 1;
+  const lockedPayout = cleanPayout(Math.floor(payoutNano * rewardMultiplier));
   const nonce = crypto.randomUUID();
   const metadataJson = cashoutMetadata(nonce, 'manual');
   const statements = [
@@ -109,7 +111,7 @@ export async function settleDueCrashAutoCashouts(
   currentMultiplier: number,
   crashPoint: number,
 ): Promise<CrashBetRow[]> {
-  await ensureCrashFinanceSchema(env);
+  await Promise.all([ensureCrashFinanceSchema(env), ensureDailyWheelSchema(env)]);
   const current = Math.max(1, Math.min(CRASH_MAX_MULTIPLIER, Number(currentMultiplier) || 1));
   const stop = Math.max(1, Math.min(CRASH_MAX_MULTIPLIER, Number(crashPoint) || 1));
   if (current < 1.01 || stop <= 1.01) return [];
@@ -120,7 +122,13 @@ export async function settleDueCrashAutoCashouts(
     env.DB.prepare(`UPDATE crash_live_bets
       SET status='cashout_pending',
           cashout_multiplier=auto_cashout_multiplier,
-          payout_nano=CAST(amount_nano * auto_cashout_multiplier AS INTEGER),
+          payout_nano=CAST(amount_nano * auto_cashout_multiplier AS INTEGER) *
+            CASE WHEN EXISTS(
+              SELECT 1 FROM daily_wheel_effects effect
+              WHERE effect.user_id=crash_live_bets.user_id
+                AND effect.kind='double_win' AND effect.status='active'
+                AND datetime(effect.expires_at)>datetime('now')
+            ) THEN 2 ELSE 1 END,
           updated_at=CURRENT_TIMESTAMP
       WHERE round_id=? AND is_virtual=0 AND status IN ('bet','crashed')
         AND auto_cashout_multiplier IS NOT NULL

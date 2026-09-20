@@ -4,6 +4,7 @@ import { getFinanceLimits } from './admin-finance-controls';
 import { getStarsGramRate } from './stars-deposits';
 import { ensureTonTransactionsTable } from './ton-transactions';
 import { publishLiveActivity } from './live-activity';
+import { ensureDailyWheelSchema } from './daily-wheel-rewards';
 import { createPublicClient, encodeFunctionData, getAddress, http, isAddress, keccak256, parseAbi } from 'viem';
 import { mnemonicToAccount } from 'viem/accounts';
 import { bsc } from 'viem/chains';
@@ -99,6 +100,7 @@ export async function createTonWithdrawal(
   walletInput: unknown,
   payoutMethodInput?: unknown,
 ): Promise<TonWithdrawal> {
+  await ensureDailyWheelSchema(env);
   const userId = cleanUserId(userIdInput);
   const payoutMethod = cleanPayoutMethod(payoutMethodInput, walletInput);
   const wallet = cleanWithdrawalWallet(walletInput, payoutMethod);
@@ -112,6 +114,9 @@ export async function createTonWithdrawal(
 
   const controls = await getUserControls(env, userId);
   if (controls.tonBalanceNano < amountNano) throw new Error('Not enough Gram balance');
+  const withdrawable = await env.DB.prepare(`SELECT MAX(0,ton_balance_nano-bonus_balance_nano) AS amount_nano
+    FROM app_users WHERE telegram_user_id=?`).bind(userId).first<{ amount_nano: number }>();
+  if (Number(withdrawable?.amount_nano || 0) < amountNano) throw new Error('Bonus balance cannot be withdrawn');
 
   await Promise.all([
     ensureTonWithdrawalsTable(env),
@@ -142,7 +147,7 @@ export async function createTonWithdrawal(
     env.DB.prepare(`UPDATE app_users
       SET ton_balance_nano = ton_balance_nano - ?, updated_at = CURRENT_TIMESTAMP
       WHERE telegram_user_id = ?
-        AND ton_balance_nano >= ?`)
+        AND ton_balance_nano - bonus_balance_nano >= ?`)
       .bind(amountNano, userId, amountNano),
     env.DB.prepare(`INSERT INTO ton_withdrawals
       (id, user_id, wallet_address, amount_nano, payout_asset, payout_network, payout_amount_units, payout_rate_usd, status, created_at, updated_at)

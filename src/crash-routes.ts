@@ -1,5 +1,6 @@
 import app from './index';
 import type { Env } from './types';
+import { ensureDailyWheelSchema } from './daily-wheel-rewards';
 import { getGhostRunVirtualUsers } from './ghost-run-virtual-users-config';
 import { buildCrashVirtualLiveBets, type CrashRoundSnapshot } from './crash-virtual-users';
 import {
@@ -253,10 +254,10 @@ async function placeCrashBetAtomic(
         AND NOT EXISTS(SELECT 1 FROM ton_transactions t WHERE t.user_id=? AND t.reference_type='crash' AND t.reference_id=? AND t.amount_nano<0)`)
       .bind(transactionId,userId,amountNano,amountNano,referenceId,metadataJson,userId,amountNano,roundId,userId,userId,referenceId),
     env.DB.prepare(`UPDATE app_users
-      SET ton_balance_nano=ton_balance_nano-?,updated_at=CURRENT_TIMESTAMP
+      SET ton_balance_nano=ton_balance_nano-?,bonus_balance_nano=max(0,bonus_balance_nano-?),updated_at=CURRENT_TIMESTAMP
       WHERE telegram_user_id=?
         AND EXISTS(SELECT 1 FROM ton_transactions WHERE id=? AND user_id=? AND metadata_json=?)`)
-      .bind(amountNano,userId,transactionId,userId,metadataJson),
+      .bind(amountNano,amountNano,userId,transactionId,userId,metadataJson),
     env.DB.prepare(`UPDATE crash_live_bets
       SET status='cancelled',updated_at=CURRENT_TIMESTAMP
       WHERE round_id=? AND user_id=? AND is_virtual=0 AND status='bet'
@@ -286,7 +287,7 @@ async function readRealLiveRows(db:D1Database, roundId:number): Promise<Row[]>{
 }
 
 async function ensure(env:Env){
-  await ensureCrashFinanceSchema(env);
+  await Promise.all([ensureCrashFinanceSchema(env),ensureDailyWheelSchema(env)]);
 }
 
 async function readCrashState(env:Env):Promise<CrashRoundSnapshot>{

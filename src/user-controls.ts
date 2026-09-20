@@ -2,6 +2,7 @@ import type { Env } from './types';
 import { publishLiveActivity } from './live-activity';
 import { publishUserControls } from './section-lock-events';
 import { ensureTonTransactionsTable, recordTonTransaction, recordTonTransactions, type TonTransactionMeta, type TonTransactionWrite } from './ton-transactions';
+import { dailyWheelWinMultiplier, ensureDailyWheelSchema, settleDeferredDailyWheelRewards } from './daily-wheel-rewards';
 
 export type UserSectionBlock = {
   sectionId: string;
@@ -43,6 +44,7 @@ type UserControlRow = { blocked_sections_json: string; win_chance_percent?: numb
 
 export async function getUserControls(env: Env, userId: string): Promise<UserControls> {
   const id = cleanUserId(userId);
+  await settleDeferredDailyWheelRewards(env, id);
   const [saved, tonBalanceNano] = await Promise.all([readSectionControls(env, id), readUserTonBalance(env, id)]);
   return shapeUserControls(id, saved, tonBalanceNano);
 }
@@ -58,7 +60,9 @@ export async function setUserTonBalance(env: Env, userId: string, tonBalanceNano
 
 export async function adjustUserTonBalance(env: Env, userId: string, deltaNano: number, meta: TonTransactionMeta = {}): Promise<UserControls> {
   const id = cleanUserId(userId);
-  const delta = Math.floor(Number(deltaNano) || 0);
+  await ensureDailyWheelSchema(env);
+  let delta = Math.floor(Number(deltaNano) || 0);
+  if (delta > 0 && isGameWin(meta)) delta = Math.floor(delta * await dailyWheelWinMultiplier(env, id));
   if (!delta) return getUserControls(env, id);
   if (hasBalanceReference(meta)) return applyReferencedBalanceMutation(env, id, delta, meta, false);
   const before = await readUserTonBalance(env, id);
@@ -71,7 +75,9 @@ export async function adjustUserTonBalance(env: Env, userId: string, deltaNano: 
 export async function applyGameTonBalanceDelta(env: Env, userId: string, deltaNano: number, meta: TonTransactionMeta = {}): Promise<UserControls> {
   const id = cleanUserId(userId);
   await assertUserNotBanned(env, id);
-  const baseDelta = Math.floor(Number(deltaNano) || 0);
+  await ensureDailyWheelSchema(env);
+  let baseDelta = Math.floor(Number(deltaNano) || 0);
+  if (baseDelta > 0 && isGameWin(meta)) baseDelta = Math.floor(baseDelta * await dailyWheelWinMultiplier(env, id));
   if (!baseDelta) return getUserControls(env, id);
   const effectiveMeta: TonTransactionMeta = {
     kind: 'game',
@@ -91,14 +97,20 @@ export async function settleGameTonBalanceRound(env: Env, userId: string, betNan
   const id = cleanUserId(userId);
   await assertUserNotBanned(env, id);
   const betNano = normalizeNano(betNanoInput);
-  const payoutNano = normalizeNano(payoutNanoInput);
+  await ensureDailyWheelSchema(env);
+  const rawPayoutNano = normalizeNano(payoutNanoInput);
+  const payoutNano = rawPayoutNano > betNano
+    ? normalizeNano(Math.floor(rawPayoutNano * await dailyWheelWinMultiplier(env, id)))
+    : rawPayoutNano;
   if (betNano <= 0) throw new Error('Invalid game amount');
   await ensureAppUserBalanceRow(env, id);
   const result = await env.DB.prepare(`UPDATE app_users
-    SET ton_balance_nano = ton_balance_nano - ? + ?, updated_at = CURRENT_TIMESTAMP
+    SET ton_balance_nano = ton_balance_nano - ? + ?,
+        bonus_balance_nano = max(0, bonus_balance_nano - ?),
+        updated_at = CURRENT_TIMESTAMP
     WHERE telegram_user_id = ? AND ton_balance_nano >= ?
     RETURNING ton_balance_nano`)
-    .bind(betNano, payoutNano, id, betNano)
+    .bind(betNano, payoutNano, betNano, id, betNano)
     .first<{ ton_balance_nano: number }>();
   if (!result) throw new Error('Insufficient balance');
   const after = normalizeNano(result.ton_balance_nano);
@@ -124,11 +136,17 @@ export async function debitUserTonBalanceIfEnough(env: Env, userId: string, amou
   const amount = normalizeNano(amountNano);
   if (amount <= 0) throw new Error('Invalid purchase amount');
   const effectiveMeta: TonTransactionMeta = { kind: 'adjustment', title: 'GRAM debit', ...meta };
+  await ensureDailyWheelSchema(env);
   if (hasBalanceReference(effectiveMeta)) return applyReferencedBalanceMutation(env, id, -amount, effectiveMeta, true);
   await ensureAppUserBalanceRow(env, id);
+  const gameBet = effectiveMeta.kind === 'game';
   const result = await env.DB.prepare(`UPDATE app_users
-    SET ton_balance_nano = ton_balance_nano - ?, updated_at = CURRENT_TIMESTAMP
-    WHERE telegram_user_id = ? AND ton_balance_nano >= ?`).bind(amount, id, amount).run();
+    SET ton_balance_nano = ton_balance_nano - ?,
+        bonus_balance_nano = CASE WHEN ?=1 THEN max(0, bonus_balance_nano - ?) ELSE bonus_balance_nano END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE telegram_user_id = ?
+      AND CASE WHEN ?=1 THEN ton_balance_nano >= ? ELSE ton_balance_nano - bonus_balance_nano >= ? END`)
+    .bind(amount, gameBet ? 1 : 0, amount, id, gameBet ? 1 : 0, amount, amount).run();
   if ((result.meta?.changes || 0) <= 0) throw new Error('Insufficient balance');
   const after = await readUserTonBalance(env, id);
   await recordTonTransaction(env, id, -amount, after, effectiveMeta);
@@ -306,6 +324,7 @@ async function applyReferencedBalanceMutation(env: Env, userId: string, deltaNan
   const requestNonce = crypto.randomUUID();
   const metadataJson = JSON.stringify({ ...(meta.metadata || {}), requestedDeltaNano: delta, idempotencyNonce: requestNonce }).slice(0, 2000);
   const requiredBalance = requireEnough && delta < 0 ? Math.abs(delta) : 0;
+  const gameBet = meta.kind === 'game' && delta < 0;
 
   const results = await env.DB.batch([
     env.DB.prepare(`INSERT OR IGNORE INTO ton_transactions (
@@ -317,16 +336,18 @@ async function applyReferencedBalanceMutation(env: Env, userId: string, deltaNan
       max(0, ton_balance_nano + ?),
       ?, ?, ?, ?, CURRENT_TIMESTAMP
     FROM app_users
-    WHERE telegram_user_id = ? AND (? <= 0 OR ton_balance_nano >= ?)`)
-      .bind(transactionId, userId, kind, title, description, delta, delta, status, referenceId, referenceType, metadataJson, userId, requiredBalance, requiredBalance),
+    WHERE telegram_user_id = ? AND (? <= 0 OR CASE WHEN ?=1 THEN ton_balance_nano >= ? ELSE ton_balance_nano - bonus_balance_nano >= ? END)`)
+      .bind(transactionId, userId, kind, title, description, delta, delta, status, referenceId, referenceType, metadataJson, userId, requiredBalance, gameBet ? 1 : 0, requiredBalance, requiredBalance),
     env.DB.prepare(`UPDATE app_users
-      SET ton_balance_nano = max(0, ton_balance_nano + ?), updated_at = CURRENT_TIMESTAMP
+      SET ton_balance_nano = max(0, ton_balance_nano + ?),
+          bonus_balance_nano = CASE WHEN ?=1 THEN max(0, bonus_balance_nano + ?) ELSE bonus_balance_nano END,
+          updated_at = CURRENT_TIMESTAMP
       WHERE telegram_user_id = ?
         AND EXISTS (
           SELECT 1 FROM ton_transactions
           WHERE id = ? AND user_id = ? AND metadata_json = ?
         )`)
-      .bind(delta, userId, transactionId, userId, metadataJson),
+      .bind(delta, gameBet ? 1 : 0, delta, userId, transactionId, userId, metadataJson),
   ]);
 
   const applied = Number(results[0]?.meta?.changes || 0) > 0;
@@ -337,7 +358,6 @@ async function applyReferencedBalanceMutation(env: Env, userId: string, deltaNan
     if (!existing) throw new Error('Insufficient balance');
   }
 
-  const after = await readUserTonBalance(env, userId);
   if (applied && kind === 'deposit' && delta > 0) {
     await publishLiveActivity(env, {
       kind: 'deposit',
@@ -346,7 +366,9 @@ async function applyReferencedBalanceMutation(env: Env, userId: string, deltaNan
       key: referenceId,
       createdAt: new Date().toISOString(),
     }).catch((error) => console.warn('live activity publish failed', error));
+    await settleDeferredDailyWheelRewards(env, userId);
   }
+  const after = await readUserTonBalance(env, userId);
   return controlsWithBalance(env, userId, after);
 }
 
@@ -371,11 +393,13 @@ async function readUserTonBalance(env: Env, userId: string): Promise<number> {
 }
 
 async function writeUserTonBalance(env: Env, userId: string, tonBalanceNano: number): Promise<void> {
+  await ensureDailyWheelSchema(env);
   const value = normalizeNano(tonBalanceNano);
   await env.DB.prepare(`INSERT INTO app_users (telegram_user_id, current_section, ton_balance_nano, last_seen_at, updated_at)
     VALUES (?, 'home', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT(telegram_user_id) DO UPDATE SET
       ton_balance_nano = excluded.ton_balance_nano,
+      bonus_balance_nano = min(bonus_balance_nano, excluded.ton_balance_nano),
       updated_at = CURRENT_TIMESTAMP`)
     .bind(userId, value)
     .run();
@@ -390,6 +414,15 @@ async function addUserTonBalance(env: Env, userId: string, deltaNano: number): P
       updated_at = CURRENT_TIMESTAMP`)
     .bind(userId, value, value)
     .run();
+}
+
+function isGameWin(meta: TonTransactionMeta): boolean {
+  if (meta.kind !== 'game') return false;
+  const title = String(meta.title || '').toLowerCase();
+  const metadata = (meta.metadata || {}) as Record<string, unknown>;
+  const result = String(metadata.result || metadata.status || '').toLowerCase();
+  if (/refund|rollback|draw|cancel|void/.test(title + ' ' + result)) return false;
+  return /reward|payout|cashout|win|won/.test(title + ' ' + result);
 }
 
 function normalizeSectionBlocks(value: unknown): UserSectionBlock[] {

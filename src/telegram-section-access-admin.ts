@@ -141,6 +141,7 @@ export async function sendAdminHome(env: Env, token: string, chatId: number, mes
       ],
       [
         { text: '🎟 Lottery', callback_data: 'botadmin:lottery:menu' },
+        { text: '🎡 Daily Wheel', callback_data: 'botadmin:dailywheel:0' },
       ],
       [
         { text: '🌍 تنظیمات رجین', callback_data: 'botadmin:regionsettings' },

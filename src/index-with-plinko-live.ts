@@ -4,6 +4,7 @@ import { handleCrashGhostLiveBetsAdminRequest } from './telegram-crash-ghost-liv
 import { handleGameCardAdminRequest } from './telegram-game-card-admin';
 import { handleGramWithdrawalAdminRequest, notifyAdminGramWithdrawal } from './telegram-gram-withdrawals-admin';
 import { handleLotteryAdminRequest } from './telegram-lottery-admin';
+import { handleDailyWheelAdminRequest } from './telegram-daily-wheel-admin';
 import { handleOnlineCountsAdminRequest } from './telegram-online-counts-admin';
 import { handleMandatoryChannelAdminRequest } from './telegram-mandatory-channel-admin';
 import { getMandatoryChannelAccess } from './mandatory-channel';
@@ -47,6 +48,7 @@ const TELEGRAM_ADMIN_STATE_PREFIXES = {
   plinko: ['admin:plinko-control-input:'],
   gram: ['admin:gram-withdrawal-input:'],
   lottery: ['admin:lottery-input:'],
+  dailyWheel: [],
   sectionAccess: ['admin:section-access-input:'],
   playCards: [],
   gameCard: ['admin:game-card-upload:'],
@@ -94,6 +96,7 @@ function telegramAdminCallbackRoute(dataInput: unknown): TelegramAdminCallbackRo
   if (data.startsWith('botadmin:plinko:')) return { group: 'plinko', handler: handlePlinkoControlAdminRequest };
   if (data.startsWith('botadmin:gw:')) return { group: 'gram', handler: handleGramWithdrawalAdminRequest };
   if (data.startsWith('botadmin:lottery:')) return { group: 'lottery', handler: handleLotteryAdminRequest };
+  if (data.startsWith('botadmin:dailywheel:')) return { group: 'dailyWheel', handler: handleDailyWheelAdminRequest };
   if (data.startsWith('botadmin:access:')) return { group: 'sectionAccess', handler: handleSectionAccessAdminRequest };
   if (data === 'botadmin:playcards' || data.startsWith('botadmin:playcard:')) return { group: 'playCards', handler: handlePlayZoneCardAdminRequest };
   if (GAME_CARD_ADMIN_CALLBACKS.has(data) || GAME_CARD_ADMIN_CALLBACK_PREFIXES.some((prefix) => data.startsWith(prefix))) {

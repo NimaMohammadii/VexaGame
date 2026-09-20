@@ -2,6 +2,8 @@ import type { Hono } from 'hono';
 import type { Env } from './types';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls } from './user-controls';
 import { gameBotToken, validateTelegramInitData } from './utils';
+import { completeDailyWheelSpin, createDailyWheelSpin, getDailyWheelState, grantDailyWheelEffect, type DailyWheelSpin } from './daily-wheel-rewards';
+import { grantLotteryRewardTickets } from './lottery';
 
 type App = Hono<{ Bindings: Env }>;
 
@@ -11,6 +13,48 @@ const WHEEL_MAX_CHANCE = 96;
 const WHEEL_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 25);
 
 export function registerWheelRoutes(app: App): void {
+  app.post('/app/api/wheel/daily/state', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({})) as { userId?: unknown; initData?: unknown };
+      const claimedUserId = cleanWheelUserId(body.userId);
+      const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
+      if (userId !== claimedUserId) throw new Error('Telegram user mismatch');
+      const admin = isWheelAdmin(c.env, userId);
+      let state = await getDailyWheelState(c.env, userId, admin);
+      for (const spin of state.pending) await settleDailySpin(c.env, spin).catch((error) => console.warn('Daily wheel pending settlement failed', error));
+      state = await getDailyWheelState(c.env, userId, admin);
+      const controls = await getUserControls(c.env, userId);
+      return c.json({ ok: true, ...state, tonBalanceNano: controls.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : 'Could not load Daily Wheel' }, 400, { 'cache-control': 'no-store' });
+    }
+  });
+
+  app.post('/app/api/wheel/daily/spin', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({})) as { userId?: unknown; initData?: unknown };
+      const claimedUserId = cleanWheelUserId(body.userId);
+      const userId = await validateTelegramInitData(body.initData, gameBotToken(c.env));
+      if (userId !== claimedUserId) throw new Error('Telegram user mismatch');
+      const controls = await getUserControls(c.env, userId);
+      if (controls.banned) throw new Error('Your access to all sections is blocked.');
+      if (controls.blockedSections.includes('wheel')) throw new Error('Wheel is blocked for this account.');
+      const admin = isWheelAdmin(c.env, userId);
+      const spin = await createDailyWheelSpin(c.env, userId, admin);
+      let rewardStatus = 'completed';
+      await settleDailySpin(c.env, spin).catch((error) => {
+        rewardStatus = 'pending';
+        console.warn('Daily wheel reward settlement failed', error);
+      });
+      const state = await getDailyWheelState(c.env, userId, admin);
+      const finalControls = await getUserControls(c.env, userId);
+      return c.json({ ok: true, spinId: spin.id, prizeKey: spin.prizeKey, prizeLabel: spin.prizeLabel, prizeIndex: spin.prizeIndex, rewardStatus, nextSpinAt: state.nextSpinAt, remainingMs: state.remainingMs, tonBalanceNano: finalControls.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+    } catch (error) {
+      const nextSpinAt = error instanceof Error && 'nextSpinAt' in error ? String((error as Error & { nextSpinAt?: string }).nextSpinAt || '') : undefined;
+      return c.json({ error: error instanceof Error ? error.message : 'Could not spin Daily Wheel', nextSpinAt }, 400, { 'cache-control': 'no-store' });
+    }
+  });
+
   app.post('/app/api/wheel/spin', async (c) => {
     let userId = '';
     let amountNano = 0;
@@ -91,6 +135,28 @@ export function registerWheelRoutes(app: App): void {
       );
     }
   });
+}
+
+async function settleDailySpin(env: Env, spin: DailyWheelSpin): Promise<void> {
+  if (spin.prizeKey === 'gram_4' || spin.prizeKey === 'gram_05' || spin.prizeKey === 'gram_01') {
+    const amountNano = spin.prizeKey === 'gram_4' ? 4_000_000_000 : spin.prizeKey === 'gram_05' ? 500_000_000 : 100_000_000;
+    await adjustUserTonBalance(env, spin.userId, amountNano, {
+      kind: 'adjustment',
+      title: 'Daily Wheel reward',
+      referenceType: 'daily_wheel',
+      referenceId: spin.id,
+      metadata: { section: 'wheel', feature: 'daily', prizeKey: spin.prizeKey },
+    });
+  } else if (spin.prizeKey === 'lottery_5') {
+    await grantLotteryRewardTickets(env, spin.userId, 5, 'daily_wheel_' + spin.id);
+  } else {
+    await grantDailyWheelEffect(env, spin);
+  }
+  await completeDailyWheelSpin(env, spin.id);
+}
+
+function isWheelAdmin(env: Env, userId: string): boolean {
+  return String(env.BOT_ADMIN || '').split(/[\s,;|]+/).map((value) => value.trim()).filter(Boolean).includes(userId);
 }
 
 function cleanWheelUserId(value: unknown): string {

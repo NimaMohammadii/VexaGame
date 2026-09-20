@@ -17,7 +17,7 @@ export const WHEEL_SECTION = `
     .wheel-view.daily-mode .daily-wheel-wrap{position:relative;inset:auto;opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0) scale(1);filter:blur(0);transition-delay:0s}
     /* Daily reward wheel */
     .daily-wheel-stage{position:relative;box-sizing:border-box;width:min(calc(100vw - 56px),360px);max-width:100%;aspect-ratio:1;margin:12px auto 34px}
-    .daily-wheel-rotor{position:absolute;inset:12px;display:block;width:calc(100% - 24px);height:calc(100% - 24px);object-fit:contain;transform-box:border-box;transform-origin:49.88% 48.96%;backface-visibility:hidden;-webkit-backface-visibility:hidden;will-change:transform;transform:rotate(0deg)}
+    .daily-wheel-rotor{position:absolute;inset:12px;display:block;width:calc(100% - 24px);height:calc(100% - 24px);object-fit:contain;transform-origin:50% 50%;backface-visibility:hidden;-webkit-backface-visibility:hidden;will-change:transform;transform:translate3d(0,0,0) rotate(0deg)}
     .daily-wheel-pointer{position:absolute;z-index:7;left:50%;top:auto;bottom:calc(100% - 18px);width:41px;height:auto;transform:translateX(-50%);filter:drop-shadow(0 7px 9px rgba(0,0,0,.58));pointer-events:none}
     .daily-wheel-card{width:min(calc(100% - 36px),330px);margin:0 auto 54px;padding:0;background:transparent;text-align:center}
     .daily-wheel-spin{width:100%;height:54px;border-radius:17px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(145deg,rgba(111,25,64,.96),rgba(55,9,31,.96));color:#fff;font-size:15px;font-weight:900;letter-spacing:-.025em;box-shadow:0 14px 34px rgba(20,0,10,.38),inset 0 1px 0 rgba(255,255,255,.13);transition:transform .18s ease,opacity .2s ease,filter .2s ease}
@@ -151,6 +151,7 @@ export const WHEEL_SECTION = `
         function chanceFromClientX(x){var r=dragRect||chanceShell.getBoundingClientRect(),left=r.left+29,width=Math.max(1,r.width-58);return posToChance(((x-left)/width)*100)}
         function multiplierFor(c){return Math.max(1.01,Math.floor((100/c)*houseEdge*100)/100)}
         function money(n){var x=Number(n)||0,t=x.toFixed(2);if(t.slice(-3)==='.00')return t.slice(0,-3);if(t.charAt(t.length-1)==='0')return t.slice(0,-1);return t}
+        function dailyRotationTransform(deg){return 'translate3d(0,0,0) rotate('+deg+'deg)'}
         function toNano(v){return Math.max(0,Math.floor((Number(String(v||'').replace(',','.'))||0)*1000000000))}
         function userId(){var tg=window.Telegram&&window.Telegram.WebApp,u=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user,id=String((u&&u.id)||'').trim();if(id)return id;try{return String(localStorage.getItem('ownerId')||'').trim()}catch(_){return ''}}
         function telegramInitData(){var tg=window.Telegram&&window.Telegram.WebApp;return tg?String(tg.initData||''):''}
@@ -174,11 +175,11 @@ export const WHEEL_SECTION = `
             dailyNextSpinAt=Date.parse(outcome.nextSpinAt||'')||0;syncBalance(outcome.tonBalanceNano);dailySpinButton.textContent='Spinning…';if(dailyResult)dailyResult.textContent='Spinning';
             var jitter=(Math.random()-.5)*10,target=-index*(360/dailyPrizes.length)-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+8640,finalRotation=startRotation+11520+delta,finished=false,spinAnimation=null;
             dailyRotation=finalRotation;
-            function finishDailySpin(){if(finished)return;finished=true;dailyRotor.style.transform='rotate('+finalRotation+'deg)';if(spinAnimation)spinAnimation.cancel();dailySpinning=false;dailyLoading=false;if(dailyResult)dailyResult.textContent=outcome.prizeLabel||dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
+            function finishDailySpin(){if(finished)return;finished=true;dailyRotor.style.transform=dailyRotationTransform(finalRotation);if(spinAnimation)spinAnimation.cancel();dailySpinning=false;dailyLoading=false;if(dailyResult)dailyResult.textContent=outcome.prizeLabel||dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
             spinAnimation=dailyRotor.animate([
-              {transform:'rotate('+startRotation+'deg)',offset:0,easing:'linear'},
-              {transform:'rotate('+fastRotation+'deg)',offset:3000/6600,easing:'cubic-bezier(.32,.68,.55,1)'},
-              {transform:'rotate('+finalRotation+'deg)',offset:1}
+              {transform:dailyRotationTransform(startRotation),offset:0,easing:'linear'},
+              {transform:dailyRotationTransform(fastRotation),offset:3000/6600,easing:'cubic-bezier(.32,.68,.55,1)'},
+              {transform:dailyRotationTransform(finalRotation),offset:1}
             ],{duration:6600,fill:'forwards'});
             spinAnimation.addEventListener('finish',finishDailySpin,{once:true});
             setTimeout(finishDailySpin,9000)

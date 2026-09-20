@@ -173,16 +173,16 @@ export const WHEEL_SECTION = `
           try{
             var outcome=await dailyRequest('/app/api/wheel/daily/spin'),index=Math.max(0,Math.min(dailyPrizes.length-1,Number(outcome.prizeIndex)||0));
             dailyNextSpinAt=Date.parse(outcome.nextSpinAt||'')||0;syncBalance(outcome.tonBalanceNano);dailySpinButton.textContent='Spinning…';if(dailyResult)dailyResult.textContent='Spinning';
-            var jitter=(Math.random()-.5)*10,target=-index*(360/dailyPrizes.length)-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+8640,finalRotation=startRotation+11520+delta,finished=false,spinAnimation=null;
+            var jitter=(Math.random()-.5)*10,target=-index*(360/dailyPrizes.length)-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+9000,finalRotation=startRotation+10080+delta,finished=false,spinAnimation=null;
             dailyRotation=finalRotation;
             function finishDailySpin(){if(finished)return;finished=true;dailyRotor.style.transform=dailyRotationTransform(finalRotation);if(spinAnimation)spinAnimation.cancel();dailySpinning=false;dailyLoading=false;if(dailyResult)dailyResult.textContent=outcome.prizeLabel||dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
             spinAnimation=dailyRotor.animate([
               {transform:dailyRotationTransform(startRotation),offset:0,easing:'linear'},
-              {transform:dailyRotationTransform(fastRotation),offset:3000/6600,easing:'cubic-bezier(.32,.68,.55,1)'},
+              {transform:dailyRotationTransform(fastRotation),offset:3000/8200,easing:'cubic-bezier(.12,.78,.16,1)'},
               {transform:dailyRotationTransform(finalRotation),offset:1}
-            ],{duration:6600,fill:'forwards'});
+            ],{duration:8200,fill:'forwards'});
             spinAnimation.addEventListener('finish',finishDailySpin,{once:true});
-            setTimeout(finishDailySpin,9000)
+            setTimeout(finishDailySpin,11000)
           }catch(error){dailySpinning=false;dailyLoading=false;if(dailyResult)dailyResult.textContent=error&&error.message?error.message:'Spin failed';loadDailyState()}
         }
         function applyWheelSlices(c){var winDeg=c*3.6,loseDeg=360-winDeg;rotor.style.background='conic-gradient(from 0deg,#E8D5DA 0deg '+winDeg+'deg,#1A0B0F '+winDeg+'deg 360deg)';winLabel.style.setProperty('--wheel-angle',(winDeg/2)+'deg');loseLabel.style.setProperty('--wheel-angle',(winDeg+loseDeg/2)+'deg')}

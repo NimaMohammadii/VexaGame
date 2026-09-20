@@ -21,11 +21,11 @@ const DAY_MS = 86_400_000;
 const PRIZES: ReadonlyArray<{ key: DailyWheelPrizeKey; label: string; weightBps: number }> = [
   { key: 'gram_4', label: '4 GRAM', weightBps: 0 },
   { key: 'double_win', label: '2x WIN · 24H', weightBps: 0 },
-  { key: 'cashback_30', label: '30% Cashback · 24H', weightBps: 525 },
+  { key: 'cashback_30', label: '30% Cashback · 24H', weightBps: 1028 },
   { key: 'gram_05', label: '0.5 GRAM', weightBps: 18 },
-  { key: 'lottery_5', label: '5 Lottery Tickets', weightBps: 175 },
-  { key: 'empty', label: 'Empty', weightBps: 5254 },
-  { key: 'deposit_bonus_60', label: '60% Deposit Bonus', weightBps: 876 },
+  { key: 'lottery_5', label: '5 Lottery Tickets', weightBps: 750 },
+  { key: 'empty', label: 'Empty', weightBps: 3754 },
+  { key: 'deposit_bonus_60', label: '60% Deposit Bonus', weightBps: 1298 },
   { key: 'gram_01', label: '0.1 GRAM', weightBps: 3152 },
 ];
 

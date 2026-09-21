@@ -173,13 +173,12 @@ export const WHEEL_SECTION = `
           try{
             var outcome=await dailyRequest('/app/api/wheel/daily/spin'),index=Math.max(0,Math.min(dailyPrizes.length-1,Number(outcome.prizeIndex)||0));
             dailyNextSpinAt=Date.parse(outcome.nextSpinAt||'')||0;syncBalance(outcome.tonBalanceNano);dailySpinButton.textContent='Spinning…';if(dailyResult)dailyResult.textContent='Spinning';
-            var jitter=(Math.random()-.5)*10,target=-index*(360/dailyPrizes.length)-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+8640,finalRotation=startRotation+10080+delta,landingRotation=finalRotation-126,finished=false,spinAnimation=null;
+            var jitter=(Math.random()-.5)*10,target=-index*(360/dailyPrizes.length)-jitter,startRotation=dailyRotation,current=((startRotation%360)+360)%360,desired=((target%360)+360)%360,delta=(desired-current+360)%360,fastRotation=startRotation+8640,finalRotation=startRotation+10080+delta,finished=false,spinAnimation=null;
             dailyRotation=finalRotation;
             function finishDailySpin(){if(finished)return;finished=true;dailyRotor.style.transform=dailyRotationTransform(finalRotation);if(spinAnimation)spinAnimation.cancel();dailySpinning=false;dailyLoading=false;if(dailyResult)dailyResult.textContent=outcome.prizeLabel||dailyPrizes[index];if(root.classList.contains('active')&&root.classList.contains('daily-mode'))startDailyClock();else updateDailyAvailability()}
             spinAnimation=dailyRotor.animate([
               {transform:dailyRotationTransform(startRotation),offset:0,easing:'linear'},
               {transform:dailyRotationTransform(fastRotation),offset:3000/10700,easing:'cubic-bezier(.08,.70,.12,1)'},
-              {transform:dailyRotationTransform(landingRotation),offset:8000/10700,easing:'cubic-bezier(.12,.88,.16,1)'},
               {transform:dailyRotationTransform(finalRotation),offset:1}
             ],{duration:10700,fill:'forwards'});
             spinAnimation.addEventListener('finish',finishDailySpin,{once:true});

@@ -359,33 +359,39 @@ export async function grantLotteryRewardTickets(env: Env, userIdInput: unknown, 
   await ensureLotteryTables(env);
 
   const existing = await ticketsForPurchase(env, userId, purchaseId);
-  if (existing.length) return existing;
+  if (existing.length >= quantity) return existing;
 
   const round = await getCurrentLotteryRound(env, true);
   if (!round || round.status !== 'open' || Date.parse(round.drawAt) <= Date.now()) throw new Error('Lottery round is not open yet');
+  const rewardTicketPrefix = await deterministicRewardTicketPrefix(userId, purchaseId);
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const codes = ticketCodes(quantity);
     const drafts = Array.from({ length: quantity }, (_, index) => ({
-      id: ticketId(),
+      id: `${rewardTicketPrefix}_${index}`,
       internalNumber: internalTicketNumber(),
       ticketCode: codes[index],
     }));
     try {
-      await env.DB.batch(drafts.map((ticket) => env.DB.prepare(`INSERT INTO lottery_tickets
+      await env.DB.batch(drafts.map((ticket) => env.DB.prepare(`INSERT OR IGNORE INTO lottery_tickets
         (id,round_id,user_id,ticket_number,ticket_code,price_nano,is_free,purchase_id,created_at)
         SELECT ?,?,?,?,?,0,1,?,CURRENT_TIMESTAMP
         WHERE EXISTS (SELECT 1 FROM lottery_rounds
           WHERE id=? AND status='open' AND (draw_lock IS NULL OR draw_lock='') AND datetime(draw_at)>datetime('now'))`)
         .bind(ticket.id, round.id, userId, ticket.internalNumber, ticket.ticketCode, purchaseId, round.id)));
       const inserted = await ticketsForPurchase(env, userId, purchaseId);
-      if (inserted.length === quantity) return inserted;
-      await env.DB.prepare(`DELETE FROM lottery_tickets WHERE user_id=? AND purchase_id=?`).bind(userId, purchaseId).run().catch(() => undefined);
+      if (inserted.length >= quantity) return inserted;
     } catch {
-      await env.DB.prepare(`DELETE FROM lottery_tickets WHERE user_id=? AND purchase_id=?`).bind(userId, purchaseId).run().catch(() => undefined);
+      continue;
     }
   }
   throw new Error('Could not grant Lottery reward tickets');
+}
+
+async function deterministicRewardTicketPrefix(userId: string, purchaseId: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${userId}:${purchaseId}`));
+  const hex = Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, '0')).join('');
+  return 'lottery_reward_' + hex.slice(0, 40);
 }
 
 async function buyLotteryTicketsSerialized(env: Env, userId: string, quantityInput: unknown, purchaseIdInput: unknown): Promise<LotteryPurchaseResult> {

@@ -564,6 +564,15 @@ export async function updateLotterySettings(env: Env, patch: Partial<{
 }>): Promise<LotterySettings> {
   const current = await getLotterySettings(env);
   const nextInterval = patch.drawIntervalMinutes === undefined ? current.drawIntervalMinutes : cleanInterval(patch.drawIntervalMinutes);
+  // The app countdown comes from the open round. Keep it in sync when an
+  // admin changes the configured draw interval, while retaining that interval
+  // for all later rounds.
+  const rescheduleOpenRound = patch.nextDrawAt !== undefined || patch.drawIntervalMinutes !== undefined;
+  const nextDrawAt = patch.nextDrawAt !== undefined
+    ? normalizeFutureDate(patch.nextDrawAt, nextInterval)
+    : patch.drawIntervalMinutes !== undefined
+      ? new Date(Date.now() + nextInterval * 60_000).toISOString()
+      : current.nextDrawAt;
   const next: LotterySettings = {
     ...current,
     enabled: patch.enabled ?? current.enabled,
@@ -572,17 +581,17 @@ export async function updateLotterySettings(env: Env, patch: Partial<{
     ticketPriceNano: patch.ticketPriceNano === undefined ? current.ticketPriceNano : cleanPrice(patch.ticketPriceNano),
     maxTicketsPerUser: patch.maxTicketsPerUser === undefined ? current.maxTicketsPerUser : cleanMaxTickets(patch.maxTicketsPerUser),
     drawIntervalMinutes: nextInterval,
-    nextDrawAt: patch.nextDrawAt === undefined ? current.nextDrawAt : normalizeFutureDate(patch.nextDrawAt, nextInterval),
+    nextDrawAt,
     updatedAt: new Date().toISOString(),
   };
-  await env.DB.prepare(`UPDATE lottery_settings SET
+  const statements = [env.DB.prepare(`UPDATE lottery_settings SET
     enabled=?,sales_open=?,free_ticket_enabled=?,ticket_price_nano=?,max_tickets_per_user=?,draw_interval_minutes=?,next_draw_at=?,updated_at=CURRENT_TIMESTAMP
     WHERE id=1`)
-    .bind(next.enabled ? 1 : 0, next.salesOpen ? 1 : 0, next.freeTicketEnabled ? 1 : 0, next.ticketPriceNano, next.maxTicketsPerUser, next.drawIntervalMinutes, next.nextDrawAt)
-    .run();
-  if (patch.nextDrawAt !== undefined) {
-    await env.DB.prepare("UPDATE lottery_rounds SET draw_at=?,draw_lock=NULL,updated_at=CURRENT_TIMESTAMP WHERE status='open'").bind(next.nextDrawAt).run();
+    .bind(next.enabled ? 1 : 0, next.salesOpen ? 1 : 0, next.freeTicketEnabled ? 1 : 0, next.ticketPriceNano, next.maxTicketsPerUser, next.drawIntervalMinutes, next.nextDrawAt)];
+  if (rescheduleOpenRound) {
+    statements.push(env.DB.prepare("UPDATE lottery_rounds SET draw_at=?,draw_lock=NULL,updated_at=CURRENT_TIMESTAMP WHERE status='open'").bind(next.nextDrawAt));
   }
+  await env.DB.batch(statements);
   const updated = await getLotterySettings(env);
   await syncLotterySchedulerSafely(env, 'update Lottery settings');
   return updated;

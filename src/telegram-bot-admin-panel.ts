@@ -732,8 +732,11 @@ async function sendBroadcastDestinationMenu(env: Env, token: string, chatId: num
 }
 
 async function chooseBroadcastDestination(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, state: AdminState | null, destination: string, messageId?: number): Promise<true> {
+  if (state?.mode !== 'broadcast-destination' || state.miniAppButton !== true || !Array.isArray(state.locales) || !state.locales.length) {
+    return sendBroadcastOptions(env, token, chatId, tg, adminId, messageId);
+  }
   const normalized = normalizeChannelDestination(destination);
-  const locales = normalizeBroadcastLocales(state?.locales || 'ALL');
+  const locales = normalizeBroadcastLocales(state.locales);
   if (!normalized) return sendBroadcastDestinationMenu(env, token, chatId, tg, adminId, locales, messageId);
   return promptAdminInput(
     env,

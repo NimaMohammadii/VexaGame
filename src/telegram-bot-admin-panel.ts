@@ -11,7 +11,7 @@ import { makeSimplePdf } from './telegram-pdf';
 type TgApi = <T = unknown>(token: string, method: string, payload: unknown) => Promise<T>;
 type AdminUser = Record<string, unknown> & { id?: unknown; firstName?: unknown; username?: unknown; tonBalance?: unknown; tonBalanceNano?: unknown; currentSection?: unknown; status?: unknown; level?: unknown; xp?: unknown; rankName?: unknown; regionCode?: unknown; languageCode?: unknown; regionLabel?: unknown; returnCount?: unknown; botStartedAt?: unknown; appEnteredAt?: unknown };
 type AdminState = {
-  mode: 'win' | 'credit' | 'message' | 'broadcast' | 'limit' | 'search' | 'channel-link' | 'channel-destination' | 'channel-button-text' | 'channel-content';
+  mode: 'win' | 'credit' | 'message' | 'broadcast' | 'broadcast-destination' | 'limit' | 'search' | 'channel-link' | 'channel-destination' | 'channel-button-text' | 'channel-content';
   userId?: string;
   page?: number;
   list?: string;
@@ -36,7 +36,7 @@ const REGION_SETTINGS_KEY = 'admin:bot-region-settings';
 const CHANNEL_POST_SETTINGS_KEY = 'admin:channel-post-settings';
 const CHANNEL_POST_STATE_PREFIX = 'admin:channel-post-state:';
 const CHANNEL_DESTINATIONS = [
-  ['home', '🏠 Home'],
+  ['home', '🏠 Lucky Zone'],
   ['predictzone', '🔮 Predict'],
   ['playzone', '🎮 Play Hub'],
 ] as const;
@@ -103,7 +103,11 @@ export async function handleBotAdminCallback(env: Env, token: string, q: Telegra
   const id = parts[2] || '';
   const arg = parts[3] || '';
   const pageArg = Number(parts[4]) || 0;
-  const pendingState = action.startsWith('channel') ? await getChannelAdminState(env, q.from.id) : null;
+  const pendingState = action.startsWith('channel')
+    ? await getChannelAdminState(env, q.from.id)
+    : action === 'broadcastdestination'
+      ? await getAdminState(env, q.from.id)
+      : null;
   await clearAdminState(env, q.from.id);
   if (action === 'home') return sendAdminHome(env, token, chatId, tg, messageId);
   if (action === 'channelpost') return sendChannelPostMenu(env, token, chatId, tg, q.from.id, messageId);
@@ -122,6 +126,7 @@ export async function handleBotAdminCallback(env: Env, token: string, q: Telegra
   if (action === 'askcredit') return promptAdminInput(env, token, chatId, tg, q.from.id, { mode: 'credit', userId: id, page: Number(arg) || 0, list: returnListKey(parts[4] || 'all') }, 'مقدار تغییر کردیت/TON را با علامت مثبت یا منفی بفرستید. مثال: +1.5 یا -0.25', messageId);
   if (action === 'askmsg') return promptAdminInput(env, token, chatId, tg, q.from.id, { mode: 'message', userId: id, page: Number(arg) || 0, list: returnListKey(parts[4] || 'all') }, 'پیام تکی کاربر را بفرستید: متن، عکس با کپشن، ویدیو، ویس/صوت یا فایل.', messageId);
   if (action === 'askbroadcast') return sendBroadcastOptions(env, token, chatId, tg, q.from.id, messageId);
+  if (action === 'broadcastdestination') return chooseBroadcastDestination(env, token, chatId, tg, q.from.id, pendingState, id, messageId);
   if (action === 'ban') return toggleUserBan(env, token, chatId, tg, id, arg === 'on', messageId, pageArg);
   if (action === 'financestats') return sendFinanceStatsPanel(env, token, chatId, tg, messageId);
   if (action === 'financelimits') return sendFinanceLimitsPanel(env, token, chatId, tg, messageId);
@@ -130,7 +135,11 @@ export async function handleBotAdminCallback(env: Env, token: string, q: Telegra
   if (action === 'togglestartregion') return updateRegionSettings(env, token, chatId, tg, messageId, { startPromptEnabled: id !== 'off' });
   if (action === 'toggleregioncmd') return updateRegionSettings(env, token, chatId, tg, messageId, { commandEnabled: id !== 'off' });
   if (action === 'setdefaultregion') return updateRegionSettings(env, token, chatId, tg, messageId, { defaultRegionCode: regionByCode(id)?.code ?? null });
-  if (action === 'broadcastlocale') return promptAdminInput(env, token, chatId, tg, q.from.id, { mode: 'broadcast', locales: normalizeBroadcastLocales(id), miniAppButton: arg !== 'nobutton' }, broadcastPrompt(normalizeBroadcastLocales(id), arg !== 'nobutton'), messageId);
+  if (action === 'broadcastlocale') {
+    const locales = normalizeBroadcastLocales(id);
+    if (arg !== 'nobutton') return sendBroadcastDestinationMenu(env, token, chatId, tg, q.from.id, locales, messageId);
+    return promptAdminInput(env, token, chatId, tg, q.from.id, { mode: 'broadcast', locales, miniAppButton: false }, broadcastPrompt(locales, false), messageId);
+  }
   if (action === 'report') return sendUserReportPdf(env, token, chatId, tg, id);
   if (action === 'block') return toggleSection(env, token, chatId, tg, id, arg, messageId, pageArg);
   if (action === 'reset') return resetUser(env, token, chatId, tg, id, messageId);
@@ -347,6 +356,9 @@ async function handleStateMessage(env: Env, token: string, message: TelegramMess
     return sendFinanceLimitsPanel(env, token, message.chat.id, tg, state.menuMessageId);
   }
   if (state.mode === 'broadcast') {
+    const withMiniAppButton = state.miniAppButton !== false;
+    const destination = withMiniAppButton ? normalizeChannelDestination(state.destination) : null;
+    if (withMiniAppButton && !destination) return sendStateError(env, token, tg, message, state, 'مقصد دکمهٔ مینی‌اپ انتخاب نشده است.');
     await clearAdminState(env, message.from?.id);
     const data = await adminUsersJson(env);
     const locales = normalizeBroadcastLocales(state.locales || 'ALL');
@@ -354,7 +366,7 @@ async function handleStateMessage(env: Env, token: string, message: TelegramMess
     for (const user of (data.users as AdminUser[]).filter((item) => isAppEnteredUser(item) && localeMatches(item, locales))) {
       const id = cleanId(user.id);
       if (!id) continue;
-      try { await copyAdminMessageToChat(token, tg, message, id, state.miniAppButton !== false, broadcastMiniAppButtonText(user)); sent++; } catch (_) { /* ignore blocked users */ }
+      try { await copyAdminMessageToChat(token, tg, message, id, withMiniAppButton, broadcastMiniAppButtonText(user), destination || undefined); sent++; } catch (_) { /* ignore blocked users */ }
     }
     await cleanupAdminInput(token, tg, message);
     return sendAdminHome(env, token, message.chat.id, tg, state.menuMessageId);
@@ -385,8 +397,11 @@ async function sendStateError(env: Env, token: string, tg: TgApi, message: Teleg
   return true;
 }
 
-async function copyAdminMessageToChat(token: string, tg: TgApi, message: TelegramMessage, targetChatId: string, miniAppButton = false, buttonText = 'Open Mini App'): Promise<void> {
-  const reply_markup = miniAppButton ? { inline_keyboard: [[{ text: buttonText, web_app: { url: `${PUBLIC_BASE_URL}/app` } }]] } : undefined;
+async function copyAdminMessageToChat(token: string, tg: TgApi, message: TelegramMessage, targetChatId: string, miniAppButton = false, buttonText = 'Open Mini App', destination?: string): Promise<void> {
+  const miniAppUrl = destination ? `${PUBLIC_BASE_URL}/app?startapp=${encodeURIComponent(destination)}` : `${PUBLIC_BASE_URL}/app`;
+  const reply_markup = miniAppButton
+    ? { inline_keyboard: [[{ text: buttonText, web_app: { url: miniAppUrl } }]] }
+    : undefined;
   await tg(token, 'copyMessage', { chat_id: targetChatId, from_chat_id: message.chat.id, message_id: message.message_id, ...(reply_markup ? { reply_markup } : {}) });
 }
 
@@ -563,19 +578,8 @@ async function sendChannelDestinationMenu(env: Env, token: string, chatId: numbe
   const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
   await setAdminState(env, adminId, { mode: 'channel-destination', menuMessageId, ...channelState(settings) });
   await upsertMessage(env, token, tg, chatId, messageId, 'مقصد دکمه داخل اپ را انتخاب کنید.', [
-    ...CHANNEL_DESTINATIONS.map(([id, label]) => [{ text: label, callback_data: `botadmin:channeldestination:${id}` }]),
-    [{ text: '🕹 انتخاب یکی از بازی‌ها', callback_data: 'botadmin:channeldestination:games' }],
+    ...destinationSelectionRows('channeldestination'),
     [{ text: '⬅️ بازگشت', callback_data: 'botadmin:channelpost' }],
-  ]);
-  return true;
-}
-
-async function sendChannelGameMenu(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, settings: ChannelPostSettings, messageId?: number): Promise<true> {
-  const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
-  await setAdminState(env, adminId, { mode: 'channel-destination', menuMessageId, ...channelState(settings) });
-  await upsertMessage(env, token, tg, chatId, messageId, 'بازی مقصد را انتخاب کنید.', [
-    ...chunk(CHANNEL_GAMES.map(([id, label]) => ({ text: label, callback_data: `botadmin:channeldestination:${id}` })), 2),
-    [{ text: '⬅️ بازگشت', callback_data: 'botadmin:channelcompose' }],
   ]);
   return true;
 }
@@ -583,7 +587,6 @@ async function sendChannelGameMenu(env: Env, token: string, chatId: number, tg: 
 async function chooseChannelDestination(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, state: AdminState | null, destination: string, messageId?: number): Promise<true> {
   const settings = channelSettingsFromState(state) ?? await getChannelPostSettings(env);
   if (!settings) return promptChannelLink(env, token, chatId, tg, adminId, messageId);
-  if (destination === 'games') return sendChannelGameMenu(env, token, chatId, tg, adminId, settings, messageId);
   const normalized = normalizeChannelDestination(destination);
   if (!normalized) return sendChannelDestinationMenu(env, token, chatId, tg, adminId, settings, messageId);
   const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
@@ -695,6 +698,13 @@ function channelMiniAppUrl(destination: string): string {
   return `${VEXA_APP_DEEP_LINK}=${encodeURIComponent(destination)}`;
 }
 
+function destinationSelectionRows(action: 'channeldestination' | 'broadcastdestination'): Array<Array<{ text: string; callback_data: string }>> {
+  return [
+    ...CHANNEL_DESTINATIONS.map(([id, label]) => [{ text: label, callback_data: `botadmin:${action}:${id}` }]),
+    ...chunk(CHANNEL_GAMES.map(([id, label]) => ({ text: `🕹 ${label}`, callback_data: `botadmin:${action}:${id}` })), 2),
+  ];
+}
+
 async function sendBroadcastOptions(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, messageId?: number): Promise<true> {
   await clearAdminState(env, adminId);
   const rows = [
@@ -710,9 +720,37 @@ async function sendBroadcastOptions(env: Env, token: string, chatId: number, tg:
   return true;
 }
 
-function broadcastPrompt(locales: string[], miniAppButton: boolean): string {
+async function sendBroadcastDestinationMenu(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, locales: string[], messageId?: number): Promise<true> {
+  const menuMessageId = messageId ?? await getAdminMenuMessageId(env, chatId);
+  const normalizedLocales = normalizeBroadcastLocales(locales);
+  await setAdminState(env, adminId, { mode: 'broadcast-destination', locales: normalizedLocales, miniAppButton: true, menuMessageId });
+  await upsertMessage(env, token, tg, chatId, messageId, 'مقصد دکمهٔ پیام همگانی را انتخاب کنید.', [
+    ...destinationSelectionRows('broadcastdestination'),
+    [{ text: '⬅️ بازگشت', callback_data: 'botadmin:askbroadcast' }],
+  ]);
+  return true;
+}
+
+async function chooseBroadcastDestination(env: Env, token: string, chatId: number, tg: TgApi, adminId: unknown, state: AdminState | null, destination: string, messageId?: number): Promise<true> {
+  const normalized = normalizeChannelDestination(destination);
+  const locales = normalizeBroadcastLocales(state?.locales || 'ALL');
+  if (!normalized) return sendBroadcastDestinationMenu(env, token, chatId, tg, adminId, locales, messageId);
+  return promptAdminInput(
+    env,
+    token,
+    chatId,
+    tg,
+    adminId,
+    { mode: 'broadcast', locales, miniAppButton: true, destination: normalized },
+    broadcastPrompt(locales, true, normalized),
+    messageId,
+  );
+}
+
+function broadcastPrompt(locales: string[], miniAppButton: boolean, destination?: string): string {
   const target = locales.includes('ALL') ? 'همهٔ زبان‌ها' : locales.map((locale) => VEXA_LOCALE_LABELS[locale as VexaLocale] || locale).join(', ');
-  return `پیام همگانی را بفرستید: متن، عکس با کپشن، ویدیو، ویس/صوت یا فایل.\n\nزبان مخاطب: ${target}\nدکمه ورود به مینی‌اپ: ${miniAppButton ? 'بله' : 'خیر'}`;
+  const button = miniAppButton && destination ? `بله — ${channelDestinationLabel(destination)}` : 'خیر';
+  return `پیام همگانی را بفرستید: متن، عکس با کپشن، ویدیو، ویس/صوت یا فایل.\n\nزبان مخاطب: ${target}\nدکمه ورود به مینی‌اپ: ${button}`;
 }
 
 function normalizeBroadcastLocales(value: unknown): string[] {

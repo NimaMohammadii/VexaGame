@@ -724,7 +724,10 @@ const HOME_LOTTERY_CLIENT_SCRIPT = `
     var controller=typeof AbortController==='function'?new AbortController():null;
     var options={cache:'no-store',headers:{'accept':'application/json','x-telegram-init-data':data}};
     if(controller)options.signal=controller.signal;
-    if(!initialHydrationPending&&!stateFromCache)return fetch('/app/api/lottery/state',options);
+    // The startup deadline protects only the first paint. Applying it to
+    // later refreshes while cached state is visible can leave Home stuck on
+    // an old admin configuration indefinitely.
+    if(!initialHydrationPending)return fetch('/app/api/lottery/state',options);
     var timer=0;
     var deadline=new Promise(function(resolve,reject){timer=setTimeout(function(){try{if(controller)controller.abort()}catch(e){}reject(new Error('Lottery unavailable'))},INITIAL_STATE_TIMEOUT_MS)});
     return Promise.race([fetch('/app/api/lottery/state',options),deadline]).finally(function(){if(timer)clearTimeout(timer)});

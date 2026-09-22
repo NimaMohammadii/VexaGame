@@ -101,6 +101,10 @@ export const SECTION_BACKGROUND_SCRIPT = `
   function applySectionBackground(section){
     if(!section||!section.id)return;
     if(section.id==='ghostrun'||section.id==='predict')return;
+    if(section.id==='shellgame'){
+      if(section.backgroundUrl)document.documentElement.style.setProperty('--admin-shellgame-background-image',cssUrl(section.backgroundUrl));
+      else document.documentElement.style.removeProperty('--admin-shellgame-background-image');
+    }
     var found=targets(section.id);
     if(!found.length)return;
     found.forEach(function(el){

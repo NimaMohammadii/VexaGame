@@ -23,7 +23,7 @@ export const SHELL_GAME_SECTION = `
     .shell-game-status{position:absolute;z-index:7;left:15%;right:15%;top:85px;min-height:18px;text-align:center;color:rgba(255,236,224,.72);font-size:11px;font-weight:800;letter-spacing:.01em;text-shadow:0 3px 9px #000}
     .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
     .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px}
-    .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
+    .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0!important;outline:0!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
     .shell-cup-button[data-slot="0"]{--slot-x:max(-31vw,-132px)}
     .shell-cup-button[data-slot="1"]{--slot-x:0px}
     .shell-cup-button[data-slot="2"]{--slot-x:min(31vw,132px)}

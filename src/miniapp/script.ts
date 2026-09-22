@@ -108,7 +108,7 @@ export const MINIAPP_SCRIPT = `
   function storageGet(key){try{return window.localStorage?localStorage.getItem(key):''}catch(e){return ''}}
   function storageSet(key,value){try{if(window.localStorage)localStorage.setItem(key,value)}catch(e){}}
   var ownerId=telegramUserId||storageGet('ownerId')||'';
-  var sectionTitles={home:'Lucky Zone',predictzone:'Predict',results:'Bot Control',playzone:'Play Hub',mines:'Mines',plinko:'Plinko',crash:'Crash',wheel:'Wheel',dice:'Dice',tower:'Dragon Tower',slot:'Slot',coinflip:'Pump',ghostrun:'Ghost Run'};
+  var sectionTitles={home:'Lucky Zone',predictzone:'Predict',results:'Bot Control',playzone:'Play Hub',mines:'Mines',plinko:'Plinko',crash:'Crash',wheel:'Wheel',dice:'Dice',tower:'Dragon Tower',slot:'Slot',coinflip:'Pump',ghostrun:'Ghost Run',shellgame:'Shell Game'};
 
   function q(id){return document.getElementById(id)}
   function setText(id,v){var n=q(id);if(n)n.textContent=v}

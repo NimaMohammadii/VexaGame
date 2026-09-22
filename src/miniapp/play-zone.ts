@@ -11,6 +11,7 @@ const playZoneGames = [
   ['dice', 'Dice', 'Roll the dice and beat the target', 'Play'],
   ['hilo', 'Chicken Cross', 'Cross the road and collect rewards', 'Play'],
   ['coinflip', 'Pump', 'Pump the multiplier before it pops', 'Play'],
+  ['shellgame', 'Shell Game', 'Follow the ball and choose the right cup', 'Play'],
 ] as const;
 
 const EMPTY_CARD_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
@@ -124,7 +125,7 @@ export const PLAY_ZONE_VISIBILITY_SCRIPT = `
   var root=document.documentElement;
   var loaded=false;
   var inFlight=null;
-  var gameIds={mines:true,plinko:true,wheel:true,slot:true,ghostrun:true,crash:true,dice:true,hilo:true,coinflip:true};
+  var gameIds={mines:true,plinko:true,wheel:true,slot:true,ghostrun:true,crash:true,dice:true,hilo:true,coinflip:true,shellgame:true};
   var state=window.VexaPlayZoneVisibility={
     ready:false,
     admin:false,

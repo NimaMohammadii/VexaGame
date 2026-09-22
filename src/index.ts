@@ -15,6 +15,7 @@ const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const HOME_LOTTERY_SLOT_KEY = 'home-lottery-slot';
 const VERSIONED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const DICE_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 50);
+const SHELL_GAME_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 3);
 const SLOT_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 200);
 const PUMP_MAX_BET_NANO = Math.floor(Number.MAX_SAFE_INTEGER / 24);
 let slotRoundsReady: Promise<void> | null = null;
@@ -170,6 +171,29 @@ app.post('/app/api/dice/roll', async (c) => {
     return c.json({ ok: true, roundId, win, roll, target, chance, multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Could not roll Dice' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.post('/app/api/shellgame/play', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const { userId } = await authenticatedGameUser(c.env, body.initData, 'shellgame');
+    const amountNano = cleanGameAmount(body.amountNano, SHELL_GAME_MAX_BET_NANO, 'Shell Game');
+    const choice = Math.floor(Number(body.choice));
+    if (!Number.isSafeInteger(choice) || choice < 0 || choice > 2) throw new Error('Choose one of the three cups');
+    const winningCup = secureRandomInt(3);
+    const win = choice === winningCup;
+    const multiplier = 2.85;
+    const payoutNano = win ? Math.floor(amountNano * multiplier) : 0;
+    const roundId = `shell_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    const settled = await settleGameTonBalanceRound(c.env, userId, amountNano, payoutNano, {
+      referenceId: roundId,
+      referenceType: 'shell_game_round',
+      metadata: { section: 'shellgame', choice, winningCup, multiplier, result: win ? 'win' : 'lose' },
+    });
+    return c.json({ ok: true, roundId, win, choice, winningCup, multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not play Shell Game' }, 400, { 'cache-control': 'no-store' });
   }
 });
 

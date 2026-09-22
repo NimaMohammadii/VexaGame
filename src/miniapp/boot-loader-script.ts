@@ -183,7 +183,7 @@ export const STARTUP_RUNTIME_SCRIPT = `
   }
   function gameAssetsAlreadyReady(){try{return localStorage.getItem(BACKGROUND_ASSETS_READY_KEY)==='1'}catch(e){return false}}
   function activeViewId(){var active=document.querySelector('.view.active');return String(active&&active.id||'')}
-  function shouldStartGameAssetWarmup(id){id=String(id||'');return id==='playzone'||id==='mines'||id==='plinko'||id==='crash'||id==='slot'||id==='wheel'||id==='dice'||id==='coinflip'||id==='ghostrun'||id==='hilo'}
+  function shouldStartGameAssetWarmup(id){id=String(id||'');return id==='playzone'||id==='mines'||id==='plinko'||id==='crash'||id==='slot'||id==='wheel'||id==='dice'||id==='coinflip'||id==='ghostrun'||id==='hilo'||id==='shellgame'}
   function startGameAssetWarmup(){
     if(window.__vexaGameAssetWarmupStarted||gameAssetsAlreadyReady())return;
     window.__vexaGameAssetWarmupStarted=true;

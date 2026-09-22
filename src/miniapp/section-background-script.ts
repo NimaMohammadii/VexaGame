@@ -22,6 +22,7 @@ export const SECTION_BACKGROUND_SCRIPT = `
     tower:playZoneCardSelectors('tower'),
     coinflip:playZoneCardSelectors('coinflip'),
     hilo:playZoneCardSelectors('hilo'),
+    shellgame:playZoneCardSelectors('shellgame'),
     'wheel-separator':['#wheel .wheel-separator','[data-section-background-target="wheel-separator"]'],
   };
   function cssUrl(url){return 'url("'+String(url).replace(/\\\\/g,'\\\\\\\\').replace(/"/g,'\\\\"')+'")'}
@@ -116,7 +117,7 @@ export const SECTION_BACKGROUND_SCRIPT = `
   var inFlight=null;
   function sectionVisible(id){var el=document.getElementById(aliases[id]||id);return !!(el&&el.classList&&el.classList.contains('active'))}
   function visibilityAllowsSection(id){var state=window.VexaPlayZoneVisibility;return !state||typeof state.shouldPreload!=='function'||state.shouldPreload(id)}
-  function shouldApplySection(section){if(!section||!section.id)return false;var id=aliases[section.id]||section.id;if(section.id==='home'||section.id.indexOf('home-')===0||section.id==='ghostrun')return false;if(!visibilityAllowsSection(id))return false;if(section.id.indexOf('playzone-')===0)return sectionVisible('playzone');if(['mines','plinko','crash','wheel','dice','slot','tower','coinflip','hilo','predict-zone-card'].indexOf(section.id)>=0)return sectionVisible('playzone')||sectionVisible(id);return sectionVisible(id)}
+  function shouldApplySection(section){if(!section||!section.id)return false;var id=aliases[section.id]||section.id;if(section.id==='home'||section.id.indexOf('home-')===0||section.id==='ghostrun')return false;if(!visibilityAllowsSection(id))return false;if(section.id.indexOf('playzone-')===0)return sectionVisible('playzone');if(['mines','plinko','crash','wheel','dice','slot','tower','coinflip','hilo','shellgame','predict-zone-card'].indexOf(section.id)>=0)return sectionVisible('playzone')||sectionVisible(id);return sectionVisible(id)}
   function apply(sections){
     if(!Array.isArray(sections))return Promise.resolve();
     var jobs=[];

@@ -13,7 +13,7 @@ export type OnlineCountConfig = {
 type AdminSettingRow = { value_json: string };
 
 const KEY = 'admin:online-user-counts';
-const SECTION_IDS = ['mines', 'plinko', 'wheel', 'dice', 'crash', 'hilo', 'coinflip', 'slot', 'ghostrun', 'predict'];
+const SECTION_IDS = ['mines', 'plinko', 'wheel', 'dice', 'crash', 'hilo', 'coinflip', 'slot', 'ghostrun', 'shellgame', 'predict'];
 const MAX_COUNT = 999_999;
 
 export const ONLINE_COUNT_SECTIONS = SECTION_IDS.map((id) => ({ id, label: labelForSection(id) }));
@@ -130,6 +130,6 @@ function normalizeCount(value: unknown, fallback: number): number {
 }
 
 function labelForSection(id: string): string {
-  const labels: Record<string, string> = { mines: 'Mines', plinko: 'Plinko', wheel: 'Wheel', dice: 'Dice', crash: 'Crash', hilo: 'Chicken Cross', coinflip: 'Pump', slot: 'Slot', ghostrun: 'Ghost Run', predict: 'Predict' };
+  const labels: Record<string, string> = { mines: 'Mines', plinko: 'Plinko', wheel: 'Wheel', dice: 'Dice', crash: 'Crash', hilo: 'Chicken Cross', coinflip: 'Pump', slot: 'Slot', ghostrun: 'Ghost Run', shellgame: 'Shell Game', predict: 'Predict' };
   return labels[id] || id;
 }

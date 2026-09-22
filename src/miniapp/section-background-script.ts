@@ -22,7 +22,7 @@ export const SECTION_BACKGROUND_SCRIPT = `
     tower:playZoneCardSelectors('tower'),
     coinflip:playZoneCardSelectors('coinflip'),
     hilo:playZoneCardSelectors('hilo'),
-    shellgame:playZoneCardSelectors('shellgame'),
+    shellgame:['#shellgame'],
     'wheel-separator':['#wheel .wheel-separator','[data-section-background-target="wheel-separator"]'],
   };
   function cssUrl(url){return 'url("'+String(url).replace(/\\\\/g,'\\\\\\\\').replace(/"/g,'\\\\"')+'")'}

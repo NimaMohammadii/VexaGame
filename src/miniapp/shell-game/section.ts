@@ -6,8 +6,8 @@ export const SHELL_GAME_SECTION = `
     .shell-game-view{height:calc(100dvh - 52px - env(safe-area-inset-top));padding:0 10px max(22px,env(safe-area-inset-bottom));box-sizing:border-box;overflow-x:hidden;overflow-y:auto;background-color:#030202;background-image:url('/assets/shell-game-background.webp');background-position:center top;background-size:min(100%,768px) auto;background-repeat:no-repeat;color:#fff;scrollbar-width:none;-webkit-overflow-scrolling:touch}
     .shell-game-view::-webkit-scrollbar{display:none}
     .shell-game-wrap{width:min(100%,520px);margin:0 auto;padding:8px 0 24px;display:grid;gap:12px}
-    .shell-game-hero{position:relative;height:430px;border:0;border-radius:0;overflow:visible;background:transparent;box-shadow:none}
-    .shell-game-hero:after{content:none;display:none}
+    .shell-game-hero{position:relative;height:430px;border:0!important;border-radius:0!important;overflow:visible;background:none!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+    .shell-game-hero:before,.shell-game-hero:after{content:none!important;display:none!important;background:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
     .shell-game-head{position:absolute;z-index:7;left:14px;right:14px;top:14px;height:60px;display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px}
     .shell-game-back{width:46px;height:46px;padding:0;border:1px solid rgba(255,255,255,.12);border-radius:50%;display:grid;place-items:center;background:rgba(8,6,6,.58);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);color:#fbe8dc;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
     .shell-game-back svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -18,7 +18,8 @@ export const SHELL_GAME_SECTION = `
     .shell-game-multiplier{height:42px;padding:0 14px;border:1px solid rgba(255,76,111,.5);border-radius:15px;display:flex;align-items:center;background:linear-gradient(145deg,rgba(121,22,43,.86),rgba(47,8,18,.84));box-shadow:inset 0 1px 0 rgba(255,202,211,.13),0 8px 22px rgba(0,0,0,.3);color:#ffd9df;font-size:13px;font-weight:850;white-space:nowrap;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
     .shell-game-status{position:absolute;z-index:7;left:15%;right:15%;top:85px;min-height:18px;text-align:center;color:rgba(255,236,224,.72);font-size:11px;font-weight:800;letter-spacing:.01em;text-shadow:0 3px 9px #000}
     .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
-    .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px}
+    .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;perspective:900px}
+    .shell-game-arena:before,.shell-game-arena:after{content:none!important;display:none!important}
     .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
     .shell-cup-button[data-slot="0"]{--slot-x:max(-31vw,-132px)}
     .shell-cup-button[data-slot="1"]{--slot-x:0px}

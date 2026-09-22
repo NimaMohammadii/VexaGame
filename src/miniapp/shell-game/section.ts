@@ -18,7 +18,7 @@ export const SHELL_GAME_SECTION = `
     .shell-cup-button[data-slot="0"],.shell-cup-shadow[data-slot="0"]{--slot-x:max(-26vw,-112px)}
     .shell-cup-button[data-slot="1"],.shell-cup-shadow[data-slot="1"]{--slot-x:0px}
     .shell-cup-button[data-slot="2"],.shell-cup-shadow[data-slot="2"]{--slot-x:min(26vw,112px)}
-    .shell-cup-shadow{--slot-x:0px;position:absolute;left:50%;bottom:126px;width:27%;max-width:112px;height:15px;border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.66) 0%,rgba(0,0,0,.46) 42%,rgba(0,0,0,.18) 64%,rgba(0,0,0,0) 82%);box-shadow:0 7px 15px rgba(0,0,0,.22);filter:blur(2.8px);transform:translateX(calc(-50% + var(--slot-x))) scaleX(1.08);opacity:.78;pointer-events:none;z-index:2}
+    .shell-cup-shadow{--slot-x:0px;position:absolute;left:50%;bottom:138px;width:27%;max-width:112px;height:15px;border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.66) 0%,rgba(0,0,0,.46) 42%,rgba(0,0,0,.18) 64%,rgba(0,0,0,0) 82%);box-shadow:0 7px 15px rgba(0,0,0,.22);filter:blur(2.8px);transform:translateX(calc(-50% + var(--slot-x))) scaleX(1.08);opacity:.78;pointer-events:none;z-index:2}
     .shell-cup-button.selectable{cursor:pointer;filter:brightness(1.04)}
     .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
     .shell-cup-button.lifted{--cup-lift:-66px}

@@ -1,77 +1,121 @@
 export const SHELL_GAME_SECTION = `
-<section id="shellgame" class="view shell-game-view">
+<section id="shellgame" class="view shell-game-view" aria-label="Shell Game">
   <style>
     body:has(#shellgame.active) .tabs{display:none!important}
-    body:has(#shellgame.active) .content{height:calc(100dvh - 54px - env(safe-area-inset-top))!important;overflow:hidden!important}
-    .shell-game-view{position:relative;min-height:100dvh;padding:52px 14px max(22px,env(safe-area-inset-bottom));box-sizing:border-box;overflow:hidden;background:radial-gradient(circle at 50% 22%,rgba(112,18,48,.24),transparent 38%),linear-gradient(180deg,#120308 0%,#050203 58%,#000 100%)}
-    .shell-game-wrap{width:min(100%,520px);height:100%;margin:auto;display:flex;flex-direction:column;justify-content:flex-end;gap:14px}
-    .shell-game-board{position:relative;height:min(56vh,470px);min-height:330px;border-radius:34px;background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.025));box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 24px 60px rgba(0,0,0,.34);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);overflow:hidden}
-    .shell-game-board:before{content:'';position:absolute;left:7%;right:7%;bottom:58px;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent);box-shadow:0 18px 38px rgba(0,0,0,.8)}
-    .shell-game-status{position:absolute;left:18px;right:18px;top:22px;text-align:center;color:rgba(255,255,255,.7);font-size:14px;font-weight:850;letter-spacing:-.02em}
-    .shell-game-status.win{color:#80ffc0}.shell-game-status.lose{color:#ff8aa5}
-    .shell-game-multiplier{position:absolute;top:54px;left:50%;transform:translateX(-50%);padding:7px 13px;border-radius:999px;background:rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);color:rgba(255,255,255,.88);font-size:12px;font-weight:900}
-    .shell-game-arena{position:absolute;left:0;right:0;bottom:61px;height:230px;perspective:780px}
-    .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:0;width:31%;max-width:132px;height:178px;padding:0;border:0;background:transparent;color:#fff;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .31s cubic-bezier(.2,.75,.25,1),filter .2s ease;z-index:3;-webkit-tap-highlight-color:transparent}
-    .shell-cup-button[data-slot="0"]{--slot-x:max(-31vw,-126px)}
+    body:has(#shellgame.active) .content{height:calc(100dvh - 52px - env(safe-area-inset-top))!important;overflow:hidden!important}
+    .shell-game-view{height:calc(100dvh - 52px - env(safe-area-inset-top));padding:0 10px max(22px,env(safe-area-inset-bottom));box-sizing:border-box;overflow-x:hidden;overflow-y:auto;background:#030202;color:#fff;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .shell-game-view::-webkit-scrollbar{display:none}
+    .shell-game-wrap{width:min(100%,520px);margin:0 auto;padding:8px 0 24px;display:grid;gap:12px}
+    .shell-game-hero{position:relative;height:472px;border-radius:28px;overflow:hidden;background:#090403 url('/assets/shell-game-background.webp') center 37%/cover no-repeat;box-shadow:inset 0 1px 0 rgba(255,226,210,.14),0 22px 52px rgba(0,0,0,.36)}
+    .shell-game-hero:after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.18) 0%,transparent 25%,transparent 70%,rgba(0,0,0,.30) 100%);pointer-events:none}
+    .shell-game-head{position:absolute;z-index:7;left:14px;right:14px;top:14px;height:60px;display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px}
+    .shell-game-back{width:46px;height:46px;padding:0;border:1px solid rgba(255,255,255,.12);border-radius:50%;display:grid;place-items:center;background:rgba(8,6,6,.58);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);color:#fbe8dc;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+    .shell-game-back svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .shell-game-title{min-width:0;text-align:center;color:#f5dfcb;text-shadow:0 3px 16px rgba(0,0,0,.7)}
+    .shell-game-title strong{display:flex;align-items:center;justify-content:center;gap:8px;font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1;font-weight:700;letter-spacing:-.035em;white-space:nowrap}
+    .shell-game-title strong i{font-style:normal;font-size:27px;color:#d7a779}
+    .shell-game-title small{display:block;margin-top:8px;font-size:7px;line-height:1;font-weight:800;letter-spacing:.42em;color:rgba(241,207,180,.62);white-space:nowrap}
+    .shell-game-multiplier{height:42px;padding:0 14px;border:1px solid rgba(255,76,111,.5);border-radius:15px;display:flex;align-items:center;background:linear-gradient(145deg,rgba(121,22,43,.86),rgba(47,8,18,.84));box-shadow:inset 0 1px 0 rgba(255,202,211,.13),0 8px 22px rgba(0,0,0,.3);color:#ffd9df;font-size:13px;font-weight:850;white-space:nowrap;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+    .shell-game-status{position:absolute;z-index:7;left:15%;right:15%;top:85px;min-height:18px;text-align:center;color:rgba(255,236,224,.72);font-size:11px;font-weight:800;letter-spacing:.01em;text-shadow:0 3px 9px #000}
+    .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
+    .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:28px;height:285px;perspective:900px}
+    .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
+    .shell-cup-button[data-slot="0"]{--slot-x:max(-31vw,-132px)}
     .shell-cup-button[data-slot="1"]{--slot-x:0px}
-    .shell-cup-button[data-slot="2"]{--slot-x:min(31vw,126px)}
-    .shell-cup-button.selectable{cursor:pointer}.shell-cup-button.selectable:active{filter:brightness(1.18);transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.98)}
-    .shell-cup-button.lifted{--cup-lift:-64px}
-    .shell-cup{position:absolute;left:8%;right:8%;bottom:0;height:150px;clip-path:polygon(18% 2%,82% 2%,100% 94%,94% 100%,6% 100%,0 94%);background:linear-gradient(90deg,#3a0715 0%,#8e2547 18%,#d56b87 46%,#8b2344 73%,#30050f 100%);box-shadow:inset 0 5px 7px rgba(255,255,255,.35),inset 0 -12px 20px rgba(0,0,0,.5),0 18px 28px rgba(0,0,0,.5);filter:drop-shadow(0 2px 0 rgba(255,211,222,.25))}
-    .shell-cup:before{content:'';position:absolute;left:5%;right:5%;top:0;height:15px;border-radius:50%;background:linear-gradient(180deg,#f4a0b4,#7b1735 58%,#2b040e);box-shadow:inset 0 2px 3px rgba(255,255,255,.55),0 4px 8px rgba(0,0,0,.35)}
-    .shell-cup:after{content:'';position:absolute;top:19px;bottom:20px;left:22%;width:17%;border-radius:50%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.23),transparent);transform:rotate(-4deg)}
-    .shell-ball{position:absolute;left:50%;bottom:5px;width:29px;height:29px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff6c7 0 9%,#ffc83d 27%,#d36c00 72%,#5f1f00 100%);box-shadow:0 6px 16px rgba(0,0,0,.65),0 0 22px rgba(255,159,34,.25);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:2}
+    .shell-cup-button[data-slot="2"]{--slot-x:min(31vw,132px)}
+    .shell-cup-button.selectable{cursor:pointer;filter:brightness(1.04)}
+    .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
+    .shell-cup-button.lifted{--cup-lift:-66px}
+    .shell-cup{position:absolute;left:0;right:0;bottom:0;width:100%;height:auto;object-fit:contain;filter:drop-shadow(0 19px 14px rgba(0,0,0,.52));pointer-events:none}
+    .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:16px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
+    .shell-ball{position:absolute;left:50%;bottom:18px;width:30px;height:30px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff7ca 0 10%,#ffc640 28%,#d76d00 72%,#5a1b00 100%);box-shadow:0 8px 16px rgba(0,0,0,.7),0 0 20px rgba(255,165,48,.22);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:3}
     .shell-ball.visible{transform:translateX(-50%) scale(1);opacity:1}
-    .shell-game-controls{padding:16px;border-radius:30px;background:rgba(15,7,9,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 44px rgba(0,0,0,.3);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
-    .shell-bet-row{display:grid;grid-template-columns:64px minmax(0,1fr) 64px;gap:10px;height:62px}
-    .shell-bet-row button{border:0;border-radius:20px;background:rgba(255,255,255,.07);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);color:#fff;font-size:17px;font-weight:900}
-    .shell-bet-value{display:flex!important;align-items:center;justify-content:center;gap:5px;font-size:20px!important}.shell-bet-value img{width:29px;height:29px;object-fit:contain}
-    .shell-play-button{width:100%;height:60px;margin-top:11px;border:0;border-radius:20px;background:linear-gradient(145deg,rgba(139,31,63,.95),rgba(64,7,24,.92));box-shadow:inset 0 1px 0 rgba(255,222,231,.22),0 12px 26px rgba(0,0,0,.28);color:#ffe7ee;font-size:17px;font-weight:920;letter-spacing:-.025em}
-    .shell-play-button:disabled{opacity:.56}.shell-play-button:not(:disabled):active{transform:scale(.98)}
-    @media(max-height:720px){.shell-game-view{padding-top:34px}.shell-game-board{height:365px;min-height:300px}.shell-game-arena{height:205px}.shell-cup-button{height:158px}.shell-cup{height:132px}}
+    .shell-guess{display:flex;align-items:center;justify-content:center;gap:7px;margin:1px 0 0;color:rgba(255,244,237,.86);font-size:13px;font-weight:740}.shell-guess i{font-style:normal;color:#d9a87a}
+    .shell-picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    .shell-pick{height:74px;padding:7px 4px;border:1px solid rgba(226,188,158,.22);border-radius:18px;display:grid;place-items:center;align-content:center;gap:1px;background:linear-gradient(145deg,rgba(34,26,24,.72),rgba(11,9,9,.78));box-shadow:inset 0 1px 0 rgba(255,255,255,.06);color:#fff;transition:border-color .18s ease,background .18s ease,transform .16s ease}
+    .shell-pick img{width:34px;height:32px;object-fit:contain}.shell-pick span{font-size:12px;font-weight:760}.shell-pick:disabled{opacity:.52}.shell-pick.selectable{border-color:rgba(239,178,134,.48);background:linear-gradient(145deg,rgba(63,39,33,.84),rgba(17,11,12,.86))}.shell-pick.selectable:active{transform:scale(.97)}
+    .shell-game-controls{padding:13px;border:1px solid rgba(226,188,158,.16);border-radius:23px;background:linear-gradient(145deg,rgba(23,19,18,.88),rgba(6,6,6,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 16px 38px rgba(0,0,0,.30)}
+    .shell-control-head{height:28px;margin:0 2px 9px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.68);font-size:11px;font-weight:720}
+    .shell-balance{height:27px;padding:0 10px;border:1px solid rgba(255,255,255,.10);border-radius:10px;display:flex;align-items:center;gap:7px;background:rgba(0,0,0,.24);color:rgba(255,255,255,.64)}.shell-balance b{color:#fff;font-size:11px;font-weight:850}
+    .shell-bet-row{height:58px;display:grid;grid-template-columns:58px minmax(0,1fr) 58px;border:1px solid rgba(226,188,158,.20);border-radius:17px;overflow:hidden;background:rgba(2,2,2,.44)}
+    .shell-bet-row button{border:0;background:rgba(255,255,255,.035);color:#fff;font-size:24px;font-weight:450}.shell-bet-row button:first-child{border-right:1px solid rgba(255,255,255,.08)}.shell-bet-row button:last-child{border-left:1px solid rgba(255,255,255,.08)}
+    .shell-bet-value{display:flex!important;align-items:center;justify-content:center;gap:9px;font-size:18px!important;font-weight:850!important}.shell-bet-value img{width:29px;height:29px;object-fit:contain}.shell-bet-value small{font-size:13px;color:rgba(255,255,255,.64)}
+    .shell-presets{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin-top:10px}.shell-preset{height:34px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(255,255,255,.035);color:rgba(255,255,255,.83);font-size:11px;font-weight:760}.shell-preset.active{border-color:rgba(255,83,116,.72);background:linear-gradient(145deg,rgba(115,23,43,.82),rgba(55,9,20,.76));color:#ffe9ed;box-shadow:inset 0 1px 0 rgba(255,220,226,.10)}
+    .shell-play-button{width:100%;height:66px;margin-top:12px;padding:0;border:1px solid rgba(255,81,112,.72);border-radius:18px;display:grid;place-items:center;align-content:center;gap:4px;background:linear-gradient(145deg,#a52240,#4f0a1a 68%,#320610);box-shadow:inset 0 1px 0 rgba(255,221,227,.21),0 12px 25px rgba(0,0,0,.28);color:#fff4f5;transition:transform .16s ease,opacity .18s ease}
+    .shell-play-main{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:830}.shell-play-main i{font-style:normal;font-size:18px;color:#f7d8c1}.shell-play-button small{font-size:8px;font-weight:750;letter-spacing:.25em;color:rgba(255,211,218,.68)}.shell-play-button:disabled{opacity:.54}.shell-play-button:not(:disabled):active{transform:scale(.985)}
+    .shell-info-row{display:grid;grid-template-columns:1.02fr 1.12fr .96fr;gap:8px}.shell-info-card{min-width:0;height:57px;padding:8px 9px;border:1px solid rgba(226,188,158,.15);border-radius:17px;background:linear-gradient(145deg,rgba(27,23,22,.80),rgba(7,7,7,.84));color:rgba(255,255,255,.78);display:flex;align-items:center;gap:8px}.shell-info-card>i{font-style:normal;font-size:21px;color:#e4b183}.shell-info-card span{min-width:0;font-size:9px;font-weight:720;line-height:1.2}.shell-info-card small{display:block;margin-top:4px;font-size:7px;letter-spacing:.04em;color:rgba(255,255,255,.45);white-space:nowrap}.shell-result-dots{display:flex;gap:5px;margin-top:6px}.shell-result-dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.17)}.shell-result-dots i.win{background:#35bd72}.shell-result-dots i.lose{background:#be3447}
+    @media(max-width:380px){.shell-game-view{padding-left:7px;padding-right:7px}.shell-game-hero{height:430px}.shell-game-head{left:10px;right:10px}.shell-game-title strong{font-size:22px}.shell-game-multiplier{padding:0 10px;font-size:11px}.shell-game-arena{height:258px}.shell-cup-button{height:170px}.shell-cup-number{bottom:15px;font-size:20px}.shell-info-card{padding:7px 6px;gap:5px}.shell-info-card>i{font-size:17px}}
+    @media(max-height:720px){.shell-game-hero{height:405px}.shell-game-arena{height:242px}.shell-cup-button{height:160px}.shell-game-wrap{gap:9px}.shell-pick{height:65px}.shell-game-controls{padding:11px}.shell-info-row{display:none}}
     @media(prefers-reduced-motion:reduce){.shell-cup-button,.shell-ball{transition-duration:.01ms!important}}
   </style>
   <div class="shell-game-wrap">
-    <div class="shell-game-board">
-      <div class="shell-game-status" data-shell-status>Press Start and watch the ball</div>
-      <div class="shell-game-multiplier">Correct cup pays 2.85×</div>
+    <div class="shell-game-hero">
+      <div class="shell-game-head">
+        <button class="shell-game-back" type="button" data-view="playzone" aria-label="Back to Play Hub"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <div class="shell-game-title"><strong><i>♠</i>Shell Game</strong><small>TRUST YOUR INSTINCTS</small></div>
+        <div class="shell-game-multiplier">Win 2.85×</div>
+      </div>
+      <div class="shell-game-status" data-shell-status>Press Play Round to begin</div>
       <div class="shell-game-arena" data-shell-arena>
         <div class="shell-ball" data-shell-ball></div>
-        <button class="shell-cup-button" type="button" data-shell-cup="0" data-slot="0" aria-label="Left cup"><span class="shell-cup"></span></button>
-        <button class="shell-cup-button" type="button" data-shell-cup="1" data-slot="1" aria-label="Middle cup"><span class="shell-cup"></span></button>
-        <button class="shell-cup-button" type="button" data-shell-cup="2" data-slot="2" aria-label="Right cup"><span class="shell-cup"></span></button>
+        <button class="shell-cup-button" type="button" data-shell-cup="0" data-slot="0" aria-label="Cup 1"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/><span class="shell-cup-number">1</span></button>
+        <button class="shell-cup-button" type="button" data-shell-cup="1" data-slot="1" aria-label="Cup 2"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/><span class="shell-cup-number">2</span></button>
+        <button class="shell-cup-button" type="button" data-shell-cup="2" data-slot="2" aria-label="Cup 3"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/><span class="shell-cup-number">3</span></button>
       </div>
     </div>
+    <div class="shell-guess"><i>♠</i><span>Guess where the ball is hidden</span></div>
+    <div class="shell-picks">
+      <button class="shell-pick" type="button" data-shell-pick="0" disabled><img src="/assets/shell-game-cup.webp" alt=""/><span>Cup 1</span></button>
+      <button class="shell-pick" type="button" data-shell-pick="1" disabled><img src="/assets/shell-game-cup.webp" alt=""/><span>Cup 2</span></button>
+      <button class="shell-pick" type="button" data-shell-pick="2" disabled><img src="/assets/shell-game-cup.webp" alt=""/><span>Cup 3</span></button>
+    </div>
     <div class="shell-game-controls">
+      <div class="shell-control-head"><span>Bet Amount</span><span class="shell-balance">▣ Balance <b data-shell-balance>0 TON</b></span></div>
       <div class="shell-bet-row">
-        <button type="button" data-shell-half>½</button>
-        <button class="shell-bet-value" type="button" data-shell-bet><img src="/app/api/uploaded-image/ton-icon.png" alt="TON"/><span>0.1</span></button>
-        <button type="button" data-shell-double>2×</button>
+        <button type="button" data-shell-minus aria-label="Decrease bet">−</button>
+        <button class="shell-bet-value" type="button" data-shell-bet><img src="/app/api/uploaded-image/ton-icon.png" alt="TON"/><span>1</span><small>TON</small></button>
+        <button type="button" data-shell-plus aria-label="Increase bet">+</button>
       </div>
-      <button class="shell-play-button" type="button" data-shell-play>Start</button>
+      <div class="shell-presets">
+        <button class="shell-preset" type="button" data-shell-preset="0.1">0.1</button>
+        <button class="shell-preset" type="button" data-shell-preset="0.5">0.5</button>
+        <button class="shell-preset active" type="button" data-shell-preset="1">1.0</button>
+        <button class="shell-preset" type="button" data-shell-preset="5">5.0</button>
+        <button class="shell-preset" type="button" data-shell-preset="10">10.0</button>
+      </div>
+      <button class="shell-play-button" type="button" data-shell-play><span class="shell-play-main"><i>▶</i><b>Play Round</b></span><small data-shell-potential>POTENTIAL WIN 2.85 TON</small></button>
+    </div>
+    <div class="shell-info-row">
+      <div class="shell-info-card"><span>Recent Results<span class="shell-result-dots" data-shell-results><i></i><i></i><i></i><i></i><i></i></span></span></div>
+      <div class="shell-info-card"><i>♢</i><span>Provably Fair<small>100% TRANSPARENT</small></span></div>
+      <div class="shell-info-card"><i>▤</i><span>Game Rules<small>HOW TO PLAY</small></span></div>
     </div>
   </div>
   <script>(function(){
     var root=document.getElementById('shellgame');if(!root||root.dataset.shellReady)return;root.dataset.shellReady='1';
-    var tg=window.Telegram&&window.Telegram.WebApp,NANO=1000000000,cups=Array.prototype.slice.call(root.querySelectorAll('[data-shell-cup]')),ball=root.querySelector('[data-shell-ball]'),status=root.querySelector('[data-shell-status]'),play=root.querySelector('[data-shell-play]'),betButton=root.querySelector('[data-shell-bet]'),betText=betButton.querySelector('span'),half=root.querySelector('[data-shell-half]'),doubleButton=root.querySelector('[data-shell-double]');
-    var bet=.1,state='ready',slots=[0,1,2],timers=[];
+    var tg=window.Telegram&&window.Telegram.WebApp,NANO=1000000000,cups=Array.prototype.slice.call(root.querySelectorAll('[data-shell-cup]')),picks=Array.prototype.slice.call(root.querySelectorAll('[data-shell-pick]')),presets=Array.prototype.slice.call(root.querySelectorAll('[data-shell-preset]')),ball=root.querySelector('[data-shell-ball]'),status=root.querySelector('[data-shell-status]'),play=root.querySelector('[data-shell-play]'),playLabel=play.querySelector('.shell-play-main b'),potential=root.querySelector('[data-shell-potential]'),betButton=root.querySelector('[data-shell-bet]'),betText=betButton.querySelector('span'),minus=root.querySelector('[data-shell-minus]'),plus=root.querySelector('[data-shell-plus]'),balanceText=root.querySelector('[data-shell-balance]'),results=root.querySelector('[data-shell-results]');
+    var amounts=[.1,.5,1,5,10],bet=1,state='ready',slots=[0,1,2],timers=[],recent=[];
     function wait(ms){return new Promise(function(resolve){var id=setTimeout(resolve,ms);timers.push(id)})}
     function haptic(kind){try{if(!tg||!tg.HapticFeedback)return;if(kind==='success'||kind==='error')tg.HapticFeedback.notificationOccurred(kind);else tg.HapticFeedback.impactOccurred('light')}catch(e){}}
     function money(value){return (Math.round((Number(value)||0)*10000)/10000).toFixed(4).replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1')}
     function readBalance(){return window.VexaTonBalance?Math.max(0,Math.floor(Number(window.VexaTonBalance.read())||0)):0}
-    function syncBalance(value){var n=Number(value);if(window.VexaTonBalance&&Number.isFinite(n)&&n>=0)window.VexaTonBalance.write(Math.floor(n),0)}
+    function syncBalance(value){var n=Number(value);if(window.VexaTonBalance&&Number.isFinite(n)&&n>=0)window.VexaTonBalance.write(Math.floor(n),0);renderBalance()}
+    function renderBalance(){if(balanceText)balanceText.textContent=money(readBalance()/NANO)+' TON'}
     function setStatus(text,kind){status.textContent=text;status.classList.remove('win','lose');if(kind)status.classList.add(kind)}
-    function setBet(value){bet=Math.max(.0001,Math.round((Number(value)||.1)*10000)/10000);betText.textContent=money(bet)}
-    function resetCups(){cups.forEach(function(cup,index){cup.dataset.slot=String(index);cup.classList.remove('lifted','selectable')});slots=[0,1,2];ball.classList.remove('visible');ball.style.left='50%'}
+    function setBet(value){bet=Math.max(.0001,Math.round((Number(value)||1)*10000)/10000);betText.textContent=money(bet);potential.textContent='POTENTIAL WIN '+money(bet*2.85)+' TON';presets.forEach(function(item){item.classList.toggle('active',Math.abs(Number(item.dataset.shellPreset)-bet)<.00001)})}
+    function resetCups(){cups.forEach(function(cup,index){cup.dataset.slot=String(index);cup.classList.remove('lifted','selectable')});slots=[0,1,2];ball.classList.remove('visible');ball.style.left='50%';setPickEnabled(false)}
     function ballLeft(slot){return slot===0?'17%':slot===2?'83%':'50%'}
     function swap(a,b){var first=slots.indexOf(a),second=slots.indexOf(b);slots[first]=b;slots[second]=a;cups[a].dataset.slot=String(second);cups[b].dataset.slot=String(first);haptic('impact')}
     async function shuffle(){for(var i=0;i<9;i++){var a=Math.floor(Math.random()*3),b=(a+1+Math.floor(Math.random()*2))%3;swap(a,b);await wait(270+Math.floor(Math.random()*55))}}
-    function chooseEnabled(enabled){cups.forEach(function(cup){cup.classList.toggle('selectable',enabled);cup.disabled=!enabled})}
+    function setPickEnabled(enabled){cups.forEach(function(cup){cup.classList.toggle('selectable',enabled);cup.disabled=!enabled});picks.forEach(function(item){item.classList.toggle('selectable',enabled);item.disabled=!enabled})}
+    function setControlsDisabled(disabled){minus.disabled=disabled;plus.disabled=disabled;betButton.disabled=disabled;presets.forEach(function(item){item.disabled=disabled})}
     function requestPlay(choice){var initData=tg?String(tg.initData||''):'';if(!initData)return Promise.reject(new Error('Open the Mini App inside Telegram'));return fetch('/app/api/shellgame/play',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({initData:initData,amountNano:Math.max(1,Math.floor(bet*NANO)),choice:choice})}).then(function(response){return response.json().catch(function(){return null}).then(function(data){if(!response.ok)throw new Error(data&&data.error||'Could not reveal the ball');return data})})}
-    async function start(){if(state!=='ready')return;var stake=Math.max(1,Math.floor(bet*NANO));if(readBalance()<stake){setStatus('Not enough balance','lose');return}state='shuffling';play.disabled=true;half.disabled=true;doubleButton.disabled=true;betButton.disabled=true;resetCups();setStatus('Watch the ball');cups[1].classList.add('lifted');ball.style.left=ballLeft(1);ball.classList.add('visible');haptic('impact');await wait(850);cups[1].classList.remove('lifted');ball.classList.remove('visible');await wait(350);setStatus('Keep your eye on it');await shuffle();state='choosing';chooseEnabled(true);setStatus('Choose a cup');play.textContent='Choose one cup'}
-    async function choose(cup){if(state!=='choosing')return;state='revealing';chooseEnabled(false);setStatus('Revealing...');var selectedSlot=Number(cup.dataset.slot);try{var data=await requestPlay(selectedSlot),winning=Number(data.winningCup),winner=cups.filter(function(item){return Number(item.dataset.slot)===winning})[0];syncBalance(data.tonBalanceNano);if(winner)winner.classList.add('lifted');ball.style.left=ballLeft(winning);await wait(230);ball.classList.add('visible');if(data.win){setStatus('You won '+money(Number(data.payoutNano||0)/NANO)+' TON','win');haptic('success')}else{setStatus('The ball was under another cup','lose');haptic('error')}await wait(1900)}catch(error){setStatus(error&&error.message||'Game failed','lose');await wait(1300)}finally{resetCups();state='ready';play.disabled=false;half.disabled=false;doubleButton.disabled=false;betButton.disabled=false;play.textContent='Start'}}
-    cups.forEach(function(cup){cup.disabled=true;cup.addEventListener('click',function(){choose(cup)})});
-    half.addEventListener('click',function(){if(state==='ready')setBet(bet/2)});doubleButton.addEventListener('click',function(){if(state==='ready')setBet(Math.min(readBalance()/NANO||bet*2,bet*2))});betButton.addEventListener('click',function(){if(state!=='ready')return;var value=window.prompt('Enter TON bet',money(bet));if(value!==null){var parsed=Number(String(value).replace(',','.'));if(Number.isFinite(parsed)&&parsed>0)setBet(parsed)}});play.addEventListener('click',start);
-    window.addEventListener('vexa:view-changed',function(event){if(!event.detail||event.detail.id==='shellgame')return;timers.forEach(clearTimeout);timers=[];state='ready';resetCups();play.disabled=false;half.disabled=false;doubleButton.disabled=false;betButton.disabled=false;play.textContent='Start';setStatus('Press Start and watch the ball')});
+    function addResult(won){recent.unshift(won?'win':'lose');recent=recent.slice(0,5);var dots=results?Array.prototype.slice.call(results.querySelectorAll('i')):[];dots.forEach(function(dot,index){dot.className=recent[index]||''})}
+    async function start(){if(state!=='ready')return;var stake=Math.max(1,Math.floor(bet*NANO));if(readBalance()<stake){setStatus('Not enough balance','lose');return}state='shuffling';play.disabled=true;setControlsDisabled(true);resetCups();setStatus('Watch the ball');cups[1].classList.add('lifted');ball.style.left=ballLeft(1);ball.classList.add('visible');haptic('impact');await wait(850);cups[1].classList.remove('lifted');ball.classList.remove('visible');await wait(350);setStatus('Keep your eye on it');await shuffle();state='choosing';setPickEnabled(true);setStatus('Choose a cup');playLabel.textContent='Choose One Cup'}
+    async function chooseSlot(selectedSlot){if(state!=='choosing')return;state='revealing';setPickEnabled(false);setStatus('Revealing...');try{var data=await requestPlay(selectedSlot),winning=Number(data.winningCup),winner=cups.filter(function(item){return Number(item.dataset.slot)===winning})[0];syncBalance(data.tonBalanceNano);if(winner)winner.classList.add('lifted');ball.style.left=ballLeft(winning);await wait(230);ball.classList.add('visible');addResult(!!data.win);if(data.win){setStatus('You won '+money(Number(data.payoutNano||0)/NANO)+' TON','win');haptic('success')}else{setStatus('The ball was under Cup '+String(winning+1),'lose');haptic('error')}await wait(1900)}catch(error){setStatus(error&&error.message||'Game failed','lose');await wait(1300)}finally{resetCups();state='ready';play.disabled=false;setControlsDisabled(false);playLabel.textContent='Play Round'}}
+    cups.forEach(function(cup){cup.disabled=true;cup.addEventListener('click',function(){chooseSlot(Number(cup.dataset.slot))})});picks.forEach(function(item){item.addEventListener('click',function(){chooseSlot(Number(item.dataset.shellPick))})});
+    minus.addEventListener('click',function(){if(state!=='ready')return;var index=0;for(var i=0;i<amounts.length;i++)if(amounts[i]<bet)index=i;setBet(amounts[index])});plus.addEventListener('click',function(){if(state!=='ready')return;var next=amounts[amounts.length-1];for(var i=0;i<amounts.length;i++)if(amounts[i]>bet){next=amounts[i];break}setBet(next)});presets.forEach(function(item){item.addEventListener('click',function(){if(state==='ready')setBet(Number(item.dataset.shellPreset))})});betButton.addEventListener('click',function(){if(state!=='ready')return;var value=window.prompt('Enter TON bet',money(bet));if(value!==null){var parsed=Number(String(value).replace(',','.'));if(Number.isFinite(parsed)&&parsed>0)setBet(parsed)}});play.addEventListener('click',start);
+    window.addEventListener('vexa-ton-balance-sync',renderBalance);window.addEventListener('vexa-ton-balance-game-change',renderBalance);window.addEventListener('vexa:view-changed',function(event){if(!event.detail||event.detail.id==='shellgame'){renderBalance();return}timers.forEach(clearTimeout);timers=[];state='ready';resetCups();play.disabled=false;setControlsDisabled(false);playLabel.textContent='Play Round';setStatus('Press Play Round to begin')});
+    setBet(1);renderBalance();resetCups();
   })();</script>
 </section>`;

@@ -29,11 +29,11 @@ export const SHELL_GAME_SECTION = `
     .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
     .shell-cup-button.lifted{--cup-lift:-66px}
     .shell-cup{position:absolute;left:50%;bottom:120px;width:80%;height:auto;object-fit:contain;transform:translateX(-50%);filter:none;pointer-events:none}
-    .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:166px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
+    .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:126px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
     .shell-ball{position:absolute;left:50%;bottom:18px;width:30px;height:30px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff7ca 0 10%,#ffc640 28%,#d76d00 72%,#5a1b00 100%);box-shadow:0 8px 16px rgba(0,0,0,.7),0 0 20px rgba(255,165,48,.22);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:3}
     .shell-ball.visible{transform:translateX(-50%) scale(1);opacity:1}
     .shell-guess{display:flex;align-items:center;justify-content:center;gap:7px;margin:1px 0 0;color:rgba(255,244,237,.86);font-size:13px;font-weight:740}.shell-guess i{font-style:normal;color:#d9a87a}
-    .shell-game-controls{padding:13px;border:1px solid rgba(226,188,158,.16);border-radius:23px;background:linear-gradient(145deg,rgba(23,19,18,.88),rgba(6,6,6,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 16px 38px rgba(0,0,0,.30)}
+    .shell-game-controls{padding:13px;border:1px solid rgba(226,188,158,.16);border-radius:23px;background:linear-gradient(145deg,rgba(23,19,18,.88),rgba(6,6,6,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 16px 38px rgba(0,0,0,.30);transform:translateY(-60px)}
     .shell-control-head{height:28px;margin:0 2px 9px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.68);font-size:11px;font-weight:720}
     .shell-balance{height:27px;padding:0 10px;border:1px solid rgba(255,255,255,.10);border-radius:10px;display:flex;align-items:center;gap:7px;background:rgba(0,0,0,.24);color:rgba(255,255,255,.64)}.shell-balance b{color:#fff;font-size:11px;font-weight:850}
     .shell-bet-row{height:58px;display:grid;grid-template-columns:58px minmax(0,1fr) 58px;border:1px solid rgba(226,188,158,.20);border-radius:17px;overflow:hidden;background:rgba(2,2,2,.44)}

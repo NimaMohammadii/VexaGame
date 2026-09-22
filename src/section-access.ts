@@ -24,6 +24,7 @@ export const ACCESS_SECTIONS = [
   ['coinflip', 'Pump'],
   ['hilo', 'Chicken Cross'],
   ['ghostrun', 'Ghost Run'],
+  ['shellgame', 'Shell Game'],
 ] as const;
 
 export type AccessSectionId = typeof ACCESS_SECTIONS[number][0];

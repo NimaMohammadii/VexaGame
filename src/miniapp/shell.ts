@@ -15,6 +15,7 @@ import { DICE_FINAL_TWEAK, DICE_SECTION } from './dice';
 import { WHEEL_SECTION } from './wheel';
 import { PUMP_SECTION } from './pump';
 import { GHOST_RUN_SECTION, GHOST_RUN_STYLES } from './ghost-run';
+import { SHELL_GAME_SECTION } from './shell-game';
 import { PLAY_ZONE_STYLES } from './play-zone-styles';
 import { PLAY_ZONE_SHOWCASE_OVERRIDES } from './play-zone-showcase-overrides';
 import { PLAY_ZONE_TOP_BLUR } from './play-zone-top-blur';
@@ -91,6 +92,7 @@ const LAZY_SECTIONS: LazySectionPayload[] = [
   { id: 'dice', html: DICE_SECTION + DICE_FINAL_TWEAK, scripts: [], styles: '' },
   { id: 'coinflip', html: PUMP_SECTION, scripts: [], styles: '' },
   { id: 'ghostrun', html: GHOST_RUN_SECTION, scripts: [], styles: GHOST_RUN_STYLES },
+  { id: 'shellgame', html: SHELL_GAME_SECTION, scripts: [], styles: '' },
 ];
 
 export function miniAppLazySectionPayload(rawId: string): LazySectionPayload | null {
@@ -118,7 +120,7 @@ function lazySectionLoaderScript(): string {
   var loading={};
   var mounted={};
   var main=null;
-  var gameIds={mines:true,plinko:true,crash:true,slot:true,wheel:true,dice:true,coinflip:true,ghostrun:true,hilo:true};
+  var gameIds={mines:true,plinko:true,crash:true,slot:true,wheel:true,dice:true,coinflip:true,ghostrun:true,hilo:true,shellgame:true};
   function findMain(){return main||(main=document.querySelector('main.app')||document.body)}
   function isGame(id){return !!gameIds[String(id||'')]}
   function canMount(id){

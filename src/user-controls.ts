@@ -29,7 +29,7 @@ export type UserControls = {
   sectionBlocks: UserSectionBlock[];
 };
 
-const VALID_SECTIONS = new Set(['home', 'plinko', 'playzone', 'mines', 'crash', 'wheel', 'dice', 'tower', 'slot', 'coinflip', 'hilo', 'ghostrun', 'predict-bitcoin', 'predict-gold', 'predict-oil']);
+const VALID_SECTIONS = new Set(['home', 'plinko', 'playzone', 'mines', 'crash', 'wheel', 'dice', 'tower', 'slot', 'coinflip', 'hilo', 'ghostrun', 'shellgame', 'predict-bitcoin', 'predict-gold', 'predict-oil']);
 let gameBalanceLedgerReady: Promise<void> | null = null;
 
 type StoredUserControls = {

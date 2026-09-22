@@ -43,7 +43,7 @@ const CHANNEL_DESTINATIONS = [
 const CHANNEL_GAMES = [
   ['mines', 'Mines'], ['plinko', 'Plinko'], ['wheel', 'Wheel'],
   ['slot', 'Slot'], ['ghostrun', 'Ghost Run'], ['crash', 'Crash'],
-  ['dice', 'Dice'], ['hilo', 'Chicken Cross'], ['coinflip', 'Pump'],
+  ['dice', 'Dice'], ['hilo', 'Chicken Cross'], ['coinflip', 'Pump'], ['shellgame', 'Shell Game'],
 ] as const;
 const CHANNEL_DESTINATION_IDS = new Set<string>([
   ...CHANNEL_DESTINATIONS.map(([id]) => id),
@@ -72,7 +72,7 @@ const REGIONS: RegionConfig[] = [
   { code: 'OTHER', label: '🌐 Other', language: 'en', timezone: 'UTC' },
 ];
 const SECTIONS: Array<[string, string]> = [
-  ['home', 'خانه'], ['connect', 'اتصال'], ['playzone', 'بازی‌ها'], ['plinko', 'پلینکو'], ['mines', 'ماینز'], ['crash', 'کرش'], ['wheel', 'ویل'], ['dice', 'تاس'],  ['slot', 'اسلات'], ['ghostrun', 'گوست ران'],
+  ['home', 'خانه'], ['connect', 'اتصال'], ['playzone', 'بازی‌ها'], ['plinko', 'پلینکو'], ['mines', 'ماینز'], ['crash', 'کرش'], ['wheel', 'ویل'], ['dice', 'تاس'], ['slot', 'اسلات'], ['ghostrun', 'گوست ران'], ['shellgame', 'سه لیوان'],
 ];
 
 export async function handleBotAdminMessage(env: Env, token: string, message: TelegramMessage, tg: TgApi): Promise<boolean> {

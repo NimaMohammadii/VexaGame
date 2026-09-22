@@ -26,7 +26,7 @@ type MiniappAudioTarget = 'dice' | 'wallet-credit';
 const UPLOADED_IMAGE_CONTEXT_SECTIONS: Record<string, string[]> = {
   home: ['home'],
   startup: ['home'],
-  playzone: ['playzone', 'mines', 'plinko', 'crash', 'slot', 'coinflip', 'hilo', 'ghostrun'],
+  playzone: ['playzone', 'mines', 'plinko', 'crash', 'slot', 'coinflip', 'hilo', 'ghostrun', 'shellgame'],
   mines: ['mines'],
   plinko: ['plinko'],
 };
@@ -81,6 +81,7 @@ app.get('/app/api/section-backgrounds', async (c) => {
     { id: 'slot', label: 'Slot', description: 'Slot background' },
     { id: 'ghostrun', label: 'Ghost Run', description: 'Ghost Run background' },
     { id: 'coinflip', label: 'Pump', description: 'Pump background' },
+    { id: 'shellgame', label: 'Shell Game', description: 'Shell Game background' },
   ];
   const sections = await Promise.all(adminSections.map((section) => sectionBackgroundInfo(c.env, section)));
   const preload = sections.map((section) => section.backgroundUrl).filter(Boolean);

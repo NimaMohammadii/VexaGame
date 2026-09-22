@@ -27,13 +27,14 @@ type UploadTarget = { kind: 'game'; game: string } | { kind: 'background'; game:
 const GAMES = [
   ['mines', 'Mines'], ['plinko', 'Plinko'], ['slot', 'Slot'],
   ['wheel', 'Wheel'], ['dice', 'Dice'], ['crash', 'Crash'], ['hilo', 'Chicken Cross'],
-  ['coinflip', 'Pump'], ['ghostrun', 'Ghost Run'],
+  ['coinflip', 'Pump'], ['ghostrun', 'Ghost Run'], ['shellgame', 'Shell Game'],
 ] as const;
 const GAME_IDS = new Set(GAMES.map(([id]) => id));
 const BACKGROUND_GAMES = [
   ['predict', 'Predict'],
   ['ghostrun', 'Ghost Run'],
   ['coinflip', 'Pump'],
+  ['shellgame', 'Shell Game'],
 ] as const;
 const HOME_PROMO_GAMES = ['promo-1', 'promo-2', 'promo-3'] as const;
 const BACKGROUND_GAME_IDS = new Set<string>([...BACKGROUND_GAMES.map(([id]) => id), ...HOME_PROMO_GAMES]);
@@ -56,6 +57,7 @@ const DICE_AUDIO_KEY = 'miniapp/audio';
 const WALLET_CREDIT_AUDIO_KEY = 'miniapp/audio/wallet-credit';
 const LOADING_AUDIO_KEY = 'miniapp/audio/loading';
 const DICE_AUDIO_ENABLED_KEY = 'admin:miniapp-audio-enabled';
+const SHELL_GAME_CARD_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400"><defs><linearGradient id="b" x2="0" y2="1"><stop stop-color="#2b0712"/><stop offset="1" stop-color="#050102"/></linearGradient><linearGradient id="c"><stop stop-color="#420817"/><stop offset=".45" stop-color="#c85a79"/><stop offset="1" stop-color="#350611"/></linearGradient><radialGradient id="o" cx="35%" cy="28%"><stop stop-color="#fff5b5"/><stop offset=".28" stop-color="#ffc33d"/><stop offset="1" stop-color="#a83c00"/></radialGradient><filter id="s"><feDropShadow dx="0" dy="18" stdDeviation="16" flood-opacity=".55"/></filter></defs><rect width="1200" height="400" rx="48" fill="url(#b)"/><ellipse cx="600" cy="330" rx="455" ry="34" fill="#000" opacity=".48"/><circle cx="600" cy="295" r="24" fill="url(#o)"/><g fill="url(#c)" stroke="#f49ab1" stroke-opacity=".22" stroke-width="3" filter="url(#s)"><path d="M175 105h190l34 214H141z"/><path d="M505 105h190l34 214H471z"/><path d="M835 105h190l34 214H801z"/></g><g fill="#f6a4b8" opacity=".48"><ellipse cx="270" cy="105" rx="95" ry="14"/><ellipse cx="600" cy="105" rx="95" ry="14"/><ellipse cx="930" cy="105" rx="95" ry="14"/></g><text x="600" y="70" text-anchor="middle" fill="#ffe9ef" font-family="Arial,sans-serif" font-size="34" font-weight="700">SHELL GAME</text></svg>`;
 const RANKS = ['Rookie', 'Explorer', 'Pro', 'Elite', 'Master', 'Legend', 'Titan'] as const;
 const GHOST_ASSETS = [
   ['background', 'Background اصلی'], ['background1', 'Background 1'], ['background2', 'Background 2'],
@@ -109,6 +111,7 @@ async function serveImage(request: Request, env: Env, raw: string): Promise<Resp
   const cacheControl = versioned ? GAME_CARD_CACHE_CONTROL : LIVE_GAME_CARD_CACHE_CONTROL;
   const object = await env.ASSETS.get(gameKey(game)).catch(() => null);
   if (!object) {
+    if (game === 'shellgame') return new Response(SHELL_GAME_CARD_SVG, { headers: { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' } });
     return new Response(null, {
       status: 302,
       headers: {
@@ -131,6 +134,10 @@ async function serveGameCardManifest(env: Env): Promise<Response> {
   await Promise.all(GAMES.map(async ([game]) => {
     const object = await env.ASSETS.head(gameKey(game)).catch(() => null);
     if (!object) {
+      if (game === 'shellgame') {
+        images[game] = '/app/api/game-card-image/shellgame.png?builtin=1';
+        return;
+      }
       images[game] = `/app/api/section-lock-image/${game}/locked.png?v=1`;
       return;
     }

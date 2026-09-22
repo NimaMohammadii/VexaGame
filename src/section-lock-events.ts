@@ -71,7 +71,7 @@ const PREDICT_OPS_STATE_KEY = 'predict-ops:realtime-state:v1';
 const PREDICT_RUNTIME_ISSUE_PREFIX = 'admin:predict-runtime-issue:v1:';
 const PREDICT_REALTIME_ISSUE_TYPE = 'round_realtime_publish_failed';
 const NANO = 1_000_000_000;
-const GAME_IDS = new Set(['mines', 'plinko', 'wheel', 'dice', 'crash', 'hilo', 'coinflip', 'slot', 'ghostrun']);
+const GAME_IDS = new Set(['mines', 'plinko', 'wheel', 'dice', 'crash', 'hilo', 'coinflip', 'slot', 'ghostrun', 'shellgame']);
 let predictVisitorTrackingReady: Promise<void> | null = null;
 
 function messageFor(locks: SectionLock[]): LockMessage {

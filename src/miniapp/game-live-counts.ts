@@ -8,6 +8,7 @@ const liveGameLabels: Record<string, string> = {
   coinflip: 'Pump',
   slot: 'Slot',
   ghostrun: 'Ghost Run',
+  shellgame: 'Shell Game',
 };
 
 const hiddenCardPlayerCounts = new Set(['hilo', 'coinflip']);

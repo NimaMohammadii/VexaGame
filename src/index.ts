@@ -6,6 +6,7 @@ import { registerSlotAssetRoutes } from './slot-assets';
 import { handleGameBotWebhook } from './telegram-game-bot';
 import { addUserXpBatch, getUserLevel } from './levels';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, settleGameTonBalanceRound } from './user-controls';
+import { ensureTonTransactionsTable } from './ton-transactions';
 import type { Env, TelegramUpdate } from './types';
 import { gameBotToken, PUBLIC_BASE_URL, validateTelegramInitData } from './utils';
 
@@ -194,6 +195,38 @@ app.post('/app/api/shellgame/play', async (c) => {
     return c.json({ ok: true, roundId, win, choice, winningCup, multiplier, payoutNano, tonBalanceNano: settled.tonBalanceNano }, 200, { 'cache-control': 'no-store' });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Could not play Shell Game' }, 400, { 'cache-control': 'no-store' });
+  }
+});
+
+app.get('/app/api/shellgame/results', async (c) => {
+  try {
+    const initData = c.req.header('x-telegram-init-data') || '';
+    const { userId } = await authenticatedGameUser(c.env, initData, 'shellgame');
+    await ensureTonTransactionsTable(c.env);
+    const rows = await c.env.DB.prepare(`SELECT reference_id, metadata_json
+      FROM ton_transactions
+      WHERE user_id = ? AND kind = 'game' AND reference_type = 'shell_game_round'
+      ORDER BY datetime(created_at) DESC, id DESC
+      LIMIT 12`)
+      .bind(userId)
+      .all<{ reference_id: string | null; metadata_json: string | null }>();
+    const seen = new Set<string>();
+    const results: Array<'win' | 'lose'> = [];
+    for (const row of rows.results ?? []) {
+      const roundId = String(row.reference_id || '');
+      if (!roundId || seen.has(roundId)) continue;
+      seen.add(roundId);
+      let result = '';
+      try {
+        const metadata = JSON.parse(String(row.metadata_json || '{}')) as { result?: unknown };
+        result = String(metadata.result || '');
+      } catch {}
+      if (result === 'win' || result === 'lose') results.push(result);
+      if (results.length >= 5) break;
+    }
+    return c.json({ ok: true, results }, 200, { 'cache-control': 'no-store' });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Could not load Shell Game results' }, 400, { 'cache-control': 'no-store' });
   }
 });
 

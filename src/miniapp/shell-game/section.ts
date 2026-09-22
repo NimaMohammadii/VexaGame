@@ -2,13 +2,11 @@ export const SHELL_GAME_SECTION = `
 <section id="shellgame" class="view shell-game-view" aria-label="Shell Game">
   <style>
     body:has(#shellgame.active) .tabs{display:none!important}
-    body:has(#shellgame.active) .app{height:var(--tg-viewport-stable-height,100svh)!important}
-    body:has(#shellgame.active) .content{height:calc(var(--tg-viewport-stable-height,100svh) - 52px - env(safe-area-inset-top))!important;overflow:hidden!important}
     html body:has(#shellgame.active.has-admin-background){isolation:isolate!important;background:#000!important}
-    html body:has(#shellgame.active.has-admin-background)::before{content:''!important;display:block!important;position:fixed!important;inset:0!important;width:100vw!important;height:var(--tg-viewport-stable-height,100svh)!important;z-index:-1!important;pointer-events:none!important;background-color:#030202!important;background-image:var(--admin-shellgame-background-image)!important;background-size:cover!important;background-position:center top!important;background-repeat:no-repeat!important}
+    html body:has(#shellgame.active.has-admin-background)::before{content:''!important;display:block!important;position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;z-index:-1!important;pointer-events:none!important;background-color:#030202!important;background-image:var(--admin-shellgame-background-image)!important;background-size:cover!important;background-position:center top!important;background-repeat:no-repeat!important}
     html body:has(#shellgame.active.has-admin-background)::after,html body:has(#shellgame.active.has-admin-background) .app::before,html body:has(#shellgame.active.has-admin-background) .app::after{display:none!important;content:none!important;background:none!important;background-image:none!important}
     html body:has(#shellgame.active.has-admin-background) .app,html body:has(#shellgame.active.has-admin-background) main.app,html body:has(#shellgame.active.has-admin-background) .content,html body:has(#shellgame.active.has-admin-background) #shellgame.shell-game-view,html body:has(#shellgame.active.has-admin-background) .top,html body:has(#shellgame.active.has-admin-background) header.top{background:transparent!important;background-color:transparent!important;background-image:none!important}
-    .shell-game-view{height:calc(var(--tg-viewport-stable-height,100svh) - 52px - env(safe-area-inset-top));padding:0 10px max(22px,env(safe-area-inset-bottom));box-sizing:border-box;overflow:hidden;background-color:#030202;color:#fff}
+    .shell-game-view{width:100%;height:100%;min-height:0;max-height:100%;padding:0 10px max(22px,env(safe-area-inset-bottom));box-sizing:border-box;overflow:hidden;background-color:#030202;color:#fff;touch-action:none}
     .shell-game-wrap{width:min(100%,520px);margin:0 auto;padding:8px 0 24px;display:grid;gap:12px}
     .shell-game-hero{position:relative;height:430px;border:0;border-radius:0;overflow:visible;background:transparent;box-shadow:none}
     .shell-game-hero:after{content:none;display:none}

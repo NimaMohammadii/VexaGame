@@ -80,11 +80,11 @@ export const SHELL_GAME_SECTION = `
     var amounts=[.1,.5,1,5,10],bet=1,state='ready',slots=[0,1,2],timers=[],recent=[],betFocusScrollTop=0;
     function wait(ms){return new Promise(function(resolve){var id=setTimeout(resolve,ms);timers.push(id)})}
     function haptic(kind){try{if(!tg||!tg.HapticFeedback)return;if(kind==='success'||kind==='error')tg.HapticFeedback.notificationOccurred(kind);else tg.HapticFeedback.impactOccurred('light')}catch(e){}}
-    function money(value){return (Math.round((Number(value)||0)*10000)/10000).toFixed(4).replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1')}
+    function money(value){var text=(Math.round((Number(value)||0)*10000)/10000).toFixed(4);while(text.indexOf('.')>=0&&text.endsWith('0'))text=text.slice(0,-1);if(text.endsWith('.'))text=text.slice(0,-1);return text}
     function readBalance(){return window.VexaTonBalance?Math.max(0,Math.floor(Number(window.VexaTonBalance.read())||0)):0}
     function syncBalance(value){var n=Number(value);if(window.VexaTonBalance&&Number.isFinite(n)&&n>=0)window.VexaTonBalance.write(Math.floor(n),0)}
     function setStatus(text,kind){status.textContent=text;status.classList.remove('win','lose');if(kind)status.classList.add(kind)}
-    function cleanBetDraft(value){var raw=String(value==null?'':value).replace(',','.').replace(/[^0-9.]/g,''),dot=raw.indexOf('.');if(dot>=0)raw=raw.slice(0,dot+1)+raw.slice(dot+1).replace(/\./g,'');var parts=raw.split('.');parts[0]=parts[0].slice(0,6);if(parts.length>1)parts[1]=parts[1].slice(0,4);return parts.length>1?parts[0]+'.'+parts[1]:parts[0]}
+    function cleanBetDraft(value){var raw=String(value==null?'':value).replace(',','.').replace(/[^0-9.]/g,''),dot=raw.indexOf('.');if(dot>=0)raw=raw.slice(0,dot+1)+raw.slice(dot+1).split('.').join('');var parts=raw.split('.');parts[0]=parts[0].slice(0,6);if(parts.length>1)parts[1]=parts[1].slice(0,4);return parts.length>1?parts[0]+'.'+parts[1]:parts[0]}
     function setBet(value){var parsed=Number(value);if(!Number.isFinite(parsed)||parsed<=0)parsed=bet||1;bet=Math.max(.0001,Math.round(parsed*10000)/10000);betInput.value=money(bet);potential.textContent='POTENTIAL WIN '+money(bet*2.85)+' TON';presets.forEach(function(item){item.classList.toggle('active',Math.abs(Number(item.dataset.shellPreset)-bet)<.00001)})}
     function applyBetInput(){var raw=cleanBetDraft(betInput.value),parsed=Number(raw);if(Number.isFinite(parsed)&&parsed>0)setBet(parsed);else betInput.value=money(bet)}
     function restoreBetScroll(){requestAnimationFrame(function(){requestAnimationFrame(function(){root.scrollTop=betFocusScrollTop})})}

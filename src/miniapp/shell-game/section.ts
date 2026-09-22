@@ -17,13 +17,13 @@ export const SHELL_GAME_SECTION = `
     .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
     .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px;transform:translateY(-20px)}
     .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
-    .shell-cup-button[data-slot="0"]{--slot-x:max(-31vw,-132px)}
+    .shell-cup-button[data-slot="0"]{--slot-x:max(-26vw,-112px)}
     .shell-cup-button[data-slot="1"]{--slot-x:0px}
-    .shell-cup-button[data-slot="2"]{--slot-x:min(31vw,132px)}
+    .shell-cup-button[data-slot="2"]{--slot-x:min(26vw,112px)}
     .shell-cup-button.selectable{cursor:pointer;filter:brightness(1.04)}
     .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
     .shell-cup-button.lifted{--cup-lift:-66px}
-    .shell-cup{position:absolute;left:50%;bottom:120px;width:80%;height:auto;object-fit:contain;transform:translateX(-50%);filter:none;pointer-events:none}
+    .shell-cup{position:absolute;left:50%;bottom:120px;width:100%;height:auto;object-fit:contain;transform:translateX(-50%);filter:none;pointer-events:none}
     .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:131px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
     .shell-ball{position:absolute;left:50%;bottom:138px;width:30px;height:30px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff7ca 0 10%,#ffc640 28%,#d76d00 72%,#5a1b00 100%);box-shadow:0 8px 16px rgba(0,0,0,.7),0 0 20px rgba(255,165,48,.22);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:3}
     .shell-ball.visible{transform:translateX(-50%) scale(1);opacity:1}
@@ -87,7 +87,7 @@ export const SHELL_GAME_SECTION = `
     function setBet(value){bet=Math.max(.0001,Math.round((Number(value)||1)*10000)/10000);betText.textContent=money(bet);potential.textContent='POTENTIAL WIN '+money(bet*2.85)+' TON';presets.forEach(function(item){item.classList.toggle('active',Math.abs(Number(item.dataset.shellPreset)-bet)<.00001)})}
     function restorePromptViewport(rootTop,pageTop){function restore(){root.scrollTop=rootTop;try{window.scrollTo(0,pageTop)}catch(e){}}restore();requestAnimationFrame(function(){restore();requestAnimationFrame(restore)});setTimeout(restore,120);setTimeout(restore,300)}
     function resetCups(){cups.forEach(function(cup,index){cup.dataset.slot=String(index);cup.classList.remove('lifted','selectable')});slots=[0,1,2];ball.classList.remove('visible');ball.style.left='50%';setPickEnabled(false)}
-    function ballLeft(slot){return slot===0?'17%':slot===2?'83%':'50%'}
+    function ballLeft(slot){var cup=cups.filter(function(item){return Number(item.dataset.slot)===slot})[0],arena=root.querySelector('[data-shell-arena]');if(!cup||!arena)return'50%';var cupRect=cup.getBoundingClientRect(),arenaRect=arena.getBoundingClientRect(),center=cupRect.left+cupRect.width/2-arenaRect.left;return(Math.max(0,Math.min(arenaRect.width,center))/Math.max(1,arenaRect.width)*100)+'%'}
     function swap(a,b){var first=slots.indexOf(a),second=slots.indexOf(b);slots[first]=b;slots[second]=a;cups[a].dataset.slot=String(second);cups[b].dataset.slot=String(first);haptic('impact')}
     async function shuffle(){for(var i=0;i<9;i++){var a=Math.floor(Math.random()*3),b=(a+1+Math.floor(Math.random()*2))%3;swap(a,b);await wait(270+Math.floor(Math.random()*55))}}
     function setPickEnabled(enabled){cups.forEach(function(cup){cup.classList.toggle('selectable',enabled);cup.disabled=!enabled})}

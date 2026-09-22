@@ -12,12 +12,7 @@ export const SHELL_GAME_SECTION = `
     .shell-game-wrap{width:min(100%,520px);margin:0 auto;padding:8px 0 24px;display:grid;gap:12px}
     .shell-game-hero{position:relative;height:430px;border:0;border-radius:0;overflow:visible;background:transparent;box-shadow:none}
     .shell-game-hero:after{content:none;display:none}
-    .shell-game-head{position:absolute;z-index:7;left:14px;right:14px;top:14px;height:60px;display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px}
-    .shell-game-title{grid-column:2;min-width:0;text-align:center;color:#f5dfcb;text-shadow:0 3px 16px rgba(0,0,0,.7)}
-    .shell-game-title strong{display:flex;align-items:center;justify-content:center;gap:8px;font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1;font-weight:700;letter-spacing:-.035em;white-space:nowrap}
-    .shell-game-title strong i{font-style:normal;font-size:27px;color:#d7a779}
-    .shell-game-title small{display:block;margin-top:8px;font-size:7px;line-height:1;font-weight:800;letter-spacing:.42em;color:rgba(241,207,180,.62);white-space:nowrap}
-    .shell-game-multiplier{grid-column:3;height:42px;padding:0 14px;border:1px solid rgba(255,76,111,.5);border-radius:15px;display:flex;align-items:center;background:linear-gradient(145deg,rgba(121,22,43,.86),rgba(47,8,18,.84));box-shadow:inset 0 1px 0 rgba(255,202,211,.13),0 8px 22px rgba(0,0,0,.3);color:#ffd9df;font-size:13px;font-weight:850;white-space:nowrap;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+    body:has(#shellgame.active) #brandTitle{font-family:Georgia,'Times New Roman',serif!important;font-size:26px!important;line-height:1!important;font-weight:700!important;letter-spacing:-.035em!important;color:#f5dfcb!important;text-shadow:0 3px 16px rgba(0,0,0,.7)!important}
     .shell-game-status{position:absolute;z-index:7;left:15%;right:15%;top:85px;min-height:18px;text-align:center;color:rgba(255,236,224,.72);font-size:11px;font-weight:800;letter-spacing:.01em;text-shadow:0 3px 9px #000}
     .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
     .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px;transform:translateY(-20px)}
@@ -32,7 +27,7 @@ export const SHELL_GAME_SECTION = `
     .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:131px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
     .shell-ball{position:absolute;left:50%;bottom:138px;width:30px;height:30px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff7ca 0 10%,#ffc640 28%,#d76d00 72%,#5a1b00 100%);box-shadow:0 8px 16px rgba(0,0,0,.7),0 0 20px rgba(255,165,48,.22);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:3}
     .shell-ball.visible{transform:translateX(-50%) scale(1);opacity:1}
-    .shell-guess{display:flex;align-items:center;justify-content:center;gap:7px;margin:1px 0 0;color:rgba(255,244,237,.86);font-size:13px;font-weight:740}.shell-guess i{font-style:normal;color:#d9a87a}
+    .shell-guess{display:flex;align-items:center;justify-content:center;gap:7px;margin:1px 0 0;color:rgba(255,244,237,.86);font-size:13px;font-weight:740;transform:translateY(-60px)}.shell-guess i{font-style:normal;color:#d9a87a}
     .shell-game-controls{padding:13px;border:1px solid rgba(226,188,158,.16);border-radius:23px;background:linear-gradient(145deg,rgba(23,19,18,.88),rgba(6,6,6,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 16px 38px rgba(0,0,0,.30);transform:translateY(-60px)}
     .shell-control-head{height:28px;margin:0 2px 9px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.68);font-size:11px;font-weight:720}
     .shell-balance{height:27px;padding:0 10px;border:1px solid rgba(255,255,255,.10);border-radius:10px;display:flex;align-items:center;gap:7px;background:rgba(0,0,0,.24);color:rgba(255,255,255,.64)}.shell-balance b{color:#fff;font-size:11px;font-weight:850}
@@ -43,16 +38,12 @@ export const SHELL_GAME_SECTION = `
     .shell-play-button{width:100%;height:66px;margin-top:12px;padding:0;border:1px solid rgba(255,81,112,.72);border-radius:18px;display:grid;place-items:center;align-content:center;gap:4px;background:linear-gradient(145deg,#a52240,#4f0a1a 68%,#320610);box-shadow:inset 0 1px 0 rgba(255,221,227,.21),0 12px 25px rgba(0,0,0,.28);color:#fff4f5;transition:transform .16s ease,opacity .18s ease}
     .shell-play-main{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:830}.shell-play-main i{font-style:normal;font-size:18px;color:#f7d8c1}.shell-play-button small{font-size:8px;font-weight:750;letter-spacing:.25em;color:rgba(255,211,218,.68)}.shell-play-button:disabled{opacity:.54}.shell-play-button:not(:disabled):active{transform:scale(.985)}
     .shell-info-row{display:grid;grid-template-columns:1.02fr 1.12fr .96fr;gap:8px;transform:translateY(-60px)}.shell-info-card{min-width:0;height:57px;padding:8px 9px;border:1px solid rgba(226,188,158,.15);border-radius:17px;background:linear-gradient(145deg,rgba(27,23,22,.80),rgba(7,7,7,.84));color:rgba(255,255,255,.78);display:flex;align-items:center;gap:8px}.shell-info-card>i{font-style:normal;font-size:21px;color:#e4b183}.shell-info-card span{min-width:0;font-size:9px;font-weight:720;line-height:1.2}.shell-info-card small{display:block;margin-top:4px;font-size:7px;letter-spacing:.04em;color:rgba(255,255,255,.45);white-space:nowrap}.shell-result-dots{display:flex;gap:5px;margin-top:6px}.shell-result-dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.17)}.shell-result-dots i.win{background:#35bd72}.shell-result-dots i.lose{background:#be3447}
-    @media(max-width:380px){.shell-game-view{padding-left:7px;padding-right:7px}.shell-game-hero{height:405px}.shell-game-head{left:10px;right:10px}.shell-game-title strong{font-size:22px}.shell-game-multiplier{padding:0 10px;font-size:11px}.shell-game-arena{bottom:58px;height:245px}.shell-cup-button{height:166px}.shell-cup-number{font-size:20px}.shell-info-card{padding:7px 6px;gap:5px}.shell-info-card>i{font-size:17px}}
+    @media(max-width:380px){.shell-game-view{padding-left:7px;padding-right:7px}.shell-game-hero{height:405px}.shell-game-arena{bottom:58px;height:245px}.shell-cup-button{height:166px}.shell-cup-number{font-size:20px}.shell-info-card{padding:7px 6px;gap:5px}.shell-info-card>i{font-size:17px}body:has(#shellgame.active) #brandTitle{font-size:22px!important}}
     @media(max-height:720px){.shell-game-hero{height:370px}.shell-game-arena{bottom:48px;height:225px}.shell-cup-button{height:154px}.shell-game-wrap{gap:9px}.shell-game-controls{padding:11px}.shell-info-row{display:none}}
     @media(prefers-reduced-motion:reduce){.shell-cup-button,.shell-ball{transition-duration:.01ms!important}}
   </style>
   <div class="shell-game-wrap">
     <div class="shell-game-hero">
-      <div class="shell-game-head">
-        <div class="shell-game-title"><strong><i>♠</i>Shell Game</strong><small>TRUST YOUR INSTINCTS</small></div>
-        <div class="shell-game-multiplier">Win 2.85×</div>
-      </div>
       <div class="shell-game-status" data-shell-status>Press Play Round to begin</div>
       <div class="shell-game-arena" data-shell-arena>
         <div class="shell-ball" data-shell-ball></div>

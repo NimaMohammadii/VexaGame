@@ -98,10 +98,7 @@ export async function handleGameCardAdminRequest(request: Request, env: Env): Pr
   const crashStageImage = url.pathname.match(/^\/app\/api\/crash-stage-image\/(\d+)(?:\.png)?$/);
   if (request.method === 'GET' && crashStageImage) return serveCrashStageImage(request, env, crashStageImage[1]);
   if (request.method === 'GET' && url.pathname === '/app/api/crash-stage-images') return serveCrashStageManifest(env);
-  if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
-  const update = await request.clone().json().catch(() => null) as Update | null;
-  if (!update) return null;
-  return handleUpdate(env, update);
+  return null;
 }
 
 async function serveImage(request: Request, env: Env, raw: string): Promise<Response> {
@@ -211,6 +208,51 @@ async function serveCrashStageManifest(env: Env): Promise<Response> {
   return Response.json({ images, preload }, { headers: { 'cache-control': 'no-store' } });
 }
 
+function isGameCardAdminCallbackData(data: string): boolean {
+  return data === 'botadmin:imagesmenu'
+    || data === 'botadmin:paymentmethods'
+    || data === 'botadmin:audiomenu'
+    || data === 'botadmin:gameimages'
+    || data === 'botadmin:gamebackgrounds'
+    || data === 'botadmin:homepromos'
+    || data === 'botadmin:crashstage'
+    || data === 'botadmin:tonlogo'
+    || data === 'botadmin:homeslot'
+    || data === 'botadmin:mainmenuimage'
+    || data === 'botadmin:predictimages'
+    || data === 'botadmin:shareinviteimage'
+    || data === 'botadmin:ranks'
+    || data === 'botadmin:ghostassets'
+    || data === 'botadmin:slotsymbols'
+    || data === 'botadmin:minestiles'
+    || data.startsWith('botadmin:paymentmethod:')
+    || data.startsWith('botadmin:audio:')
+    || data.startsWith('botadmin:gameimage:')
+    || data.startsWith('botadmin:gamebackground:')
+    || data.startsWith('botadmin:homepromo:')
+    || data.startsWith('botadmin:crashstage:')
+    || data.startsWith('botadmin:rank:')
+    || data.startsWith('botadmin:ghostasset:')
+    || data.startsWith('botadmin:slotsymbol:')
+    || data.startsWith('botadmin:minestile:')
+    || data.startsWith('botadmin:predictimage:');
+}
+
+export async function handleGameCardAdminUpdate(env: Env, value: unknown): Promise<boolean> {
+  const update = value as Update | null;
+  if (!update || typeof update !== 'object') return false;
+  const callback = update.callback_query;
+  if (callback) {
+    if (!isGameCardAdminCallbackData(callback.data || '')) return false;
+    return Boolean(await handleUpdate(env, update));
+  }
+  const message = update.message;
+  if (!message?.from?.id) return false;
+  const rawState = await env.BOT_CACHE.get(stateKey(message.from.id)).catch(() => null);
+  if (!normalizeTarget(rawState)) return false;
+  return Boolean(await handleUpdate(env, update));
+}
+
 async function handleUpdate(env: Env, update: Update): Promise<Response | null> {
   const token = env.BOT_TOKEN;
   if (!token) return null;
@@ -218,34 +260,7 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
   const callback = update.callback_query;
   if (callback) {
     const data = callback.data || '';
-    const ours = data === 'botadmin:imagesmenu'
-      || data === 'botadmin:paymentmethods'
-      || data === 'botadmin:audiomenu'
-      || data === 'botadmin:gameimages'
-      || data === 'botadmin:gamebackgrounds'
-      || data === 'botadmin:homepromos'
-      || data === 'botadmin:crashstage'
-      || data === 'botadmin:tonlogo'
-      || data === 'botadmin:homeslot'
-      || data === 'botadmin:mainmenuimage'
-      || data === 'botadmin:predictimages'
-      || data === 'botadmin:shareinviteimage'
-      || data === 'botadmin:ranks'
-      || data === 'botadmin:ghostassets'
-      || data === 'botadmin:slotsymbols'
-      || data === 'botadmin:minestiles'
-      || data.startsWith('botadmin:paymentmethod:')
-      || data.startsWith('botadmin:audio:')
-      || data.startsWith('botadmin:gameimage:')
-      || data.startsWith('botadmin:gamebackground:')
-      || data.startsWith('botadmin:homepromo:')
-      || data.startsWith('botadmin:crashstage:')
-      || data.startsWith('botadmin:rank:')
-      || data.startsWith('botadmin:ghostasset:')
-      || data.startsWith('botadmin:slotsymbol:')
-      || data.startsWith('botadmin:minestile:')
-      || data.startsWith('botadmin:predictimage:');
-    if (!ours) return null;
+    if (!isGameCardAdminCallbackData(data)) return null;
     if (!isAdmin(env, callback.from.id)) return ok();
     await tg(token, 'answerCallbackQuery', { callback_query_id: callback.id }).catch(() => undefined);
     const chatId = callback.message?.chat.id ?? callback.from.id;

@@ -1,4 +1,5 @@
 import { handleBotAdminCallback, handleBotAdminMessage } from './telegram-bot-admin-panel';
+import { handleGameCardAdminUpdate } from './telegram-game-card-admin';
 import { getUserRegionPreference, recordBotStartUser, setUserRegionPreference } from './admin-users';
 import { DEFAULT_VEXA_LOCALE, VEXA_LOCALES, VEXA_LOCALE_LABELS, type VexaLocale } from './miniapp/i18n';
 import { handleStarsPreCheckout, handleStarsSuccessfulPayment } from './stars-deposits';
@@ -263,6 +264,8 @@ export async function handleGameBotWebhook(env: Env, update: TelegramUpdate): Pr
     await handleStarsSuccessfulPayment(env, userId, message.successful_payment);
     return;
   }
+
+  if (await handleGameCardAdminUpdate(env, update)) return;
 
   if (update.callback_query) {
     if (await handleBotAdminCallback(env, token, update.callback_query, telegram as TelegramApi)) return;

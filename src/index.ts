@@ -4,6 +4,7 @@ import { registerFriendGameRoutes } from './game-friend-routes';
 import { registerWheelRoutes } from './wheel-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
 import { handleGameBotWebhook } from './telegram-game-bot';
+import { handleGameCardAdminRequest } from './telegram-game-card-admin';
 import { addUserXpBatch, getUserLevel } from './levels';
 import { adjustUserTonBalance, debitUserTonBalanceIfEnough, getUserControls, settleGameTonBalanceRound } from './user-controls';
 import { ensureTonTransactionsTable } from './ton-transactions';
@@ -89,6 +90,14 @@ app.get('/app/api/lazy-section/:id', (c) => {
   const payload = miniAppLazySection(c.req.param('id'));
   if (!payload) return c.json({ error: 'Not found' }, 404, { 'cache-control': 'no-store' });
   return c.json(payload, 200, { 'cache-control': 'no-store' });
+});
+app.get('/app/api/game-card-images', async (c) => {
+  const response = await handleGameCardAdminRequest(c.req.raw, c.env);
+  return response ?? c.json({ error: 'Not found' }, 404, { 'cache-control': 'no-store' });
+});
+app.get('/app/api/game-card-image/:game', async (c) => {
+  const response = await handleGameCardAdminRequest(c.req.raw, c.env);
+  return response ?? c.json({ error: 'Not found' }, 404, { 'cache-control': 'no-store' });
 });
 app.get('/assets/Home.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Home.PNG'));
 app.get('/assets/Playhub.PNG', (c) => serveVersionedStaticAsset(c.req.raw, c.env, '/assets/Playhub.PNG'));

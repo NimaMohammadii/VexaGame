@@ -28,7 +28,7 @@ export const SHELL_GAME_SECTION = `
     .shell-cup-button.selectable{cursor:pointer;filter:brightness(1.04)}
     .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
     .shell-cup-button.lifted{--cup-lift:-66px}
-    .shell-cup{position:absolute;left:0;right:0;bottom:0;width:100%;height:auto;object-fit:contain;filter:none;pointer-events:none}
+    .shell-cup{position:absolute;left:0;right:0;bottom:20px;width:100%;height:auto;object-fit:contain;filter:none;pointer-events:none}
     .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:16px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
     .shell-ball{position:absolute;left:50%;bottom:18px;width:30px;height:30px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff7ca 0 10%,#ffc640 28%,#d76d00 72%,#5a1b00 100%);box-shadow:0 8px 16px rgba(0,0,0,.7),0 0 20px rgba(255,165,48,.22);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:3}
     .shell-ball.visible{transform:translateX(-50%) scale(1);opacity:1}

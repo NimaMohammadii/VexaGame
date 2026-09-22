@@ -20,13 +20,13 @@ export const SHELL_GAME_SECTION = `
     .shell-game-multiplier{grid-column:3;height:42px;padding:0 14px;border:1px solid rgba(255,76,111,.5);border-radius:15px;display:flex;align-items:center;background:linear-gradient(145deg,rgba(121,22,43,.86),rgba(47,8,18,.84));box-shadow:inset 0 1px 0 rgba(255,202,211,.13),0 8px 22px rgba(0,0,0,.3);color:#ffd9df;font-size:13px;font-weight:850;white-space:nowrap;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
     .shell-game-status{position:absolute;z-index:7;left:15%;right:15%;top:85px;min-height:18px;text-align:center;color:rgba(255,236,224,.72);font-size:11px;font-weight:800;letter-spacing:.01em;text-shadow:0 3px 9px #000}
     .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
-    .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px}
-    .shell-cup-button{--slot-x:0px;--cup-base-y:-20px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(calc(var(--cup-base-y) + var(--cup-lift)));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
+    .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px;transform:translateY(-20px)}
+    .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
     .shell-cup-button[data-slot="0"]{--slot-x:max(-31vw,-132px)}
     .shell-cup-button[data-slot="1"]{--slot-x:0px}
     .shell-cup-button[data-slot="2"]{--slot-x:min(31vw,132px)}
     .shell-cup-button.selectable{cursor:pointer;filter:brightness(1.04)}
-    .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(calc(var(--cup-base-y) - 5px)) scale(.975);filter:brightness(1.17)}
+    .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
     .shell-cup-button.lifted{--cup-lift:-66px}
     .shell-cup{position:absolute;left:0;right:0;bottom:0;width:100%;height:auto;object-fit:contain;filter:none;pointer-events:none}
     .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:16px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}

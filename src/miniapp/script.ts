@@ -115,18 +115,10 @@ export const MINIAPP_SCRIPT = `
   function toast(v){var n=q('toast');if(!n)return;n.textContent=v;n.style.display='block';setTimeout(function(){n.style.display='none'},3000)}
   function setKeyboardOpen(open){document.body.classList.toggle('keyboard-open',!!open)}
   function dismissKeyboard(){var active=document.activeElement;if(active&&typeof active.blur==='function')active.blur();setKeyboardOpen(false)}
-  function handleBackButton(){
-    var active=document.querySelector('.view.active');
-    show(active&&active.id==='shellgame'?'playzone':'home');
-  }
+  function handleBackButton(){show('home')}
   function syncTelegramBackButton(id){
     if(!tg||!tg.BackButton)return;
     try{tg.BackButton.offClick(handleBackButton)}catch(e){}
-    if(id==='shellgame'){
-      try{tg.BackButton.onClick(handleBackButton)}catch(e){}
-      try{tg.BackButton.show()}catch(e){}
-      return;
-    }
     try{tg.BackButton.hide()}catch(e){}
   }
   var primaryTabs={home:true,playzone:true,predictzone:true};

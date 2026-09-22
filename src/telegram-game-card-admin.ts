@@ -390,7 +390,9 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
       const game = normalizeGame(data.slice('botadmin:gameimage:'.length));
       if (game) {
         await env.BOT_CACHE.put(stateKey(callback.from.id), game, { expirationTtl: 900 });
-        await upsert(token, chatId, messageId, `🖼 تصویر کارت ${label(game)}\n\nتصویر را به‌صورت عکس معمولی یا File/Document بفرستید. نسبت پیشنهادی ۴:۵ است.`, [
+        await upsert(token, chatId, messageId, game === 'shellgame'
+          ? `🖼 تصویر کارت ${label(game)}\n\nبرای جلوگیری از هرگونه فشرده‌سازی یا تبدیل توسط تلگرام، تصویر را فقط به‌صورت File/Document بفرستید. فایل اصلی PNG، JPG یا WebP بدون تغییر ذخیره می‌شود. نسبت پیشنهادی ۴:۵ است.`
+          : `🖼 تصویر کارت ${label(game)}\n\nتصویر را به‌صورت عکس معمولی یا File/Document بفرستید. نسبت پیشنهادی ۴:۵ است.`, [
           [{ text: '⬅️ بازگشت', callback_data: 'botadmin:gameimages' }],
         ]);
       }
@@ -524,6 +526,10 @@ async function handleUpdate(env: Env, update: Update): Promise<Response | null> 
   const source = imageFromMessage(message);
   if (!source) {
     await replaceUploadPrompt(env, token, message, '❌ یک فایل PNG، JPG یا WebP بفرستید یا /cancel را بزنید.');
+    return ok();
+  }
+  if (target.kind === 'game' && target.game === 'shellgame' && source.via !== 'document') {
+    await replaceUploadPrompt(env, token, message, '❌ تصویر کارت Shell Game باید فقط به‌صورت File/Document ارسال شود تا تلگرام آن را فشرده یا تبدیل نکند. فایل اصلی PNG، JPG یا WebP را بفرستید.', 'botadmin:gameimages');
     return ok();
   }
   if (target.kind === 'ton' && source.via !== 'document') {

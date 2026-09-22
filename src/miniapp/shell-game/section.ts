@@ -15,14 +15,14 @@ export const SHELL_GAME_SECTION = `
     .shell-game-status.win{color:#78efae}.shell-game-status.lose{color:#ff91a7}
     .shell-game-arena{position:absolute;z-index:3;left:0;right:0;bottom:64px;height:275px;perspective:900px;transform:translateY(-20px)}
     .shell-cup-button{--slot-x:0px;--cup-lift:0px;position:absolute;left:50%;bottom:14px;width:34%;max-width:152px;height:190px;padding:0;border:0;background:transparent;color:#f8d8bb;transform:translateX(calc(-50% + var(--slot-x))) translateY(var(--cup-lift));transition:transform .32s cubic-bezier(.2,.76,.24,1),filter .2s ease;z-index:4;-webkit-tap-highlight-color:transparent}
-    .shell-cup-button[data-slot="0"]{--slot-x:max(-26vw,-112px)}
-    .shell-cup-button[data-slot="1"]{--slot-x:0px}
-    .shell-cup-button[data-slot="2"]{--slot-x:min(26vw,112px)}
+    .shell-cup-button[data-slot="0"],.shell-cup-shadow[data-slot="0"]{--slot-x:max(-26vw,-112px)}
+    .shell-cup-button[data-slot="1"],.shell-cup-shadow[data-slot="1"]{--slot-x:0px}
+    .shell-cup-button[data-slot="2"],.shell-cup-shadow[data-slot="2"]{--slot-x:min(26vw,112px)}
+    .shell-cup-shadow{--slot-x:0px;position:absolute;left:50%;bottom:126px;width:27%;max-width:112px;height:15px;border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.66) 0%,rgba(0,0,0,.46) 42%,rgba(0,0,0,.18) 64%,rgba(0,0,0,0) 82%);box-shadow:0 7px 15px rgba(0,0,0,.22);filter:blur(2.8px);transform:translateX(calc(-50% + var(--slot-x))) scaleX(1.08);opacity:.78;pointer-events:none;z-index:2}
     .shell-cup-button.selectable{cursor:pointer;filter:brightness(1.04)}
     .shell-cup-button.selectable:active{transform:translateX(calc(-50% + var(--slot-x))) translateY(-5px) scale(.975);filter:brightness(1.17)}
     .shell-cup-button.lifted{--cup-lift:-66px}
-    .shell-cup{position:absolute;left:50%;bottom:120px;width:100%;height:auto;object-fit:contain;transform:translateX(-50%);filter:none;pointer-events:none}
-    .shell-cup-number{position:absolute;z-index:2;left:50%;bottom:136px;transform:translateX(-50%);font-family:Georgia,'Times New Roman',serif;font-size:23px;font-weight:700;color:#f3d5b7;text-shadow:0 2px 5px #000;pointer-events:none}
+    .shell-cup{position:absolute;left:50%;bottom:120px;width:100%;height:auto;object-fit:contain;transform:translateX(-50%);filter:drop-shadow(0 5px 4px rgba(0,0,0,.34));pointer-events:none}
     .shell-ball{position:absolute;left:50%;bottom:138px;width:30px;height:30px;border-radius:50%;transform:translateX(-50%) scale(0);opacity:0;background:radial-gradient(circle at 34% 28%,#fff7ca 0 10%,#ffc640 28%,#d76d00 72%,#5a1b00 100%);box-shadow:0 8px 16px rgba(0,0,0,.7),0 0 20px rgba(255,165,48,.22);transition:left .28s ease,transform .25s ease,opacity .2s ease;z-index:3}
     .shell-ball.visible{transform:translateX(-50%) scale(1);opacity:1}
     .shell-guess{display:flex;align-items:center;justify-content:center;gap:7px;margin:1px 0 0;color:rgba(255,244,237,.86);font-size:13px;font-weight:740;transform:translateY(-60px)}.shell-guess i{font-style:normal;color:#d9a87a}
@@ -35,7 +35,7 @@ export const SHELL_GAME_SECTION = `
     .shell-play-button{width:100%;height:66px;margin-top:12px;padding:0;border:1px solid rgba(255,81,112,.72);border-radius:18px;display:grid;place-items:center;align-content:center;gap:4px;background:linear-gradient(145deg,#a52240,#4f0a1a 68%,#320610);box-shadow:inset 0 1px 0 rgba(255,221,227,.21),0 12px 25px rgba(0,0,0,.28);color:#fff4f5;transition:transform .16s ease,opacity .18s ease}
     .shell-play-main{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:830}.shell-play-main i{font-style:normal;font-size:18px;color:#f7d8c1}.shell-play-button small{font-size:8px;font-weight:750;letter-spacing:.25em;color:rgba(255,211,218,.68)}.shell-play-button:disabled{opacity:.54}.shell-play-button:not(:disabled):active{transform:scale(.985)}
     .shell-info-row{display:grid;grid-template-columns:1.02fr 1.12fr .96fr;gap:8px;transform:translateY(-60px)}.shell-info-card{min-width:0;height:57px;padding:8px 9px;border:1px solid rgba(226,188,158,.15);border-radius:17px;background:linear-gradient(145deg,rgba(27,23,22,.80),rgba(7,7,7,.84));color:rgba(255,255,255,.78);display:flex;align-items:center;gap:8px}.shell-info-card>i{font-style:normal;font-size:21px;color:#e4b183}.shell-info-card span{min-width:0;font-size:9px;font-weight:720;line-height:1.2}.shell-info-card small{display:block;margin-top:4px;font-size:7px;letter-spacing:.04em;color:rgba(255,255,255,.45);white-space:nowrap}.shell-result-dots{display:flex;gap:5px;margin-top:6px}.shell-result-dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.17)}.shell-result-dots i.win{background:#35bd72}.shell-result-dots i.lose{background:#be3447}
-    @media(max-width:380px){.shell-game-view{padding-left:7px;padding-right:7px}.shell-game-hero{height:405px}.shell-game-arena{bottom:58px;height:245px}.shell-cup-button{height:166px}.shell-cup-number{font-size:20px}.shell-info-card{padding:7px 6px;gap:5px}.shell-info-card>i{font-size:17px}}
+    @media(max-width:380px){.shell-game-view{padding-left:7px;padding-right:7px}.shell-game-hero{height:405px}.shell-game-arena{bottom:58px;height:245px}.shell-cup-button{height:166px}.shell-info-card{padding:7px 6px;gap:5px}.shell-info-card>i{font-size:17px}}
     .shell-game-view.shell-compact .shell-game-hero{height:370px}.shell-game-view.shell-compact .shell-game-arena{bottom:48px;height:225px}.shell-game-view.shell-compact .shell-cup-button{height:154px}.shell-game-view.shell-compact .shell-game-wrap{gap:9px}.shell-game-view.shell-compact .shell-game-controls{padding:11px}.shell-game-view.shell-compact .shell-info-row{display:none}
     @media(prefers-reduced-motion:reduce){.shell-cup-button,.shell-ball{transition-duration:.01ms!important}}
   </style>
@@ -43,10 +43,13 @@ export const SHELL_GAME_SECTION = `
     <div class="shell-game-hero">
       <div class="shell-game-status" data-shell-status>Press Play Round to begin</div>
       <div class="shell-game-arena" data-shell-arena>
+        <span class="shell-cup-shadow" data-slot="0" aria-hidden="true"></span>
+        <span class="shell-cup-shadow" data-slot="1" aria-hidden="true"></span>
+        <span class="shell-cup-shadow" data-slot="2" aria-hidden="true"></span>
         <div class="shell-ball" data-shell-ball></div>
-        <button class="shell-cup-button" type="button" data-shell-cup="0" data-slot="0" aria-label="Cup 1"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/><span class="shell-cup-number">1</span></button>
-        <button class="shell-cup-button" type="button" data-shell-cup="1" data-slot="1" aria-label="Cup 2"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/><span class="shell-cup-number">2</span></button>
-        <button class="shell-cup-button" type="button" data-shell-cup="2" data-slot="2" aria-label="Cup 3"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/><span class="shell-cup-number">3</span></button>
+        <button class="shell-cup-button" type="button" data-shell-cup="0" data-slot="0" aria-label="Cup 1"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/></button>
+        <button class="shell-cup-button" type="button" data-shell-cup="1" data-slot="1" aria-label="Cup 2"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/></button>
+        <button class="shell-cup-button" type="button" data-shell-cup="2" data-slot="2" aria-label="Cup 3"><img class="shell-cup" src="/assets/shell-game-cup.webp" alt=""/></button>
       </div>
     </div>
     <div class="shell-guess"><i>♠</i><span>Guess where the ball is hidden</span></div>

@@ -112,8 +112,10 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       for(let i=0;i<7;i++){const x=(i-3)*.12;const tail=oval(body,.08,.09,.34,x,1.13,.83,feather);tail.rotation.x=-.32;tail.rotation.z=(i-3)*.12}
       const legs=[];for(const x of [-.25,.25]){const leg=new T.Group();leg.position.set(x,.64,.16);body.add(leg);box(.09,.53,.09,legMat,leg,0,-.27,0);for(let j=-1;j<=1;j++)box(.052,.04,.34,legMat,leg,j*.09,-.53,-.15);legs.push(leg)}
       bird.position.set(0,.03,9.8);bird.rotation.y=0;
-      // Face the width of the road: traffic runs vertically and the crossing reads left to right.
-      const cameraDistance=Math.hypot(26,26),roadWidth=35;
+      // Face the road from its starting side; follow the bird across the lanes without turning the camera.
+      const cameraDistance=Math.hypot(28,16),roadWidth=20;
+      const cameraCenter=(z)=>Math.max(-9.4,z-4);
+      let cameraZ=cameraCenter(shownZ);
       function resize(){const r=container.getBoundingClientRect(),w=Math.max(1,r.width),h=Math.max(1,r.height);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(roadWidth/(2*cameraDistance*camera.aspect))*180/Math.PI;camera.updateProjectionMatrix()}
       const observer=new ResizeObserver(resize);observer.observe(container);resize();
       function frameLoop(){if(!running)return;frame=requestAnimationFrame(frameLoop);const dt=Math.min(.05,clock.getDelta()),now=performance.now();for(const car of traffic){if(hitTime&&car===hitCar)continue;car.obj.position.x+=car.speed*car.direction*dt;if(car.obj.position.x>53)car.obj.position.x=-53;if(car.obj.position.x< -53)car.obj.position.x=53}
@@ -121,11 +123,11 @@ export const CHICKEN_CROSS_SECTION = String.raw`
         bird.position.y=.03+hop;head.rotation.y=Math.sin(now*.0008)*.08;
         if(hitTime&&hitCar){const p=Math.min(1,(now-hitTime)/820);hitCar.obj.position.x=-8+9*p;hitCar.obj.position.z=targetZ;body.rotation.z=p> .55?(p-.55)*1.6:0;if(p===1){hitTime=0;hitCar.obj.position.x=-45}}
         else body.rotation.z*=.85;
-        renderer.render(scene,camera)}
+        cameraZ+=(cameraCenter(shownZ)-cameraZ)*(1-Math.exp(-dt*3));camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ);renderer.render(scene,camera)}
       function setActive(value){if(value===running)return;running=value;if(running){clock.getDelta();resize();frame=requestAnimationFrame(frameLoop)}else{cancelAnimationFrame(frame);shownZ=targetZ;bird.position.z=targetZ;jumpStart=0;hitTime=0;body.rotation.z=0;if(hitCar)hitCar.obj.position.x=-45;if(resolveCross){const done=resolveCross;resolveCross=null;done()}}}
-      function setStep(step,animate){progressStep=Math.max(0,Math.min(8,Number(step)||0));targetZ=9.8-progressStep*2.84;if(!animate){shownZ=targetZ;bird.position.z=targetZ;body.rotation.z=0}}
+      function setStep(step,animate){progressStep=Math.max(0,Math.min(8,Number(step)||0));targetZ=9.8-progressStep*2.84;if(!animate){shownZ=targetZ;bird.position.z=targetZ;body.rotation.z=0;cameraZ=cameraCenter(targetZ);camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ)}}
       function cross(before,after,hit){setStep(after,true);if(!running){shownZ=targetZ;return Promise.resolve()}jumpStart=performance.now();if(hit){hitCar=traffic[after%traffic.length];hitTime=jumpStart;hitCar.obj.position.x=-8}return new Promise(resolve=>{resolveCross=resolve})}
-      camera.position.set(26,26,-2.2);camera.lookAt(0,0,-2.2);
+      camera.position.set(-28,16,cameraZ);camera.lookAt(0,0,cameraZ);
       return {setActive,setStep,cross};
     }
   })();

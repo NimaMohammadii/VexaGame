@@ -33,6 +33,10 @@ function multiplier(difficulty: Difficulty, step: number): number {
   return Math.floor((.96 / Math.pow(CONFIG[difficulty], step)) * 100) / 100;
 }
 
+async function payoutNano(env: Env, userId: string, amountNano: number, atMultiplier: number): Promise<number> {
+  return Math.floor(amountNano * atMultiplier * await dailyWheelWinMultiplier(env, userId));
+}
+
 async function digest(value: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -104,7 +108,10 @@ async function ready(env: Env, round: Round): Promise<Round> {
 async function response(env: Env, round: Round) {
   const current = await ready(env, round);
   const controls = await getUserControls(env, round.user_id);
-  return { ok: true, round: publicRound(current), tonBalanceNano: controls.tonBalanceNano };
+  const cashoutQuoteNano = current.status === 'active' && current.step > 0
+    ? await payoutNano(env, current.user_id, current.amount_nano, current.multiplier)
+    : null;
+  return { ok: true, round: { ...publicRound(current), cashoutQuoteNano }, tonBalanceNano: controls.tonBalanceNano };
 }
 
 export function registerChickenCrossRoutes(app: App): void {
@@ -161,7 +168,7 @@ export function registerChickenCrossRoutes(app: App): void {
       const step = round.step + 1;
       const survived = await safeLane(round, step);
       const finished = survived && step === LANES;
-      const payout = finished ? Math.floor(round.amount_nano * multiplier(round.difficulty, step) * await dailyWheelWinMultiplier(c.env, userId)) : 0;
+      const payout = finished ? await payoutNano(c.env, userId, round.amount_nano, multiplier(round.difficulty, step)) : 0;
       const result = await c.env.DB.prepare(`UPDATE chicken_cross_v2_rounds SET
         step=?,status=?,multiplier=?,payout_nano=?,updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND user_id=? AND status='active' AND step=?`)
@@ -183,7 +190,7 @@ export function registerChickenCrossRoutes(app: App): void {
       if (!round) throw new Error('Round not found');
       round = await ready(c.env, round);
       if (round.status === 'active' && round.step > 0) {
-        const payout = Math.floor(round.amount_nano * round.multiplier * await dailyWheelWinMultiplier(c.env, userId));
+        const payout = await payoutNano(c.env, userId, round.amount_nano, round.multiplier);
         await c.env.DB.prepare(`UPDATE chicken_cross_v2_rounds SET status='payout_pending',payout_nano=?,updated_at=CURRENT_TIMESTAMP
           WHERE id=? AND user_id=? AND status='active' AND step=?`)
           .bind(payout, id, userId, round.step).run();

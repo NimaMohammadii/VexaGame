@@ -15,7 +15,7 @@ export const TELEGRAM_BACK_BUTTON_SCRIPT = `
     function hide(){try{if(originalHide)originalHide();else back.hide()}catch(e){}}
     function goPlayZone(){var tab=document.querySelector('button[data-view="playzone"],.tab[data-view="playzone"]');if(tab&&typeof tab.click==='function'){tab.click();return true}return false}
     function shouldShow(){
-      var games=['crash','plinko','mines','slot','wheel','dice','ghostrun','coinflip','shellgame'];
+      var games=['crash','plinko','mines','slot','wheel','dice','ghostrun','coinflip','shellgame','hilo'];
       for(var i=0;i<games.length;i++)if(isActive(games[i]))return true;
       var p=document.getElementById('predictzone');
       return !!(p&&p.classList.contains('active')&&(p.classList.contains('predict-market-detail-mode')||p.classList.contains('football-match-detail-open')));
@@ -31,7 +31,7 @@ export const TELEGRAM_BACK_BUTTON_SCRIPT = `
         if(window.VexaFootballPredictBack){try{if(window.VexaFootballPredictBack()){setTimeout(sync,60);return}}catch(e){}}
         sync();return;
       }
-      var games=['crash','plinko','mines','slot','wheel','dice','ghostrun','coinflip','shellgame'];
+      var games=['crash','plinko','mines','slot','wheel','dice','ghostrun','coinflip','shellgame','hilo'];
       for(var i=0;i<games.length;i++){if(isActive(games[i])){if(goPlayZone()){setTimeout(sync,0);return}sync();return}}
       sync();
     }

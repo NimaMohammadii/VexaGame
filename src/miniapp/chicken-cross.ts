@@ -129,32 +129,62 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       for(const z of [-15.1,10.7])box(12,7.5,1.5,tunnelStone,scene,-54,3.75,z);
       for(const x of [-59,-53,-48]){for(const z of [-14,9.6])box(.52,7.55,1,tunnelEdge,scene,x,3.78,z);box(.52,.9,24.6,tunnelEdge,scene,x,7.25,-2.2);box(.55,.09,24.5,concrete,scene,x,6.76,-2.2)}
       for(const z of [-10,-2.2,5.6])box(8,.04,.11,tunnelLight,scene,-53,7.18,z);
+      // Frame the mouth with a continuous urban block; the back wall of the tunnel remains dark.
+      const farBrick=material(0x333036,0,.93),farStone=material(0x51474c,0,.88),farGlass=material(0x252f35,.28,.28),farLight=new T.MeshStandardMaterial({color:0x776351,emissive:0x8a6049,emissiveIntensity:.24,roughness:.55});
+      mineral(farBrick,.036);mineral(farStone,.024);
+      const facadeMatrices=[[],[],[],[]];function facadeDetail(type,x,y,z,w,h,d){const matrix=new T.Matrix4().makeScale(w,h,d);matrix.setPosition(x,y,z);facadeMatrices[type].push(matrix)}
+      for(const [z,w,h,depth] of [[-27,15,16,8],[-39,10,11,7],[18,14,18,9],[31,12,12,7]]){
+        const front=-54;box(depth,h,w,farBrick,scene,front-depth/2,h/2,z).castShadow=true;
+        box(depth+.15,.3,w+.5,farStone,scene,front-depth/2,h+.15,z);
+        box(.16,.65,w+.4,farStone,scene,front+.11,.45,z);
+        for(let level=0;level<Math.floor((h-1)/2.45);level++)for(let column=0;column<Math.floor((w-1)/2.15);column++){
+          const wz=z-w/2+1.35+column*2.15,wy=1.75+level*2.45;
+          facadeDetail(0,front+.12,wy,wz,.045,1.16,1.35);
+          facadeDetail((level*7+column*3+Math.round(z))%9===0?2:1,front+.155,wy,wz,.058,.99,1.17);
+          facadeDetail(3,front+.22,wy-.62,wz,.16,.1,1.54);
+        }
+      }
+      for(let type=0;type<4;type++){const matrices=facadeMatrices[type],part=new T.InstancedMesh(new T.BoxGeometry(1,1,1),[frameMat,farGlass,farLight,farStone][type],matrices.length);matrices.forEach((matrix,index)=>part.setMatrixAt(index,matrix));part.computeBoundingSphere();scene.add(part)}
+      // Parapet and a restrained retaining wall visually connect the two blocks above the portal.
+      box(4.5,1.5,28.6,farStone,scene,-54,8.7,-2.2).castShadow=true;
+      box(.35,.18,29,concrete,scene,-51.65,9.55,-2.2);
+      for(const z of [-13.7,9.3]){box(5.2,2,.32,farStone,scene,-51.4,1,z).castShadow=true;box(5.6,.1,.48,concrete,scene,-51.4,2.1,z)}
       // Geometry of the cars is authored here: beveled body, glass cabin, lights and wheels.
       const tire=material(0x111315,.04,.98),rim=material(0x919a9b,.8,.28),glass=material(0x354550,.24,.12),trim=material(0x18191c,.35,.5),lampWhite=new T.MeshBasicMaterial({color:0xffedcc}),lampRed=new T.MeshBasicMaterial({color:0xa51c19});
       const tireGeometry=new T.CylinderGeometry(.37,.37,.17,20),rimGeometry=new T.CylinderGeometry(.20,.20,.185,20);
       function car(color,direction){const group=new T.Group(),paint=material(color,.42,.29);scene.add(group);const shape=new T.Shape();shape.moveTo(-2.05,.38);shape.lineTo(-1.92,.80);shape.lineTo(-1.12,.91);shape.lineTo(-.65,1.48);shape.lineTo(.78,1.48);shape.lineTo(1.16,.91);shape.lineTo(1.95,.79);shape.lineTo(2.07,.42);shape.lineTo(2.07,.32);shape.lineTo(-2.05,.32);const shell=new T.ExtrudeGeometry(shape,{depth:1.54,bevelEnabled:true,bevelSegments:2,steps:1,bevelSize:.13,bevelThickness:.10,curveSegments:3});mesh(shell,paint,group,0,0,-.77).castShadow=true;
         box(1.3,.41,1.33,glass,group,.05,1.16,0);box(1.3,.055,1.42,paint,group,.05,1.52,0);
-        for(const side of [-1,1]){box(1.45,.02,.018,trim,group,.08,.92,side*.79);box(.16,.1,.22,paint,group,-.7,1.18,side*.85);box(.19,.022,.018,rim,group,.4,.87,side*.8)}
+        const windshield=new T.Shape();windshield.moveTo(-.57,.02);windshield.lineTo(.57,.02);windshield.lineTo(.48,.39);windshield.lineTo(-.48,.39);windshield.closePath();const windGeom=new T.ShapeGeometry(windshield);windGeom.rotateY(Math.PI/2);mesh(windGeom,glass,group,1.175,1.03,0);
+        for(const side of [-1,1]){box(1.45,.02,.018,trim,group,.08,.92,side*.79);box(.16,.1,.22,paint,group,-.7,1.18,side*.85);box(.19,.022,.018,rim,group,.4,.87,side*.8);
+          box(.53,.24,.024,glass,group,-.39,1.25,side*.9);box(.5,.24,.024,glass,group,.36,1.25,side*.9);
+          box(.025,.26,.035,trim,group,-.02,1.25,side*.93);box(.028,.4,.028,trim,group,-.04,.66,side*.93);
+          box(.17,.025,.05,rim,group,.19,.83,side*.84)}
+        box(.065,.17,.92,trim,group,2.11,.59,0);box(.07,.035,.42,rim,group,2.15,.54,0);
+        box(.1,.15,1.65,trim,group,1.98,.37,0);box(.085,.11,1.65,trim,group,-1.99,.37,0);
         for(const x of [-1.27,1.22])for(const z of [-.82,.82]){const wheel=mesh(tireGeometry,tire,group,x,.38,z);wheel.rotation.x=Math.PI/2;const hub=mesh(rimGeometry,rim,group,x,.38,z+(z>0?.012:-.012));hub.rotation.x=Math.PI/2;}
         for(const z of [-.52,.52]){box(.09,.18,.28,lampWhite,group,direction>0?2.09:-2.09,.68,z);box(.08,.15,.28,lampRed,group,direction>0?-2.09:2.09,.66,z)}
         return group}
       const colors=[0x51575c,0x6d3648,0x443d48,0x756b69,0x27292e,0x753e4a,0x4d4844,0x393338];const traffic=[];
       // One car per lane, all travelling along +X towards the camera; never put a car on a lane marking.
       const carStarts=[-56,-41,-26,-11,-53,-38,-23,-8];
-      for(let lane=0;lane<8;lane++){const z=9.2-(lane+.5)*2.84,obj=car(colors[lane],1),materials=[],clones=new Map();obj.traverse(part=>{if(!part.isMesh)return;let cloned=clones.get(part.material);if(!cloned){cloned=part.material.clone();cloned.transparent=true;materials.push({mat:cloned,color:cloned.color.clone(),emissive:cloned.emissive&&cloned.emissive.clone()});clones.set(part.material,cloned)}part.material=cloned});obj.position.set(carStarts[lane],0,z);traffic.push({obj,z,speed:10.5,materials})}
+      for(let lane=0;lane<8;lane++){const z=9.2-(lane+.5)*2.84,obj=car(colors[lane],1),materials=[],clones=new Map();obj.traverse(part=>{if(!part.isMesh)return;let cloned=clones.get(part.material);if(!cloned){cloned=part.material.clone();cloned.transparent=true;materials.push({mat:cloned,color:cloned.color.clone(),emissive:cloned.emissive&&cloned.emissive.clone()});clones.set(part.material,cloned)}part.material=cloned});obj.position.set(carStarts[lane],0,z);traffic.push({obj,z,speed:15,materials})}
       function fadeCar(car,opacity){const alpha=Math.max(0,Math.min(1,opacity));car.obj.visible=alpha>.01;for(const surface of car.materials){surface.mat.opacity=alpha;surface.mat.color.copy(surface.color).multiplyScalar(.24+.76*alpha);if(surface.emissive)surface.mat.emissive.copy(surface.emissive).multiplyScalar(alpha)}}
       for(const vehicle of traffic)fadeCar(vehicle,Math.min((vehicle.obj.position.x+49)/13,(25-vehicle.obj.position.x)/13));
       // A realistic bird silhouette built from layered plumage, articulated legs and a subtle head turn.
       const bird=new T.Group();scene.add(bird);const feather=material(0xe2d8c5,0,.92),shade=material(0xc5bba9,0,.94),tip=material(0xb5a993,0,.96),dark=material(0x282a27,0,.55),beak=material(0x9a8064,0,.8),legMat=material(0x9a8268,0,.88),comb=material(0x96433c,0,.86);
       for(const plumage of [feather,shade,tip])texturedSurface(plumage,'float down=surfaceSoft(surfaceUv*11.0);float filaments=surfaceNoise(floor(surfaceUv*48.0));diffuseColor.rgb*=.87+down*.16+filaments*.05;');
-      const featherGeometry=new T.SphereGeometry(1,24,18);
+      const featherGeometry=new T.SphereGeometry(1,32,24);
       function oval(parent,sx,sy,sz,x,y,z,mat){const m=mesh(featherGeometry,mat,parent,x,y,z);m.scale.set(sx,sy,sz);return m}
       const body=new T.Group();bird.add(body);oval(body,.68,.63,.9,0,.97,0,feather).castShadow=true;oval(body,.53,.49,.67,0,.92,-.08,shade);
       const head=new T.Group();head.position.set(0,1.67,-.48);body.add(head);oval(head,.34,.35,.36,0,0,0,feather);const bill=mesh(new T.ConeGeometry(.14,.38,8),beak,head,0,-.11,-.38);bill.rotation.x=-Math.PI/2;
-      for(const x of [-.24,.24]){oval(head,.044,.052,.039,x,.035,-.258,dark);oval(body,.3,.22,.53,x>0?.56:-.56,1.04,.12,shade)}
-      for(let side of [-1,1])for(let row=0;row<3;row++)for(let i=0;i<5;i++){
-        const piece=oval(body,.12,.045,.22,side*(.53-row*.09),1.13-row*.16,-.35+i*.20,(i+row)%3?shade:tip);
-        piece.rotation.y=side*.18;piece.rotation.x=-.15;
+      for(const x of [-.24,.24]){oval(head,.044,.052,.039,x,.035,-.258,dark);oval(head,.014,.017,.012,x-.012,.051,-.289,feather)}
+      oval(head,.075,.10,.06,0,-.29,-.22,comb);
+      const wings=[];for(const side of [-1,1]){const wing=new T.Group();wing.position.set(side*.48,1.08,.08);body.add(wing);wings.push(wing);
+        oval(wing,.25,.18,.48,side*.04,0,.02,shade);
+        for(let row=0;row<3;row++)for(let i=0;i<6;i++){
+          const piece=oval(wing,.09+row*.012,.038,.16+row*.045,side*(.12+row*.027),.08-row*.075,-.38+i*.16,(i+row)%3?shade:tip);
+          piece.rotation.y=side*.12;piece.rotation.x=-.18;
+        }
       }
       for(let i=0;i<3;i++)oval(head,.105,.15,.12,0,.30,-.18+i*.12,comb);
       for(let i=0;i<7;i++){const x=(i-3)*.12;const tail=oval(body,.08,.09,.34,x,1.13,.83,feather);tail.rotation.x=-.32;tail.rotation.z=(i-3)*.12}
@@ -168,13 +198,13 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       const observer=new ResizeObserver(resize);observer.observe(container);resize();
       function finishCross(){if(resolveCross){const done=resolveCross;resolveCross=null;done()}}
       function frameLoop(){if(!running)return;frame=requestAnimationFrame(frameLoop);const dt=Math.min(.05,clock.getDelta()),now=performance.now();for(const car of traffic){if(hitTime&&car===hitCar)continue;car.obj.position.x+=car.speed*dt;if(car.obj.position.x>30)car.obj.position.x=-56;fadeCar(car,Math.min((car.obj.position.x+49)/13,(25-car.obj.position.x)/13))}
-        shownZ+=(targetZ-shownZ)*Math.min(1,dt*7);bird.position.z=shownZ;let hop=0;if(jumpStart){const t=Math.min(1,(now-jumpStart)/630);hop=Math.sin(t*Math.PI)*.46;body.rotation.x=Math.sin(t*Math.PI)*-.13;legs[0].rotation.x=Math.sin(t*Math.PI*2)*.5;legs[1].rotation.x=-legs[0].rotation.x;if(t===1){jumpStart=0;body.rotation.x=0;legs.forEach(l=>l.rotation.x=0);if(!hitTime)finishCross()}}
-        bird.position.y=.03+hop;head.rotation.y=Math.sin(now*.0008)*.08;
+        shownZ+=(targetZ-shownZ)*Math.min(1,dt*7);bird.position.z=shownZ;let hop=0;if(jumpStart){const t=Math.min(1,(now-jumpStart)/630);hop=Math.sin(t*Math.PI)*.46;body.rotation.x=Math.sin(t*Math.PI)*-.13;wings[0].rotation.z=-Math.sin(t*Math.PI)*.32;wings[1].rotation.z=Math.sin(t*Math.PI)*.32;legs[0].rotation.x=Math.sin(t*Math.PI*2)*.5;legs[1].rotation.x=-legs[0].rotation.x;if(t===1){jumpStart=0;body.rotation.x=0;wings.forEach(w=>w.rotation.z=0);legs.forEach(l=>l.rotation.x=0);if(!hitTime)finishCross()}}
+        bird.position.y=.03+hop;body.scale.y=1+Math.sin(now*.0022)*.008;head.rotation.y=Math.sin(now*.0008)*.08;head.rotation.x=Math.sin(now*.0016)*.027;
         if(hitTime&&hitCar){const p=Math.min(1,(now-hitTime)/650);hitCar.obj.position.x=-8+9*p;body.rotation.z=p> .55?(p-.55)*1.6:0;if(p===1){hitTime=0;hitCar.obj.position.x=-56;fadeCar(hitCar,0);finishCross()}}
         else body.rotation.z*=.85;
         cameraZ+=(cameraCenter(shownZ)-cameraZ)*(1-Math.exp(-dt*3));camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ);renderer.render(scene,camera)}
       function setActive(value){if(value===running)return;running=value;if(running){clock.getDelta();resize();frame=requestAnimationFrame(frameLoop)}else{cancelAnimationFrame(frame);shownZ=targetZ;bird.position.z=targetZ;jumpStart=0;hitTime=0;body.rotation.z=0;if(hitCar){hitCar.obj.position.x=-56;fadeCar(hitCar,0)}finishCross()}}
-      function setStep(step,animate){progressStep=Math.max(0,Math.min(8,Number(step)||0));targetZ=9.8-progressStep*2.84;if(!animate){jumpStart=0;shownZ=targetZ;bird.position.z=targetZ;bird.position.y=.03;body.rotation.x=0;body.rotation.z=0;legs.forEach(l=>l.rotation.x=0);cameraZ=cameraCenter(targetZ);camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ);finishCross()}}
+      function setStep(step,animate){progressStep=Math.max(0,Math.min(8,Number(step)||0));targetZ=9.8-progressStep*2.84;if(!animate){jumpStart=0;shownZ=targetZ;bird.position.z=targetZ;bird.position.y=.03;body.rotation.x=0;body.rotation.z=0;wings.forEach(w=>w.rotation.z=0);legs.forEach(l=>l.rotation.x=0);cameraZ=cameraCenter(targetZ);camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ);finishCross()}}
       function move(after){setStep(after,true);if(!running){shownZ=targetZ;bird.position.z=targetZ;return Promise.resolve()}jumpStart=performance.now();return new Promise(resolve=>{resolveCross=resolve})}
       function hit(step){if(!running)return Promise.resolve();hitCar=traffic[(Math.max(1,step)-1)%traffic.length];hitTime=performance.now();hitCar.obj.position.x=-8;fadeCar(hitCar,1);return new Promise(resolve=>{resolveCross=resolve})}
       camera.position.set(24,8,cameraZ);camera.lookAt(0,0,cameraZ);

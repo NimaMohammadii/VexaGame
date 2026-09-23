@@ -23,7 +23,7 @@ html:not(.play-zone-visibility-ready) #playzone [data-play-zone-card-id]{display
 .game-card-live:before,.game-card-live:after,.play-zone-featured-card:before,.play-zone-featured-card:after{content:none!important;display:none!important;background:none!important;box-shadow:none!important;border:0!important}
 .game-card-live .game-info,.game-card-live .game-open{display:none!important}
 .game-image{position:absolute!important;inset:var(--play-card-gap)!important;width:auto!important;height:auto!important;aspect-ratio:3/1!important;border-radius:16px!important;background:transparent!important;display:block!important;place-items:unset!important;overflow:hidden!important;border:0!important;outline:0!important;box-shadow:none!important;padding:0!important;z-index:1!important}
-.game-image img{display:block!important;width:100%!important;height:100%!important;object-fit:fill!important;object-position:center!important;border-radius:16px!important;background:transparent!important;border:0!important;outline:0!important;box-shadow:none!important;image-rendering:auto!important;transform:translateZ(0)!important;backface-visibility:hidden!important}
+.game-image img{display:block!important;width:100%!important;height:100%!important;object-position:center!important;border-radius:16px!important;background:transparent!important;border:0!important;outline:0!important;box-shadow:none!important;image-rendering:auto!important;transform:translateZ(0)!important;backface-visibility:hidden!important}
 .game-card-live .game-image{position:absolute!important;inset:var(--play-card-gap)!important;border:0!important;outline:0!important;border-radius:16px!important;box-shadow:none!important;background:transparent!important;overflow:hidden!important;padding:0!important}
 .game-card-live .game-image:after{content:none!important;display:none!important}
 .game-info{display:none!important}
@@ -56,7 +56,7 @@ html:not(.play-zone-visibility-ready) #playzone [data-play-zone-card-id]{display
   .play-zone-section-head strong{font-size:12px!important;color:rgba(255,255,255,.60)!important}
   .game-card,.game-card-live{height:calc((100vw - (var(--play-card-gap) * 2)) / 3 + (var(--play-card-gap) * 2))!important;min-height:118px!important;max-height:150px!important;border-radius:20px!important;padding:0!important}
   .game-image,.game-card-live .game-image{inset:var(--play-card-gap)!important;border-radius:14px!important;aspect-ratio:3/1!important;border:0!important;outline:0!important;box-shadow:none!important}
-  .game-image img{border-radius:14px!important;object-fit:fill!important;border:0!important;outline:0!important;box-shadow:none!important}
+  .game-image img{border-radius:14px!important;border:0!important;outline:0!important;box-shadow:none!important}
   .game-footer{bottom:11px!important;left:16px!important;right:16px!important}
   .game-players{gap:4px!important;padding:5px 9px!important}
   .game-players i{width:7px!important;height:7px!important}

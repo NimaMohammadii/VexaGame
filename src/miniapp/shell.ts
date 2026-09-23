@@ -16,6 +16,7 @@ import { WHEEL_SECTION } from './wheel';
 import { PUMP_SECTION } from './pump';
 import { GHOST_RUN_SECTION, GHOST_RUN_STYLES } from './ghost-run';
 import { SHELL_GAME_SECTION } from './shell-game';
+import { CHICKEN_CROSS_SECTION } from './chicken-cross';
 import { PLAY_ZONE_STYLES } from './play-zone-styles';
 import { PLAY_ZONE_SHOWCASE_OVERRIDES } from './play-zone-showcase-overrides';
 import { PLAY_ZONE_TOP_BLUR } from './play-zone-top-blur';
@@ -91,6 +92,7 @@ const LAZY_SECTIONS: LazySectionPayload[] = [
   { id: 'wheel', html: WHEEL_SECTION, scripts: [], styles: '' },
   { id: 'dice', html: DICE_SECTION + DICE_FINAL_TWEAK, scripts: [], styles: '' },
   { id: 'coinflip', html: PUMP_SECTION, scripts: [], styles: '' },
+  { id: 'hilo', html: CHICKEN_CROSS_SECTION, scripts: [], styles: '' },
   { id: 'ghostrun', html: GHOST_RUN_SECTION, scripts: [], styles: GHOST_RUN_STYLES },
   { id: 'shellgame', html: SHELL_GAME_SECTION, scripts: [], styles: '' },
 ];

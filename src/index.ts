@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { miniAppHtml, miniAppLazySection } from './miniapp-game';
 import { registerFriendGameRoutes } from './game-friend-routes';
 import { registerWheelRoutes } from './wheel-routes';
+import { registerChickenCrossRoutes } from './chicken-cross-routes';
 import { registerSlotAssetRoutes } from './slot-assets';
 import { handleGameBotWebhook } from './telegram-game-bot';
 import { handleGameCardAdminRequest } from './telegram-game-card-admin';
@@ -383,6 +384,7 @@ app.post('/app/api/pump/cashout', async (c) => {
 
 registerFriendGameRoutes(app);
 registerWheelRoutes(app);
+registerChickenCrossRoutes(app);
 registerSlotAssetRoutes(app);
 
 app.post('/telegram/webhook', async (c) => {

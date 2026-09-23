@@ -4,9 +4,12 @@ export const CHICKEN_CROSS_SECTION = String.raw`
   <style>
     body:has(#hilo.active) .tabs{display:none!important}
     body:has(#hilo.active) .app,body:has(#hilo.active) .content,body:has(#hilo.active) header.top{background:#080b0d!important}
-    .cc-view{--line:rgba(235,241,238,.12);height:100%;overflow-y:auto!important;overflow-x:hidden;color:#f1f2ed;background:#080b0d!important;padding:0 0 calc(20px + env(safe-area-inset-bottom));box-sizing:border-box;-webkit-overflow-scrolling:touch}
-    .cc-page{width:min(100%,520px);margin:auto}
-    .cc-stage{height:clamp(400px,61dvh,630px);min-height:400px;position:relative;overflow:hidden;background:linear-gradient(#182029,#080b0d 65%);isolation:isolate}
+    body:has(#hilo.active) .app{display:flex;flex-direction:column;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+    body:has(#hilo.active) header.top{flex-shrink:0}
+    body:has(#hilo.active) [data-lazy-section-host="hilo"]{flex:1;min-height:0}
+    .cc-view{--line:rgba(235,241,238,.12);height:100%;overflow-y:auto!important;overflow-x:hidden;color:#f1f2ed;background:#080b0d!important;padding:0;box-sizing:border-box;-webkit-overflow-scrolling:touch}
+    .cc-page{width:min(100%,520px);height:100%;min-height:520px;margin:auto;display:grid;grid-template-rows:minmax(210px,1fr) auto}
+    .cc-stage{min-height:210px;position:relative;overflow:hidden;background:linear-gradient(#182029,#080b0d 65%);isolation:isolate}
     .cc-stage canvas{width:100%;height:100%;display:block;touch-action:none}
     .cc-stage:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(4,7,10,.33),transparent 19%,transparent 72%,#080b0d 100%);z-index:2}
     .cc-topline{position:absolute;z-index:4;top:20px;left:20px;right:20px;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none;text-shadow:0 2px 12px #000}
@@ -21,7 +24,7 @@ export const CHICKEN_CROSS_SECTION = String.raw`
     .cc-wager{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:8px;margin-bottom:14px}.cc-wager button,.cc-wager input{height:46px;border:1px solid var(--line);border-radius:12px;background:#1b2225;color:#f2f5f1;font:750 17px system-ui,sans-serif;text-align:center;box-sizing:border-box;min-width:0}.cc-wager input{outline:none;font-variant-numeric:tabular-nums}.cc-wager input:focus{border-color:#c4d6cb}.cc-wager button{font-size:22px}.cc-unit{position:relative}.cc-unit input{width:100%;padding:0 64px 0 15px}.cc-unit span{position:absolute;right:12px;top:16px;color:#a4b3ad;font:700 11px system-ui,sans-serif;pointer-events:none}
     .cc-actions{display:grid;grid-template-columns:1fr;gap:9px}.cc-actions.in-round{grid-template-columns:1.25fr .75fr}.cc-actions button{height:52px;border:0;border-radius:13px;font:750 15px system-ui,sans-serif;transition:transform .18s,opacity .18s}.cc-go{background:#c4d6cb;color:#0a1814}.cc-cash{display:none;background:#263c35;color:#d4f7e5;border:1px solid #466858!important}.cc-actions.in-round .cc-cash{display:block}.cc-actions button:disabled,.cc-difficulties button:disabled,.cc-wager input:disabled,.cc-wager button:disabled{opacity:.5}
     .cc-proof{margin:11px 2px 0;font:600 10px/1.4 system-ui,sans-serif;color:#81908b;word-break:break-all}.cc-proof strong{color:#c4d6cb}
-    @media(max-height:700px){.cc-stage{height:400px}.cc-panel-inner{padding:13px}.cc-difficulties{margin-bottom:10px}}
+    @media(max-height:700px){.cc-page{min-height:470px}.cc-panel-inner{padding:13px}.cc-difficulties{margin-bottom:10px}}
     @media(prefers-reduced-motion:reduce){.cc-difficulties button,.cc-actions button{transition:none}}
   </style>
   <div class="cc-page">
@@ -109,19 +112,20 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       for(let i=0;i<7;i++){const x=(i-3)*.12;const tail=oval(body,.08,.09,.34,x,1.13,.83,feather);tail.rotation.x=-.32;tail.rotation.z=(i-3)*.12}
       const legs=[];for(const x of [-.25,.25]){const leg=new T.Group();leg.position.set(x,.64,.16);body.add(leg);box(.09,.53,.09,legMat,leg,0,-.27,0);for(let j=-1;j<=1;j++)box(.052,.04,.34,legMat,leg,j*.09,-.53,-.15);legs.push(leg)}
       bird.position.set(0,.03,9.8);bird.rotation.y=0;
-      function resize(){const r=container.getBoundingClientRect(),w=Math.max(1,r.width),h=Math.max(1,r.height);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
+      // Face the width of the road: traffic runs vertically and the crossing reads left to right.
+      const cameraDistance=Math.hypot(26,26),roadWidth=35;
+      function resize(){const r=container.getBoundingClientRect(),w=Math.max(1,r.width),h=Math.max(1,r.height);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(roadWidth/(2*cameraDistance*camera.aspect))*180/Math.PI;camera.updateProjectionMatrix()}
       const observer=new ResizeObserver(resize);observer.observe(container);resize();
-      const cameraGoal=new T.Vector3();
       function frameLoop(){if(!running)return;frame=requestAnimationFrame(frameLoop);const dt=Math.min(.05,clock.getDelta()),now=performance.now();for(const car of traffic){if(hitTime&&car===hitCar)continue;car.obj.position.x+=car.speed*car.direction*dt;if(car.obj.position.x>53)car.obj.position.x=-53;if(car.obj.position.x< -53)car.obj.position.x=53}
         shownZ+=(targetZ-shownZ)*Math.min(1,dt*7);bird.position.z=shownZ;let hop=0;if(jumpStart){const t=Math.min(1,(now-jumpStart)/630);hop=Math.sin(t*Math.PI)*.46;body.rotation.x=Math.sin(t*Math.PI)*-.13;legs[0].rotation.x=Math.sin(t*Math.PI*2)*.5;legs[1].rotation.x=-legs[0].rotation.x;if(t===1){jumpStart=0;body.rotation.x=0;legs.forEach(l=>l.rotation.x=0);if(resolveCross){const done=resolveCross;resolveCross=null;done()}}}
         bird.position.y=.03+hop;head.rotation.y=Math.sin(now*.0008)*.08;
         if(hitTime&&hitCar){const p=Math.min(1,(now-hitTime)/820);hitCar.obj.position.x=-8+9*p;hitCar.obj.position.z=targetZ;body.rotation.z=p> .55?(p-.55)*1.6:0;if(p===1){hitTime=0;hitCar.obj.position.x=-45}}
         else body.rotation.z*=.85;
-        const followZ=shownZ-5.5;cameraGoal.set(12.5,16.5,24+followZ);camera.position.lerp(cameraGoal,1-Math.exp(-dt*3.2));camera.lookAt(0,.9,followZ);renderer.render(scene,camera)}
+        renderer.render(scene,camera)}
       function setActive(value){if(value===running)return;running=value;if(running){clock.getDelta();resize();frame=requestAnimationFrame(frameLoop)}else{cancelAnimationFrame(frame);shownZ=targetZ;bird.position.z=targetZ;jumpStart=0;hitTime=0;body.rotation.z=0;if(hitCar)hitCar.obj.position.x=-45;if(resolveCross){const done=resolveCross;resolveCross=null;done()}}}
       function setStep(step,animate){progressStep=Math.max(0,Math.min(8,Number(step)||0));targetZ=9.8-progressStep*2.84;if(!animate){shownZ=targetZ;bird.position.z=targetZ;body.rotation.z=0}}
       function cross(before,after,hit){setStep(after,true);if(!running){shownZ=targetZ;return Promise.resolve()}jumpStart=performance.now();if(hit){hitCar=traffic[after%traffic.length];hitTime=jumpStart;hitCar.obj.position.x=-8}return new Promise(resolve=>{resolveCross=resolve})}
-      camera.position.set(12.5,16.5,24+4.3);camera.lookAt(0,.9,4.3);
+      camera.position.set(26,26,-2.2);camera.lookAt(0,0,-2.2);
       return {setActive,setStep,cross};
     }
   })();

@@ -23,7 +23,6 @@ export const CHICKEN_CROSS_SECTION = String.raw`
     .cc-difficulties{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}.cc-difficulties button{height:42px;border-radius:11px;border:1px solid var(--line);background:#251e22;color:#cbbfc0;font:700 12px system-ui,sans-serif;transition:background .2s,transform .2s}.cc-difficulties button.active{background:#70434d;color:#fff;border-color:#aa737b}.cc-difficulties button:active,.cc-actions button:active{transform:scale(.98)}
     .cc-wager{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:8px;margin-bottom:14px}.cc-wager button,.cc-wager input{height:46px;border:1px solid var(--line);border-radius:12px;background:#251e22;color:#f2f5f1;font:750 17px system-ui,sans-serif;text-align:center;box-sizing:border-box;min-width:0}.cc-wager input{outline:none;font-variant-numeric:tabular-nums}.cc-wager input:focus{border-color:#b48289}.cc-wager button{font-size:22px}.cc-unit{position:relative}.cc-unit input{width:100%;padding:0 64px 0 15px}.cc-unit span{position:absolute;right:12px;top:16px;color:#b8a6a7;font:700 11px system-ui,sans-serif;pointer-events:none}
     .cc-actions{display:grid;grid-template-columns:1fr;gap:9px}.cc-actions.in-round{grid-template-columns:1.25fr .75fr}.cc-actions button{height:52px;border:0;border-radius:13px;font:750 15px system-ui,sans-serif;transition:transform .18s,opacity .18s}.cc-go{background:linear-gradient(160deg,#8b4c59,#542934);color:#fff;border:1px solid #a26671!important;box-shadow:inset 0 1px rgba(255,255,255,.15)}.cc-cash{display:none;background:#263c35;color:#d4f7e5;border:1px solid #466858!important}.cc-actions.in-round .cc-cash{display:block}.cc-actions button:disabled,.cc-difficulties button:disabled,.cc-wager input:disabled,.cc-wager button:disabled{opacity:.5}
-    .cc-proof{margin:11px 2px 0;font:600 10px/1.4 system-ui,sans-serif;color:#81908b;word-break:break-all}.cc-proof strong{color:#c4d6cb}
     @media(max-height:700px){.cc-page{min-height:470px}.cc-panel-inner{padding:13px}.cc-difficulties{margin-bottom:10px}}
     @media(prefers-reduced-motion:reduce){.cc-difficulties button,.cc-actions button{transition:none}}
   </style>
@@ -39,13 +38,12 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       <div class="cc-controls-label"><span>Bet amount</span><span>GRAM</span></div>
       <div class="cc-wager"><button type="button" data-cc-half aria-label="Halve bet">−</button><div class="cc-unit"><input data-cc-bet type="text" inputmode="decimal" value="0.1" aria-label="Bet amount in GRAM"><span>GRAM</span></div><button type="button" data-cc-double aria-label="Double bet">+</button></div>
       <div class="cc-actions" data-cc-actions><button type="button" class="cc-go" data-cc-go>Start crossing</button><button type="button" class="cc-cash" data-cc-cash>Cash out</button></div>
-      <div class="cc-proof" data-cc-proof>Server verified round · seed commitment shown after starting</div>
     </div></div>
   </div>
   <script type="module">
   (async function(){
     const root=document.getElementById('hilo');if(!root||root.dataset.ready)return;root.dataset.ready='1';
-    const q=(s)=>root.querySelector(s),stage=q('[data-cc-stage]'),loading=q('[data-cc-loading]'),go=q('[data-cc-go]'),cash=q('[data-cc-cash]'),actions=q('[data-cc-actions]'),input=q('[data-cc-bet]'),status=q('[data-cc-status]'),proof=q('[data-cc-proof]');
+    const q=(s)=>root.querySelector(s),stage=q('[data-cc-stage]'),loading=q('[data-cc-loading]'),go=q('[data-cc-go]'),cash=q('[data-cc-cash]'),actions=q('[data-cc-actions]'),input=q('[data-cc-bet]'),status=q('[data-cc-status]');
     const modes={easy:.93,medium:.84,hard:.72};let mode='easy',round=null,busy=false,engine=null,active=false,requestVersion=0;
     function tgData(){return String(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData||'')}
     function money(n){return (Math.round(n*10000)/10000).toFixed(4).replace(/0+$/,'').replace(/\.$/,'')}
@@ -55,7 +53,7 @@ export const CHICKEN_CROSS_SECTION = String.raw`
     function syncBalance(n){if(window.VexaTonBalance&&Number.isFinite(Number(n)))window.VexaTonBalance.write(Math.max(0,Math.floor(Number(n))),0)}
     async function api(path,body){const initData=tgData();if(!initData)throw Error('Open the Mini App in Telegram');const options=body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({initData},body))}:{headers:{'x-telegram-init-data':initData},cache:'no-store'};const response=await fetch('/app/api/chicken-cross/'+path,options);const data=await response.json().catch(()=>null);if(!response.ok)throw Error(data&&data.error||'Could not reach the game server');return data}
     function render(){const playing=round&&round.status==='active';actions.classList.toggle('in-round',!!playing);go.textContent=playing?'Cross next lane':'Start crossing';go.disabled=busy||!engine;cash.disabled=busy||!engine||!playing||round.step<1;input.disabled=busy||!!playing;q('[data-cc-half]').disabled=busy||!!playing;q('[data-cc-double]').disabled=busy||!!playing;
-      root.querySelectorAll('[data-cc-risk]').forEach(button=>{button.classList.toggle('active',button.dataset.ccRisk===mode);button.disabled=busy||!!playing});q('[data-cc-multiplier]').firstChild.nodeValue=(round?Number(round.multiplier):1).toFixed(2)+'×';q('[data-cc-next]').textContent=playing?'NEXT '+Number(round.nextMultiplier||1).toFixed(2)+'×':'NEXT '+Math.floor(.96/modes[mode]*100)/100+'×';q('[data-cc-counter]').textContent=(round?round.step:0)+' / 8';proof.innerHTML=round&&round.seedHash?'<strong>SHA-256</strong> '+round.seedHash+(round.seed?' · revealed':' · committed'):'Server verified round · seed commitment shown after starting';}
+      root.querySelectorAll('[data-cc-risk]').forEach(button=>{button.classList.toggle('active',button.dataset.ccRisk===mode);button.disabled=busy||!!playing});q('[data-cc-multiplier]').firstChild.nodeValue=(round?Number(round.multiplier):1).toFixed(2)+'×';q('[data-cc-next]').textContent=playing?'NEXT '+Number(round.nextMultiplier||1).toFixed(2)+'×':'NEXT '+Math.floor(.96/modes[mode]*100)/100+'×';q('[data-cc-counter]').textContent=(round?round.step:0)+' / 8';}
     function apply(data){if(data&&data.round){round=data.round;mode=round.difficulty;input.value=money(round.amountNano/1e9)}if(data&&data.tonBalanceNano!==undefined)syncBalance(data.tonBalanceNano);render()}
     function setBusy(value){busy=value;render()}
     async function start(){if(busy)return;const amount=betNano();if(!Number.isSafeInteger(amount)||amount<1000000||amount>20000000000){message('Bet must be between 0.001 and 20 GRAM','lose');return}setBusy(true);try{const data=await api('start',{amountNano:amount,difficulty:mode});apply(data);engine&&engine.setStep(round.step,false);message('Cross when the road is clear');haptic('light')}catch(e){message(e.message,'lose')}finally{setBusy(false)}}
@@ -105,7 +103,9 @@ export const CHICKEN_CROSS_SECTION = String.raw`
         for(const z of [-.52,.52]){box(.09,.18,.28,lampWhite,group,direction>0?2.09:-2.09,.68,z);box(.08,.15,.28,lampRed,group,direction>0?-2.09:2.09,.66,z)}
         return group}
       const colors=[0x51575c,0x6d3648,0x443d48,0x756b69,0x27292e,0x753e4a,0x4d4844,0x393338];const traffic=[];
-      for(let lane=0;lane<8;lane++){const z=7.78-lane*2.84,direction=lane<4?1:-1;for(let j=0;j<2;j++){const obj=car(colors[(lane+j*3)%colors.length],direction);const x=(j?21:-22)+(lane%3)*7;obj.position.set(x,0,z);traffic.push({obj,z,direction,speed:5.3+(lane*3+j*2)%5})}}
+      // One car per lane, all travelling along +X towards the camera; never put a car on a lane marking.
+      const carStarts=[-48,-15,-45,-12,-42,-9,-39,-6];
+      for(let lane=0;lane<8;lane++){const z=9.2-(lane+.5)*2.84,obj=car(colors[lane],1);obj.position.set(carStarts[lane],0,z);traffic.push({obj,z,speed:7})}
       // A realistic bird silhouette built from layered plumage, articulated legs and a subtle head turn.
       const bird=new T.Group();scene.add(bird);const feather=material(0xe2d8c5,0,.92),shade=material(0xc5bba9,0,.94),tip=material(0xb5a993,0,.96),dark=material(0x282a27,0,.55),beak=material(0x9a8064,0,.8),legMat=material(0x9a8268,0,.88),comb=material(0x96433c,0,.86);
       for(const plumage of [feather,shade,tip])texturedSurface(plumage,'float down=surfaceSoft(surfaceUv*11.0);float filaments=surfaceNoise(floor(surfaceUv*48.0));diffuseColor.rgb*=.87+down*.16+filaments*.05;');
@@ -123,21 +123,21 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       const legs=[];for(const x of [-.25,.25]){const leg=new T.Group();leg.position.set(x,.64,.16);body.add(leg);box(.09,.53,.09,legMat,leg,0,-.27,0);for(let j=-1;j<=1;j++)box(.052,.04,.34,legMat,leg,j*.09,-.53,-.15);legs.push(leg)}
       bird.position.set(0,.03,9.8);bird.rotation.y=0;
       // Face the road and follow the bird from left to right without turning the camera.
-      const cameraDistance=Math.hypot(28,9),roadWidth=20;
+      const cameraDistance=Math.hypot(24,8),roadWidth=18;
       const cameraCenter=(z)=>Math.max(-9.4,z-4);
       let cameraZ=cameraCenter(shownZ);
       function resize(){const r=container.getBoundingClientRect(),w=Math.max(1,r.width),h=Math.max(1,r.height);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(roadWidth/(2*cameraDistance*camera.aspect))*180/Math.PI;camera.updateProjectionMatrix()}
       const observer=new ResizeObserver(resize);observer.observe(container);resize();
-      function frameLoop(){if(!running)return;frame=requestAnimationFrame(frameLoop);const dt=Math.min(.05,clock.getDelta()),now=performance.now();for(const car of traffic){if(hitTime&&car===hitCar)continue;car.obj.position.x+=car.speed*car.direction*dt;if(car.obj.position.x>53)car.obj.position.x=-53;if(car.obj.position.x< -53)car.obj.position.x=53}
+      function frameLoop(){if(!running)return;frame=requestAnimationFrame(frameLoop);const dt=Math.min(.05,clock.getDelta()),now=performance.now();for(const car of traffic){if(hitTime&&car===hitCar)continue;car.obj.position.x+=car.speed*dt;if(car.obj.position.x>7)car.obj.position.x=-53}
         shownZ+=(targetZ-shownZ)*Math.min(1,dt*7);bird.position.z=shownZ;let hop=0;if(jumpStart){const t=Math.min(1,(now-jumpStart)/630);hop=Math.sin(t*Math.PI)*.46;body.rotation.x=Math.sin(t*Math.PI)*-.13;legs[0].rotation.x=Math.sin(t*Math.PI*2)*.5;legs[1].rotation.x=-legs[0].rotation.x;if(t===1){jumpStart=0;body.rotation.x=0;legs.forEach(l=>l.rotation.x=0);if(resolveCross){const done=resolveCross;resolveCross=null;done()}}}
         bird.position.y=.03+hop;head.rotation.y=Math.sin(now*.0008)*.08;
-        if(hitTime&&hitCar){const p=Math.min(1,(now-hitTime)/820);hitCar.obj.position.x=-8+9*p;hitCar.obj.position.z=targetZ;body.rotation.z=p> .55?(p-.55)*1.6:0;if(p===1){hitTime=0;hitCar.obj.position.x=-45}}
+        if(hitTime&&hitCar){const p=Math.min(1,(now-hitTime)/820);hitCar.obj.position.x=-8+9*p;body.rotation.z=p> .55?(p-.55)*1.6:0;if(p===1){hitTime=0;hitCar.obj.position.x=-45}}
         else body.rotation.z*=.85;
         cameraZ+=(cameraCenter(shownZ)-cameraZ)*(1-Math.exp(-dt*3));camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ);renderer.render(scene,camera)}
       function setActive(value){if(value===running)return;running=value;if(running){clock.getDelta();resize();frame=requestAnimationFrame(frameLoop)}else{cancelAnimationFrame(frame);shownZ=targetZ;bird.position.z=targetZ;jumpStart=0;hitTime=0;body.rotation.z=0;if(hitCar)hitCar.obj.position.x=-45;if(resolveCross){const done=resolveCross;resolveCross=null;done()}}}
       function setStep(step,animate){progressStep=Math.max(0,Math.min(8,Number(step)||0));targetZ=9.8-progressStep*2.84;if(!animate){shownZ=targetZ;bird.position.z=targetZ;body.rotation.z=0;cameraZ=cameraCenter(targetZ);camera.position.z=cameraZ;camera.lookAt(0,0,cameraZ)}}
-      function cross(before,after,hit){setStep(after,true);if(!running){shownZ=targetZ;return Promise.resolve()}jumpStart=performance.now();if(hit){hitCar=traffic[after%traffic.length];hitTime=jumpStart;hitCar.obj.position.x=-8}return new Promise(resolve=>{resolveCross=resolve})}
-      camera.position.set(28,9,cameraZ);camera.lookAt(0,0,cameraZ);
+      function cross(before,after,hit){setStep(after,true);if(!running){shownZ=targetZ;return Promise.resolve()}jumpStart=performance.now();if(hit){hitCar=traffic[(after-1)%traffic.length];hitTime=jumpStart;hitCar.obj.position.x=-8}return new Promise(resolve=>{resolveCross=resolve})}
+      camera.position.set(24,8,cameraZ);camera.lookAt(0,0,cameraZ);
       return {setActive,setStep,cross};
     }
   })();

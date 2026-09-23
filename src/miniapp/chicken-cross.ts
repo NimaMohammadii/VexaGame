@@ -3,21 +3,21 @@ export const CHICKEN_CROSS_SECTION = String.raw`
 <section id="hilo" class="view cc-view" aria-label="Chicken Cross">
   <style>
     body:has(#hilo.active) .tabs{display:none!important}
-    body:has(#hilo.active) .app,body:has(#hilo.active) .content,body:has(#hilo.active) header.top{background:#100b0e!important}
+    body:has(#hilo.active) .app,body:has(#hilo.active) .content,body:has(#hilo.active) header.top{background:#080b0d!important}
     body:has(#hilo.active) .app{display:flex;flex-direction:column;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
     body:has(#hilo.active) header.top{flex-shrink:0}
     body:has(#hilo.active) [data-lazy-section-host="hilo"]{flex:1;min-height:0}
-    .cc-view{--line:rgba(203,159,161,.24);height:100%;overflow-y:auto!important;overflow-x:hidden;color:#f1f2ed;background:#100b0e!important;padding:0;box-sizing:border-box;-webkit-overflow-scrolling:touch}
+    .cc-view{--line:rgba(203,159,161,.17);height:100%;overflow-y:auto!important;overflow-x:hidden;color:#f1f2ed;background:#080b0d!important;padding:0;box-sizing:border-box;-webkit-overflow-scrolling:touch}
     .cc-page{width:min(100%,520px);height:100%;min-height:520px;margin:auto;display:grid;grid-template-rows:minmax(210px,1fr) auto}
-    .cc-stage{min-height:210px;position:relative;overflow:hidden;background:linear-gradient(#21151c,#100b0e 70%);isolation:isolate}
+    .cc-stage{min-height:210px;position:relative;overflow:hidden;background:linear-gradient(#182029,#080b0d 65%);isolation:isolate}
     .cc-stage canvas{width:100%;height:100%;display:block;touch-action:none}
-    .cc-stage:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(16,7,12,.2),transparent 19%,transparent 76%,#100b0e 100%);z-index:2}
+    .cc-stage:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(4,7,10,.33),transparent 19%,transparent 72%,#080b0d 100%);z-index:2}
     .cc-topline{position:absolute;z-index:4;top:20px;left:20px;right:20px;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none;text-shadow:0 2px 12px #000}
     .cc-multiplier{font:750 42px/1 system-ui,sans-serif;letter-spacing:-.055em;font-variant-numeric:tabular-nums}.cc-multiplier small{display:block;margin-top:7px;font:700 10px system-ui,sans-serif;letter-spacing:.13em;color:#b5c0bb;text-transform:uppercase}
     .cc-counter{padding:8px 12px;border:1px solid rgba(178,108,114,.35);border-radius:100px;background:rgba(28,14,20,.7);font:700 11px system-ui,sans-serif;letter-spacing:.12em;backdrop-filter:blur(8px)}
     .cc-status{position:absolute;z-index:4;left:18px;right:18px;bottom:24px;min-height:19px;text-align:center;font:650 13px system-ui,sans-serif;color:#e6e9e6;text-shadow:0 2px 9px #000}.cc-status.win{color:#a9efc7}.cc-status.lose{color:#ffadb1}
-    .cc-loading{position:absolute;inset:0;z-index:5;display:grid;place-content:center;text-align:center;gap:9px;background:#1b1117;color:#c9d2d1;font:650 12px system-ui,sans-serif;letter-spacing:.1em;transition:opacity .4s,visibility .4s}.cc-loading.ready{opacity:0;visibility:hidden;pointer-events:none}.cc-loading b{font-size:18px;letter-spacing:0;color:white}
-    .cc-panel{position:relative;z-index:3;padding:4px 18px 20px;background:#100b0e}
+    .cc-loading{position:absolute;inset:0;z-index:5;display:grid;place-content:center;text-align:center;gap:9px;background:#10171a;color:#c9d2d1;font:650 12px system-ui,sans-serif;letter-spacing:.1em;transition:opacity .4s,visibility .4s}.cc-loading.ready{opacity:0;visibility:hidden;pointer-events:none}.cc-loading b{font-size:18px;letter-spacing:0;color:white}
+    .cc-panel{position:relative;z-index:3;padding:4px 18px 20px;background:#080b0d}
     .cc-panel-inner{border:1px solid var(--line);border-radius:21px;background:linear-gradient(160deg,#21171b,#141215 65%,#101012);box-shadow:inset 0 1px rgba(255,255,255,.06),0 14px 26px rgba(0,0,0,.22);padding:17px}
     .cc-controls-label{display:flex;justify-content:space-between;color:#a6b0ae;text-transform:uppercase;letter-spacing:.11em;font:700 10px system-ui,sans-serif;margin-bottom:10px}
     .cc-difficulties{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}.cc-difficulties button{height:42px;border-radius:11px;border:1px solid var(--line);background:#251e22;color:#cbbfc0;font:700 12px system-ui,sans-serif;transition:background .2s,transform .2s}.cc-difficulties button.active{background:#70434d;color:#fff;border-color:#aa737b}.cc-difficulties button:active,.cc-actions button:active{transform:scale(.98)}
@@ -79,9 +79,9 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       const material=(color,metalness=0,roughness=.72)=>new T.MeshStandardMaterial({color,metalness,roughness});
       // Object-space procedural surfaces stay sharp at every camera distance and need no downloaded images.
       function texturedSurface(mat,fragment){mat.onBeforeCompile=shader=>{shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 surfaceUv;').replace('#include <begin_vertex>','#include <begin_vertex>\nsurfaceUv=position.xz;');shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 surfaceUv;\nfloat surfaceNoise(vec2 p){vec3 v=fract(vec3(p.xyx)*.1031);v+=dot(v,v.yzx+33.33);return fract((v.x+v.y)*v.z);}\nfloat surfaceSoft(vec2 p){vec2 c=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(surfaceNoise(c),surfaceNoise(c+vec2(1.0,0.0)),f.x),mix(surfaceNoise(c+vec2(0.0,1.0)),surfaceNoise(c+vec2(1.0,1.0)),f.x),f.y);}').replace('#include <color_fragment>','#include <color_fragment>\n'+fragment)}}
-      const asphalt=material(0x38353a,.07,.78);texturedSurface(asphalt,'float aggregate=surfaceNoise(floor(surfaceUv*12.0));float fine=surfaceNoise(floor(surfaceUv*38.0));float wear=surfaceSoft(surfaceUv*.55);float lane=fract((surfaceUv.y+10.0)/2.84);float track=min(abs(lane-.28),abs(lane-.72));float tireWear=1.0-smoothstep(.035,.13,track);diffuseColor.rgb*=.74+aggregate*.19+fine*.09+wear*.16-tireWear*.10;');
-      const paving=material(0x302a2e,0,.98),stone=material(0x8d7e7d,0,.88);texturedSurface(stone,'float grain=surfaceNoise(floor(surfaceUv*26.0));float mottling=surfaceSoft(surfaceUv*3.0);diffuseColor.rgb*=.77+grain*.10+mottling*.18;');
-      const line=material(0xbab2ae,0,.86),yellow=material(0xba9c7a,0,.85),curbMat=material(0x70595d,0,.85),grass=material(0x29292a,0,.98);
+      const asphalt=material(0x383039,.07,.78);texturedSurface(asphalt,'float aggregate=surfaceNoise(floor(surfaceUv*12.0));float fine=surfaceNoise(floor(surfaceUv*38.0));float wear=surfaceSoft(surfaceUv*.55);float lane=fract((surfaceUv.y+10.0)/2.84);float track=min(abs(lane-.28),abs(lane-.72));float tireWear=1.0-smoothstep(.035,.13,track);diffuseColor.rgb*=.74+aggregate*.19+fine*.09+wear*.16-tireWear*.10;');
+      const paving=material(0x30272d,0,.98),stone=material(0x826e75,0,.88);texturedSurface(stone,'float grain=surfaceNoise(floor(surfaceUv*26.0));float mottling=surfaceSoft(surfaceUv*3.0);diffuseColor.rgb*=.77+grain*.10+mottling*.18;');
+      const line=material(0xbab2ae,0,.86),yellow=material(0xba9c7a,0,.85),curbMat=material(0x765860,0,.85),grass=material(0x24302a,0,.98);
       texturedSurface(grass,'float clumps=surfaceSoft(surfaceUv*3.5);float blades=surfaceNoise(floor(surfaceUv*30.0));diffuseColor.rgb*=.66+clumps*.24+blades*.18;');
       function mesh(geometry,mat,parent,x=0,y=0,z=0){const obj=new T.Mesh(geometry,mat);obj.position.set(x,y,z);obj.receiveShadow=true;parent.add(obj);return obj}
       function box(w,h,d,mat,parent,x,y,z){return mesh(new T.BoxGeometry(w,h,d),mat,parent,x,y,z)}
@@ -104,7 +104,7 @@ export const CHICKEN_CROSS_SECTION = String.raw`
         for(const x of [-1.27,1.22])for(const z of [-.82,.82]){const wheel=mesh(tireGeometry,tire,group,x,.38,z);wheel.rotation.x=Math.PI/2;const hub=mesh(rimGeometry,rim,group,x,.38,z+(z>0?.012:-.012));hub.rotation.x=Math.PI/2;}
         for(const z of [-.52,.52]){box(.09,.18,.28,lampWhite,group,direction>0?2.09:-2.09,.68,z);box(.08,.15,.28,lampRed,group,direction>0?-2.09:2.09,.66,z)}
         return group}
-      const colors=[0x555e65,0x714942,0x3b4f5b,0x807b70,0x24292b,0x60605a,0x3f4a43,0x55515a];const traffic=[];
+      const colors=[0x51575c,0x6d3648,0x443d48,0x756b69,0x27292e,0x753e4a,0x4d4844,0x393338];const traffic=[];
       for(let lane=0;lane<8;lane++){const z=7.78-lane*2.84,direction=lane<4?1:-1;for(let j=0;j<2;j++){const obj=car(colors[(lane+j*3)%colors.length],direction);const x=(j?21:-22)+(lane%3)*7;obj.position.set(x,0,z);traffic.push({obj,z,direction,speed:5.3+(lane*3+j*2)%5})}}
       // A realistic bird silhouette built from layered plumage, articulated legs and a subtle head turn.
       const bird=new T.Group();scene.add(bird);const feather=material(0xe2d8c5,0,.92),shade=material(0xc5bba9,0,.94),tip=material(0xb5a993,0,.96),dark=material(0x282a27,0,.55),beak=material(0x9a8064,0,.8),legMat=material(0x9a8268,0,.88),comb=material(0x96433c,0,.86);

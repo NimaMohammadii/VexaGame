@@ -4,12 +4,12 @@ export const CHICKEN_CROSS_SECTION = String.raw`
   <style>
     body:has(#hilo.active) .tabs{display:none!important}
     body:has(#hilo.active) .app,body:has(#hilo.active) .content,body:has(#hilo.active) header.top{background:#080b0d!important}
-    body:has(#hilo.active) .app{display:flex;flex-direction:column;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
-    body:has(#hilo.active) header.top{flex-shrink:0}
-    body:has(#hilo.active) [data-lazy-section-host="hilo"]{flex:1;min-height:0}
-    .cc-view{--line:rgba(203,159,161,.17);height:100%;overflow-y:auto!important;overflow-x:hidden;color:#f1f2ed;background:#080b0d!important;padding:0;box-sizing:border-box;-webkit-overflow-scrolling:touch}
-    .cc-page{width:min(100%,520px);height:100%;min-height:520px;margin:auto;display:grid;grid-template-rows:minmax(210px,1fr) auto}
-    .cc-stage{min-height:210px;position:relative;overflow:hidden;background:linear-gradient(#182029,#080b0d 65%);isolation:isolate}
+    body:has(#hilo.active) .app{display:flex;flex-direction:column;padding-right:0;padding-bottom:env(safe-area-inset-bottom);padding-left:0}
+    body:has(#hilo.active) header.top{flex-shrink:0;margin-right:16px;margin-left:16px}
+    body:has(#hilo.active) [data-lazy-section-host="hilo"]{width:100%;flex:1;min-height:0;overflow:hidden}
+    .cc-view{--line:rgba(203,159,161,.17);width:100%;height:100%;min-height:0;overflow:hidden!important;color:#f1f2ed;background:#080b0d!important;padding:0;box-sizing:border-box}
+    .cc-page{width:100%;max-width:none;height:100%;min-height:0;margin:0;display:grid;grid-template-rows:minmax(190px,1fr) auto}
+    .cc-stage{min-height:190px;position:relative;overflow:hidden;background:linear-gradient(#182029,#080b0d 65%);isolation:isolate}
     .cc-stage canvas{width:100%;height:100%;display:block;touch-action:none}
     .cc-stage:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(4,7,10,.33),transparent 19%,transparent 72%,#080b0d 100%);z-index:2}
     .cc-topline{position:absolute;z-index:4;top:20px;left:20px;right:20px;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none;text-shadow:0 2px 12px #000}
@@ -17,14 +17,14 @@ export const CHICKEN_CROSS_SECTION = String.raw`
     .cc-counter{padding:8px 12px;border:1px solid rgba(178,108,114,.35);border-radius:100px;background:rgba(28,14,20,.7);font:700 11px system-ui,sans-serif;letter-spacing:.12em;backdrop-filter:blur(8px)}
     .cc-status{position:absolute;z-index:4;left:18px;right:18px;bottom:24px;min-height:19px;text-align:center;font:650 13px system-ui,sans-serif;color:#e6e9e6;text-shadow:0 2px 9px #000}.cc-status.win{color:#a9efc7}.cc-status.lose{color:#ffadb1}
     .cc-loading{position:absolute;inset:0;z-index:5;display:grid;place-content:center;text-align:center;gap:9px;background:#10171a;color:#c9d2d1;font:650 12px system-ui,sans-serif;letter-spacing:.1em;transition:opacity .4s,visibility .4s}.cc-loading.ready{opacity:0;visibility:hidden;pointer-events:none}.cc-loading b{font-size:18px;letter-spacing:0;color:white}
-    .cc-panel{position:relative;z-index:3;padding:4px 18px 20px;background:#080b0d}
+    .cc-panel{position:relative;z-index:3;padding:4px 18px 10px;background:#080b0d}
     .cc-panel-inner{border:1px solid var(--line);border-radius:21px;background:linear-gradient(160deg,#21171b,#141215 65%,#101012);box-shadow:inset 0 1px rgba(255,255,255,.06),0 14px 26px rgba(0,0,0,.22);padding:17px}
     .cc-controls-label{display:flex;justify-content:space-between;color:#a6b0ae;text-transform:uppercase;letter-spacing:.11em;font:700 10px system-ui,sans-serif;margin-bottom:10px}
     .cc-difficulties{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}.cc-difficulties button{height:42px;border-radius:11px;border:1px solid var(--line);background:#251e22;color:#cbbfc0;font:700 12px system-ui,sans-serif;transition:background .2s,transform .2s}.cc-difficulties button.active{background:#70434d;color:#fff;border-color:#aa737b}.cc-difficulties button:active,.cc-actions button:active{transform:scale(.98)}
     .cc-wager{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:8px;margin-bottom:14px}.cc-wager button,.cc-wager input{height:46px;border:1px solid var(--line);border-radius:12px;background:#251e22;color:#f2f5f1;font:750 17px system-ui,sans-serif;text-align:center;box-sizing:border-box;min-width:0}.cc-wager input{outline:none;font-variant-numeric:tabular-nums}.cc-wager input:focus{border-color:#b48289}.cc-wager button{font-size:22px}.cc-unit{position:relative}.cc-unit input{width:100%;padding:0 64px 0 15px}.cc-unit span{position:absolute;right:12px;top:16px;color:#b8a6a7;font:700 11px system-ui,sans-serif;pointer-events:none}
-    .cc-decision{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px;color:#b9abae;font:650 11px system-ui,sans-serif}.cc-decision strong{color:#f2f5f1;font:750 14px system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right}.cc-decision[hidden],.cc-setup[hidden]{display:none}
-    .cc-actions{display:grid;grid-template-columns:1fr;gap:9px}.cc-actions.in-round{grid-template-columns:1.25fr .75fr}.cc-actions button{height:52px;border:0;border-radius:13px;font:750 15px system-ui,sans-serif;transition:transform .18s,opacity .18s}.cc-go{background:linear-gradient(160deg,#8b4c59,#542934);color:#fff;border:1px solid #a26671!important;box-shadow:inset 0 1px rgba(255,255,255,.15)}.cc-cash{display:none;background:#263c35;color:#d4f7e5;border:1px solid #466858!important}.cc-actions.in-round .cc-cash{display:block}.cc-actions button:disabled,.cc-difficulties button:disabled,.cc-wager input:disabled,.cc-wager button:disabled{opacity:.5}
-    @media(max-height:700px){.cc-page{min-height:470px}.cc-panel-inner{padding:13px}.cc-difficulties{margin-bottom:10px}}
+    .cc-decision{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px;color:#b9abae;font:650 11px system-ui,sans-serif}.cc-decision strong{color:#f2f5f1;font:750 14px system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right}
+    .cc-actions{display:grid;grid-template-columns:1.25fr .75fr;gap:9px}.cc-actions button{height:52px;border:0;border-radius:13px;font:750 15px system-ui,sans-serif;transition:transform .18s,opacity .18s}.cc-go{background:linear-gradient(160deg,#8b4c59,#542934);color:#fff;border:1px solid #a26671!important;box-shadow:inset 0 1px rgba(255,255,255,.15)}.cc-cash{display:block;background:#263c35;color:#d4f7e5;border:1px solid #466858!important}.cc-actions button:disabled{opacity:.5}
+    @media(max-height:700px){.cc-panel-inner{padding:13px}.cc-difficulties{margin-bottom:10px}}
     @media(prefers-reduced-motion:reduce){.cc-difficulties button,.cc-actions button{transition:none}}
   </style>
   <div class="cc-page">
@@ -40,14 +40,14 @@ export const CHICKEN_CROSS_SECTION = String.raw`
         <div class="cc-controls-label"><span>Bet amount</span><span>GRAM</span></div>
         <div class="cc-wager"><button type="button" data-cc-half aria-label="Halve bet">−</button><div class="cc-unit"><input data-cc-bet type="text" inputmode="decimal" value="0.1" aria-label="Bet amount in GRAM"><span>GRAM</span></div><button type="button" data-cc-double aria-label="Double bet">+</button></div>
       </div>
-      <div class="cc-decision" data-cc-decision hidden><span>Cash out now</span><strong data-cc-quote>Cross one lane first</strong></div>
+      <div class="cc-decision" data-cc-decision><span>Cash out now</span><strong data-cc-quote>Cross one lane first</strong></div>
       <div class="cc-actions" data-cc-actions><button type="button" class="cc-go" data-cc-go>Start crossing</button><button type="button" class="cc-cash" data-cc-cash>Cash out</button></div>
     </div></div>
   </div>
   <script type="module">
   (async function(){
     const root=document.getElementById('hilo');if(!root||root.dataset.ready)return;root.dataset.ready='1';
-    const q=(s)=>root.querySelector(s),stage=q('[data-cc-stage]'),loading=q('[data-cc-loading]'),go=q('[data-cc-go]'),cash=q('[data-cc-cash]'),actions=q('[data-cc-actions]'),input=q('[data-cc-bet]'),status=q('[data-cc-status]'),setup=q('[data-cc-setup]'),decision=q('[data-cc-decision]'),quote=q('[data-cc-quote]');
+    const q=(s)=>root.querySelector(s),stage=q('[data-cc-stage]'),loading=q('[data-cc-loading]'),go=q('[data-cc-go]'),cash=q('[data-cc-cash]'),input=q('[data-cc-bet]'),status=q('[data-cc-status]'),quote=q('[data-cc-quote]');
     let mode='easy',round=null,busy=false,engine=null,active=false,requestVersion=0;
     function tgData(){return String(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData||'')}
     function money(n){return (Math.round(n*10000)/10000).toFixed(4).replace(/0+$/,'').replace(/\.$/,'')}
@@ -56,13 +56,13 @@ export const CHICKEN_CROSS_SECTION = String.raw`
     function betNano(){return Math.floor(Number(String(input.value).replace(',','.'))*1e9)}
     function syncBalance(n){if(window.VexaTonBalance&&Number.isFinite(Number(n)))window.VexaTonBalance.write(Math.max(0,Math.floor(Number(n))),0)}
     async function api(path,body){const initData=tgData();if(!initData)throw Error('Open the Mini App in Telegram');const options=body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({initData},body))}:{headers:{'x-telegram-init-data':initData},cache:'no-store'};const response=await fetch('/app/api/chicken-cross/'+path,options);const data=await response.json().catch(()=>null);if(!response.ok)throw Error(data&&data.error||'Could not reach the game server');return data}
-    function render(){const playing=round&&round.status==='active';setup.hidden=!!playing;decision.hidden=!playing;actions.classList.toggle('in-round',!!playing);go.textContent=playing?'Cross next lane':'Start crossing';go.disabled=busy||!engine;cash.disabled=busy||!engine||!playing||round.step<1;quote.textContent=playing&&round.step>0&&Number.isSafeInteger(round.cashoutQuoteNano)?'≈ '+money(round.cashoutQuoteNano/1e9)+' GRAM':'Cross one lane first';input.disabled=busy||!!playing;q('[data-cc-half]').disabled=busy||!!playing;q('[data-cc-double]').disabled=busy||!!playing;
+    function render(){const playing=round&&round.status==='active';go.textContent=playing?'Cross next lane':'Start crossing';go.disabled=busy||!engine;cash.disabled=busy||!engine||!playing||round.step<1;quote.textContent=playing&&round.step>0&&Number.isSafeInteger(round.cashoutQuoteNano)?'≈ '+money(round.cashoutQuoteNano/1e9)+' GRAM':'Cross one lane first';input.disabled=busy||!!playing;q('[data-cc-half]').disabled=busy||!!playing;q('[data-cc-double]').disabled=busy||!!playing;
       root.querySelectorAll('[data-cc-risk]').forEach(button=>{button.classList.toggle('active',button.dataset.ccRisk===mode);button.disabled=busy||!!playing});q('[data-cc-multiplier]').firstChild.nodeValue=round&&round.status==='lost'?'0.00×':(round?Number(round.multiplier):1).toFixed(2)+'×';q('[data-cc-next]').textContent=playing?'NEXT '+Number(round.nextMultiplier).toFixed(2)+'×':round&&round.status==='lost'?'ROUND ENDED':round&&round.status==='cashed'?'CASHED OUT':'NEXT CROSSING';q('[data-cc-counter]').textContent=(round?round.step:0)+' / 8';}
     function apply(data){if(data&&data.round){round=data.round;mode=round.difficulty;input.value=money(round.amountNano/1e9)}if(data&&data.tonBalanceNano!==undefined)syncBalance(data.tonBalanceNano);render()}
     function setBusy(value){busy=value;render()}
     async function start(){if(busy)return;const amount=betNano();if(!Number.isSafeInteger(amount)||amount<1000000||amount>20000000000){message('Bet must be between 0.001 and 20 GRAM','lose');return}setBusy(true);try{const data=await api('start',{amountNano:amount,difficulty:mode});apply(data);engine&&engine.setStep(round.step,false);message('Each crossing risks the round · choose your next step');haptic('light')}catch(e){message(e.message,'lose')}finally{setBusy(false)}}
     async function cross(){if(busy||!round||round.status!=='active')return;setBusy(true);const previous=round.step,movement=engine?engine.move(previous+1):Promise.resolve();message('Crossing…');haptic('light');try{const data=await api('step',{roundId:round.id});await movement;if(data.event==='sync'){apply(data);engine&&engine.setStep(round.step,false)}else if(data.event==='hit'){if(engine)await engine.hit(data.round.step);apply(data);engine&&engine.setStep(0,false)}else{apply(data);engine&&engine.confirmStep(data.round.step)}if(data.event==='hit'){message('Hit by traffic · round ended','lose');haptic('error')}else if(data.event==='finish'){message('All lanes crossed · payout credited','win');haptic('success')}else if(data.event==='safe')message('Safe · cash out or cross again');else message('Round updated');}catch(e){message(e.message,'lose');await restore()}finally{setBusy(false)}}
-    async function cashOut(){if(busy||!round)return;setBusy(true);try{const data=await api('cashout',{roundId:round.id});apply(data);if(round.status==='cashed'){message('Cashed out '+money(round.payoutNano/1e9)+' GRAM','win');haptic('success')}else message('Round updated · choose your next move')}catch(e){message(e.message,'lose');await restore()}finally{setBusy(false)}}
+    async function cashOut(){if(busy||!round)return;setBusy(true);try{const data=await api('cashout',{roundId:round.id});apply(data);if(round.status==='cashed'){engine&&engine.setStep(0,false);message('Cashed out '+money(round.payoutNano/1e9)+' GRAM','win');haptic('success')}else message('Round updated · choose your next move')}catch(e){message(e.message,'lose');await restore()}finally{setBusy(false)}}
     async function restore(){if(!tgData())return;const version=++requestVersion;try{const data=await api('state');if(version!==requestVersion)return;round=data.round||null;if(round)apply(data);else render();engine&&engine.setStep(round&&round.status==='active'?round.step:0,false);if(round&&round.status==='active')message('Round restored · cross or cash out')}catch(e){message(e.message,'lose')}}
     root.querySelectorAll('[data-cc-risk]').forEach(button=>button.addEventListener('click',()=>{if(busy||round&&round.status==='active')return;mode=button.dataset.ccRisk;render();haptic('light')}));
     q('[data-cc-half]').addEventListener('click',()=>{input.value=money(Math.max(.001,(Number(input.value)||.1)/2))});q('[data-cc-double]').addEventListener('click',()=>{input.value=money(Math.min(20,(Number(input.value)||.1)*2))});
@@ -200,7 +200,7 @@ export const CHICKEN_CROSS_SECTION = String.raw`
       const birdGround=-.14;bird.position.set(0,birdGround,9.8);bird.rotation.y=0;
       // Face the road and follow the bird from left to right without turning the camera.
       const cameraDistance=Math.hypot(24,8),roadWidth=18;
-      const cameraCenter=(z)=>Math.max(-9.4,z-4);
+      const cameraCenter=(z)=>z-(progressStep>0?4.7:4);
       let cameraZ=cameraCenter(shownZ);
       function resize(){const r=container.getBoundingClientRect(),w=Math.max(1,r.width),h=Math.max(1,r.height);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,w<=520?2.5:2));renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(roadWidth/(2*cameraDistance*camera.aspect))*180/Math.PI;camera.updateProjectionMatrix()}
       const observer=new ResizeObserver(resize);observer.observe(container);resize();

@@ -68,7 +68,7 @@ export const DEFAULT_PLINKO_CONTROL: PlinkoControlConfig = {
       high: riskConfig([170, 24, 8.1, 2, 0.7, 0.2, 0.2, 0.2, 0.7, 2, 8.1, 24, 170], WEIGHTS_12),
     },
     '16': {
-      low: riskConfig([16, 5, 2.5, 1.6, 1.2, 1.09, 1.05, 1.1, 0.5, 1.1, 1.05, 1.09, 1.2, 1.6, 2.5, 5, 16], WEIGHTS_16),
+      low: riskConfig([16, 5, 2.5, 1.6, 1.2, 1.09, 1.05, 1, 0.5, 1, 1.05, 1.09, 1.2, 1.6, 2.5, 5, 16], WEIGHTS_16),
       medium: riskConfig([110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3, 0.5, 1, 1.5, 3, 5, 10, 41, 110], WEIGHTS_16),
       high: riskConfig([1000, 130, 26, 9, 4, 2, 0.2, 0.2, 0.2, 0.2, 0.2, 2, 4, 9, 26, 130, 1000], WEIGHTS_16),
     },
@@ -166,6 +166,8 @@ function normalizePlinkoConfig(input: any): PlinkoControlConfig {
       };
     }
   }
+  out.rows['16'].low.multipliers[7] = 1;
+  out.rows['16'].low.multipliers[9] = 1;
   return out;
 }
 

@@ -8,7 +8,6 @@ export const PLINKO_SCRIPT = `
   var credit = readPoints();
   var iconUrl = '/assets/plinko-glass/ball.webp?v=1';
   var pegVisualUrl = '/assets/plinko-glass/peg.webp?v=1';
-  var houseStripUrl = '/assets/plinko-glass/houses.webp?v=1';
   var control = null;
   var lastStamp = '';
   var lastLoadAt = 0;
@@ -233,7 +232,7 @@ export const PLINKO_SCRIPT = `
     iconUrl = url || iconUrl;
     if (state && state.tokenImg && state.tokenImg.src !== iconUrl) state.tokenImg.src = iconUrl;
   }
-  function loadHouseImage(url) {
+  function loadVisualImage(url) {
     if (!url) return null;
     var img = new Image();
     img.onload = function () {
@@ -385,24 +384,87 @@ export const PLINKO_SCRIPT = `
     ctx.stroke();
     ctx.restore();
   }
-  function drawBin(ctx, bin) {
-    var r = Math.min(9, Math.max(5, bin.w * 0.24));
+  function drawBin(ctx, bin, index, count) {
+    var middle = (count - 1) / 2;
+    var selected = Math.abs(index - middle) < 0.6;
+    var cellWidth = 352 / count;
+    var x = 12 + index * cellWidth + 0.7;
+    var y = 252.5;
+    var w = cellWidth - 1.4;
+    var h = 31;
+    var r = Math.min(8.5, Math.max(4.5, w * 0.23));
     ctx.save();
-    roundRect(ctx, bin.x, bin.y, bin.w, bin.h, r);
-    ctx.strokeStyle = 'rgba(255,255,255,.34)';
-    ctx.lineWidth = 0.9;
+
+    ctx.shadowColor = selected ? 'rgba(255,18,82,.68)' : 'rgba(0,0,0,.82)';
+    ctx.shadowBlur = selected ? 8 : 5;
+    ctx.shadowOffsetY = selected ? 2 : 3;
+    roundRect(ctx, x, y, w, h, r);
+    var body = ctx.createLinearGradient(0, y, 0, y + h);
+    if (selected) {
+      body.addColorStop(0, 'rgba(113,8,43,.99)');
+      body.addColorStop(0.28, 'rgba(67,2,24,.99)');
+      body.addColorStop(0.7, 'rgba(24,3,12,.99)');
+      body.addColorStop(1, 'rgba(73,5,29,.99)');
+    } else {
+      body.addColorStop(0, 'rgba(42,24,30,.98)');
+      body.addColorStop(0.3, 'rgba(21,12,16,.99)');
+      body.addColorStop(0.72, 'rgba(10,7,9,.99)');
+      body.addColorStop(1, 'rgba(31,16,22,.99)');
+    }
+    ctx.fillStyle = body;
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    roundRect(ctx, x + 0.45, y + 0.45, w - 0.9, h - 0.9, Math.max(3.5, r - 0.45));
+    var edge = ctx.createLinearGradient(x, y, x + w, y + h);
+    edge.addColorStop(0, selected ? 'rgba(255,176,197,.88)' : 'rgba(255,231,237,.54)');
+    edge.addColorStop(0.34, selected ? 'rgba(255,52,108,.76)' : 'rgba(157,91,108,.30)');
+    edge.addColorStop(0.68, 'rgba(53,17,28,.22)');
+    edge.addColorStop(1, selected ? 'rgba(255,36,96,.72)' : 'rgba(111,51,68,.42)');
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = selected ? 1.3 : 0.9;
     ctx.stroke();
-    roundRect(ctx, bin.x + 1.6, bin.y + 1.6, bin.w - 3.2, bin.h - 3.2, Math.max(3, r - 1.6));
-    ctx.strokeStyle = 'rgba(255,255,255,.13)';
-    ctx.lineWidth = 0.55;
-    ctx.stroke();
+
+    ctx.save();
+    roundRect(ctx, x + 1.2, y + 1.2, w - 2.4, h - 2.4, Math.max(3, r - 1.2));
+    ctx.clip();
+    var sheen = ctx.createLinearGradient(0, y, 0, y + 13);
+    sheen.addColorStop(0, selected ? 'rgba(255,199,213,.20)' : 'rgba(255,255,255,.13)');
+    sheen.addColorStop(0.5, selected ? 'rgba(255,58,111,.07)' : 'rgba(255,255,255,.035)');
+    sheen.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(x, y, w, 13);
+    if (selected) {
+      var glow = ctx.createRadialGradient(x + w / 2, y + h, 0, x + w / 2, y + h, w * 0.9);
+      glow.addColorStop(0, 'rgba(255,24,86,.34)');
+      glow.addColorStop(1, 'rgba(255,24,86,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(x, y + h * 0.38, w, h * 0.62);
+    }
+    ctx.restore();
+
     ctx.beginPath();
-    ctx.moveTo(bin.x + Math.min(5, bin.w * 0.18), bin.y + 3.2);
-    ctx.lineTo(bin.x + bin.w - Math.min(5, bin.w * 0.18), bin.y + 3.2);
-    ctx.strokeStyle = 'rgba(255,255,255,.28)';
-    ctx.lineWidth = 0.7;
+    ctx.moveTo(x + Math.min(5, w * 0.2), y + 2.2);
+    ctx.lineTo(x + w - Math.min(5, w * 0.2), y + 2.2);
+    ctx.strokeStyle = selected ? 'rgba(255,221,229,.46)' : 'rgba(255,255,255,.22)';
+    ctx.lineWidth = 0.65;
     ctx.lineCap = 'round';
     ctx.stroke();
+
+    if (index > 0) {
+      ctx.beginPath();
+      ctx.moveTo(x - 0.7, y - 5.5);
+      ctx.lineTo(x - 0.7, y + 4.5);
+      ctx.strokeStyle = selected || Math.abs(index - 1 - middle) < 0.6
+        ? 'rgba(255,52,105,.78)'
+        : 'rgba(170,91,110,.46)';
+      ctx.lineWidth = selected ? 1.2 : 0.8;
+      ctx.shadowColor = selected ? 'rgba(255,22,84,.62)' : 'transparent';
+      ctx.shadowBlur = selected ? 4 : 0;
+      ctx.stroke();
+    }
     ctx.restore();
   }
   function hasBalls() {
@@ -540,8 +602,7 @@ export const PLINKO_SCRIPT = `
       staticDpr: 0,
       staticDirty: true,
       tokenImg: img,
-      pegVisualImg: prev && prev.pegVisualImg ? prev.pegVisualImg : loadHouseImage(pegVisualUrl),
-      houseStripImg: prev && prev.houseStripImg ? prev.houseStripImg : loadHouseImage(houseStripUrl),
+      pegVisualImg: prev && prev.pegVisualImg ? prev.pegVisualImg : loadVisualImage(pegVisualUrl),
     };
     renderPoints();
     var rowsEl = q('plinkoRowsValue');
@@ -929,33 +990,20 @@ export const PLINKO_SCRIPT = `
       drawPeg(ctx, peg.x, peg.y, peg.vr || peg.r, 0);
     }
     var bins = state.bins;
-    if (state.houseStripImg && state.houseStripImg.complete && state.houseStripImg.naturalWidth > 0) {
-      var sourceCount = 14;
-      var sourceWidth = state.houseStripImg.naturalWidth / sourceCount;
-      var targetWidth = 352 / bins.length;
-      for (var h = 0; h < bins.length; h++) {
-        var sourceIndex = Math.round((h * (sourceCount - 1)) / Math.max(1, bins.length - 1));
-        ctx.drawImage(
-          state.houseStripImg,
-          sourceIndex * sourceWidth,
-          0,
-          sourceWidth,
-          state.houseStripImg.naturalHeight,
-          12 + h * targetWidth,
-          253,
-          targetWidth,
-          28,
-        );
-      }
-    }
+    for (var h = 0; h < bins.length; h++) drawBin(ctx, bins[h], h, bins.length);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 ' + binTextSize(bins.length) + 'px Arial,system-ui,sans-serif';
     var middle = (bins.length - 1) / 2;
     for (var b = 0; b < bins.length; b++) {
       var bin = bins[b];
-      ctx.fillStyle = Math.abs(b - middle) < 0.6 ? 'rgba(255,78,115,.98)' : 'rgba(255,255,255,.94)';
-      ctx.fillText(bin.label, bin.x + bin.w / 2, bin.y + bin.h / 2);
+      var selected = Math.abs(b - middle) < 0.6;
+      ctx.save();
+      ctx.fillStyle = selected ? 'rgba(255,50,105,.99)' : 'rgba(255,255,255,.96)';
+      ctx.shadowColor = selected ? 'rgba(255,20,84,.72)' : 'rgba(0,0,0,.88)';
+      ctx.shadowBlur = selected ? 5 : 2;
+      ctx.fillText(bin.label, bin.x + bin.w / 2, bin.y + bin.h / 2 + 0.5);
+      ctx.restore();
     }
     state.staticDirty = false;
     return state.staticCanvas;

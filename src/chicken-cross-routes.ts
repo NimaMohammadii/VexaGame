@@ -85,6 +85,7 @@ async function openRound(env: Env, userId: string): Promise<Round | null> {
 }
 
 async function ready(env: Env, round: Round): Promise<Round> {
+  let changed = false;
   if (round.status === 'pending') {
     await debitUserTonBalanceIfEnough(env, round.user_id, round.amount_nano, {
       kind: 'game', title: 'Chicken Cross bet', referenceType: 'chicken_cross_bet',
@@ -92,6 +93,7 @@ async function ready(env: Env, round: Round): Promise<Round> {
     });
     await env.DB.prepare("UPDATE chicken_cross_v2_rounds SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'")
       .bind(round.id).run();
+    changed = true;
   }
   if (round.status === 'payout_pending') {
     // Store the bonus-adjusted amount in the round before crediting: retries must use the same amount.
@@ -101,8 +103,9 @@ async function ready(env: Env, round: Round): Promise<Round> {
     });
     await env.DB.prepare("UPDATE chicken_cross_v2_rounds SET status='cashed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='payout_pending'")
       .bind(round.id).run();
+    changed = true;
   }
-  return (await getRound(env, round.user_id, round.id))!;
+  return changed ? (await getRound(env, round.user_id, round.id))! : round;
 }
 
 async function response(env: Env, round: Round) {

@@ -237,7 +237,19 @@ export function miniAppShellHtml(): string {
   <meta name="theme-color" content="#12070a"/>
   <script>if(document.documentElement.classList.contains('vexa-web'))document.querySelector('meta[name="theme-color"]').setAttribute('content','#000000');</script>
   <title>Vexa FLOW</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+  <script>
+    // Telegram keeps its native loading placeholder visible until WebApp.ready()
+    // is called. This must happen before the large Mini App document and its
+    // feature scripts are parsed, otherwise slower phones can appear stuck on
+    // Telegram's four-square loader.
+    (function(){
+      try {
+        var app = window.Telegram && window.Telegram.WebApp;
+        if (app && typeof app.ready === 'function') app.ready();
+      } catch (_) {}
+    })();
+  </script>
   <style>${STYLES}
     html.vexa-web .app{padding-top:0!important}
     html.vexa-web,html.vexa-web body{background:#000!important}

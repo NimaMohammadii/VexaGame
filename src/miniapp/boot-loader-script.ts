@@ -20,6 +20,7 @@ export const STARTUP_RUNTIME_SCRIPT = `
       '/assets/Plinko.PNG?v=1',
       '/assets/plinko-glass/ball.webp',
       '/assets/plinko-glass/peg.webp',
+      '/assets/plinko-glass/houses.webp?v=2',
       '/assets/plinko-glass/control-panel-new.webp',
       '/assets/plinko-glass/point-amount-card.webp?v=2',
       '/assets/plinko-glass/half-button.webp',

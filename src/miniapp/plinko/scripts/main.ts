@@ -8,7 +8,7 @@ export const PLINKO_SCRIPT = `
   var credit = readPoints();
   var iconUrl = '/assets/plinko-glass/ball.webp?v=1';
   var pegVisualUrl = '/assets/plinko-glass/peg.webp?v=1';
-  var houseStripUrl = '/assets/plinko-glass/houses.webp?v=2';
+  var houseStripUrl = '/assets/plinko-glass/houses.webp?v=1';
   var control = null;
   var lastStamp = '';
   var lastLoadAt = 0;
